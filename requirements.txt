@@ -1,0 +1,17 @@
+argparse
+chardet
+messytables==0.15.2
+minimock
+numpy;python_version>="3.5"
+numpy<=1.16.5;python_version<"3.5"
+pandas
+requests
+orjson
+six
+sqlalchemy
+sqlalchemy-hana
+texttable
+toolz==0.10.0
+unicodecsv
+xlrd
+xlwings;platform_system=="Windows"
