@@ -9,7 +9,7 @@ import sys
 import pandas as pd
 import numpy as np
 
-from plaidtools import config
+from plaidcloud.rpc import config
 import xlwings as xw  # pylint: disable=import-error
 from shutil import copy
 

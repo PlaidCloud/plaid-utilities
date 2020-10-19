@@ -5,8 +5,8 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from plaidtools.remote.dimension import Dimensions
-from plaidtools.remote.dimension import Dimension
+from plaidcloud.utilities.remote.dimension import Dimensions
+from plaidcloud.utilities.remote.dimension import Dimension
 
 
 # @DAVE back story, I initially tried adding methods within the Dimensions class, but I realized I was doing things in

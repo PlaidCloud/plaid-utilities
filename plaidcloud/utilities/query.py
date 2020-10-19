@@ -21,12 +21,12 @@ from sqlalchemy.types import TypeDecorator, DateTime, Unicode, CHAR, TEXT, NVARC
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
-from plaidtools.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
-from plaidtools.rpc_connect import Connect
-from plaidtools.analyze_table import compiled
-from plaidtools import data_helpers as dh
-from plaidtools.type_conversion import analyze_type
-from plaidtools.database import PlaidDate
+from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
+from plaidcloud.rpc.rpc_connect import Connect
+from plaidcloud.utilities.analyze_table import compiled
+from plaidcloud.utilities import data_helpers as dh
+from plaidcloud.rpc.type_conversion import analyze_type
+from plaidcloud.rpc.database import PlaidDate
 
 
 # Primarily used in workflow-runner :(, frame_manager :( and

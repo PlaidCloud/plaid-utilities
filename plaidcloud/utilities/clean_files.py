@@ -17,8 +17,8 @@ import chardet
 import pandas as pd
 import unicodedata
 
-from plaidtools import config
-from plaidtools import utility
+from plaidcloud.rpc import config
+from plaidcloud.utilities import utility
 from six.moves import map
 
 logger = logging.getLogger(__name__)
@@ -269,7 +269,7 @@ def main(model_period=None, columns=None, email_file=None):
 
 
 if __name__ == '__main__':
-    from plaidtools.utility import do_timed_run
+    from plaidcloud.rpc.utilities.utility import do_timed_run
 
     ap = argparse.ArgumentParser()
     ap.add_argument('--period', '-p',

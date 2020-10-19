@@ -13,11 +13,11 @@ import os
 import shutil
 import six
 
-from plaidtools.logger import Logger
-from plaidtools.rpc_connect import Connect
-from plaidtools.query import Connection, Table
-import plaidtools.data_helpers as dh
-import plaidtools.frame_manager as fm
+from plaidcloud.rpc.logger import Logger
+from plaidcloud.rpc.rpc_connect import Connect
+from plaidcloud.utiliies.query import Connection, Table
+import plaidcloud.utilities.data_helpers as dh
+import plaidcloud.utiliites.frame_manager as fm
 
 try:
     import xlwings as xw  # pylint: disable=import-error

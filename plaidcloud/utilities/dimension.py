@@ -5,7 +5,7 @@ A highly optimized class for fast dimensional hierarchy operations
 """
 
 from __future__ import absolute_import
-from plaidtools import frame_manager
+from plaidcloud.utilities import frame_manager
 import json
 import os
 import pandas as pd

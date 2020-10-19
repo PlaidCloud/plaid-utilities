@@ -4,7 +4,7 @@
 from __future__ import absolute_import
 import re
 
-from plaidtools.functions import deepmerge
+from plaidcloud.rpc.functions import deepmerge
 
 __author__ = "Paul Morel"
 __copyright__ = "© Copyright 2009-2018, Tartan Solutions, Inc"

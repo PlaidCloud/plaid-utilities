@@ -17,8 +17,8 @@ import six
 from numpy import NaN
 import pandas as pd
 
-from plaidtools import data_helpers as dh
-from plaidtools import config
+from plaidcloud.utilities import data_helpers as dh
+from plaidcloud.rpc import config
 
 conf = config.get_dict()
 logger = logging.getLogger(__name__)

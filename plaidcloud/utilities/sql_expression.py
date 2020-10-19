@@ -18,9 +18,9 @@ import sqlalchemy
 import sqlalchemy.orm
 
 
-from plaidtools.type_conversion import sqlalchemy_from_dtype
-from plaidtools.stringtransforms import apply_variables
-from plaidtools import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
+from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+from plaidclout.utilities.stringtransforms import apply_variables
+from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
 
 
 __author__ = 'Adams Tower'
