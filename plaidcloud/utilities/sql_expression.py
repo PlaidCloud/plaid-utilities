@@ -19,7 +19,7 @@ import sqlalchemy.orm
 
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
-from plaidclout.utilities.stringtransforms import apply_variables
+from plaidcloud.utilities.stringtransforms import apply_variables
 from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
 
 
