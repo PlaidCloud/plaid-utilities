@@ -55,6 +55,7 @@ setup(
         'unicodecsv',
         'xlrd',
         'xlwings;platform_system=="Windows"',
+        'yaml',
     ],
     tests_require=test_deps,
     setup_requires=['pytest-runner'],
