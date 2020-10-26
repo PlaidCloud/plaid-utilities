@@ -38,6 +38,7 @@ setup(
     install_requires=[
         'argparse',
         'chardet',
+        'ipython;python_version>"2.7"',
         'messytables==0.15.2',
         'minimock',
         'numpy;python_version>="3.5"',
