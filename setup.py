@@ -38,6 +38,7 @@ setup(
     install_requires=[
         'argparse',
         'chardet',
+        'ipython;python_version>"2.7"',
         'messytables==0.15.2',
         'minimock',
         'numpy;python_version>="3.5"',
@@ -55,6 +56,7 @@ setup(
         'unicodecsv',
         'xlrd',
         'xlwings;platform_system=="Windows"',
+        'pyyaml',
     ],
     tests_require=test_deps,
     setup_requires=['pytest-runner'],
