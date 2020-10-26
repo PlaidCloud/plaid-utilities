@@ -19,8 +19,11 @@ __license__ = 'Proprietary'
 __maintainer__ = 'Dave Parsons'
 __email__ = 'dave.parsons@tartansolutions.com'
 
+# These must be synced with plaid/app/analyze/utility/dimension.py
 ROOT = '!!root!!'
 MAIN = 'main'
+DEFAULT = '!!default!!'
+VALID_CONSOL = ['~', '+', '-', '|', '&']
 
 
 class Dimensions:
@@ -508,8 +511,8 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     # ==== SHIFT METHODS ===============================================================================
     # --------------------------------------------------------------------------------------------------
-    def shift_right(self, parent, child, hierarchy=MAIN):
-        """shift_right(parent, child, hierarchy=MAIN)
+    def shift_node_right(self, parent, child, hierarchy=MAIN):
+        """shift_node_right(parent, child, hierarchy=MAIN)
         Move the node one generation down, looking upwards in the hierarchy for a suitable parent (if there is one)
         Args:
             parent (str): Parent Node Key
@@ -518,10 +521,10 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_right(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_right(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
 
-    def shift_left(self, parent, child, hierarchy=MAIN):
-        """shift_left(parent, child, hierarchy=MAIN)
+    def shift_node_left(self, parent, child, hierarchy=MAIN):
+        """shift_node_left(parent, child, hierarchy=MAIN)
         Move the node one generation up (if possible)
         Args:
             parent (str): Parent Node Key
@@ -530,10 +533,10 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_left(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_left(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
 
-    def shift_up(self, parent, child, hierarchy=MAIN):
-        """shift_up(parent, child, hierarchy=MAIN)
+    def shift_node_up(self, parent, child, hierarchy=MAIN):
+        """shift_node_up(parent, child, hierarchy=MAIN)
         Move the node above prior node within the same generation
         If top within parent, it moves to the next parent above at the same generation as it's parent (if there is one)
         Args:
@@ -543,10 +546,10 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_up(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_up(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
 
-    def shift_down(self, parent, child, hierarchy=MAIN):
-        """shift_down(parent, child, hierarchy=MAIN)
+    def shift_node_down(self, parent, child, hierarchy=MAIN):
+        """shift_node_down(parent, child, hierarchy=MAIN)
         Move the node below following node within the same generation
         If bottom within parent, it moves to the next parent below at the same generation as it's parent (if there is one)
         Args:
@@ -556,7 +559,7 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_down(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_down(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
     # ==== NAVIGATION METHODS ==========================================================================
@@ -808,7 +811,7 @@ class Dimension:
             node (str): Unique hierarchy node identifier
 
         Returns:
-            list: List of alt parent objects
+            list: Tuple of hierarchy and parent
         """
         return self.dim.get_parents(project_id=self.project_id, name=self.name, node=node)
 
@@ -1076,6 +1079,31 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     # ==== ALIAS METHODS ===============================================================================
     # --------------------------------------------------------------------------------------------------
+    def get_default_aliases(self):
+        """get_default_aliases()
+        Adds a new alias
+
+        Args:
+
+        Returns:
+            dict - primary (str): Primary alias unique ID
+                   secondary (str): Secondary alias unique ID
+        """
+        return self.dim.get_default_aliases(project_id=self.project_id, name=self.name)
+
+    def set_default_aliases(self, primary=None, secondary=None):
+        """set_default_aliases(primary, secondary)
+        Adds a new alias
+
+        Args:
+            primary (str): Primary alias unique ID
+            secondary (str): Secondary alias unique ID
+
+        Returns:
+            None
+        """
+        self.dim.set_default_aliases(project_id=self.project_id, name=self.name, primary=primary, secondary=secondary)
+
     def add_alias(self, alias):
         """add_alias(alias)
         Adds a new alias
@@ -1635,7 +1663,7 @@ class Dimension:
                                             nodes=nodes, names=names, values=values)
 
     # noinspection PyUnusedLocal
-    def load_from_table_flat(self, table, columns, top, consolidations=None, consol_default='+',
+    def load_from_table_flat(self, table, columns, top=None, consolidations=None, consol_default='+',
                              hierarchy=MAIN, connection='sqlalchemy'):
         """load_from_table(table, parents, children, consolidations, consol_default, hierarchy, connection')
         Bulk loads a dimension from an Analyze table with flattened hierarchy
@@ -1652,8 +1680,8 @@ class Dimension:
         Returns:
             None
         """
-        self.dim.load_from_table_flat(project_id=self.project_id, name=self.name, table=table, columns=columns,
-                                      consolidation=consolidations, consol_default=consol_default,
+        self.dim.load_from_table_flat(project_id=self.project_id, name=self.name, table=table, columns=columns, top=top,
+                                      consolidations=consolidations, consol_default=consol_default,
                                       hierarchy=hierarchy)
 
     # noinspection PyUnusedLocal
@@ -1673,7 +1701,7 @@ class Dimension:
             None
         """
         self.dim.load_from_table_pc(project_id=self.project_id, name=self.name, table=table, parents=parents,
-                                    children=children, consolidation=consolidations, consol_default=consol_default,
+                                    children=children, consolidations=consolidations, consol_default=consol_default,
                                     hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
@@ -1848,9 +1876,10 @@ class Dimension:
     def _append_aliases(self, df_hierarchy):
         data = self.get_all_aliases()
         for key in data.keys():
-            df_hierarchy[key] = ''
+            col = f'alias.{key}'
+            df_hierarchy[col] = ''
             for index, row in df_hierarchy.iterrows():
-                df_hierarchy.at[index, key] = data[key].get(index, '')
+                df_hierarchy.at[index, col] = data[key].get(index, '')
         return
 
     # noinspection PyMethodMayBeStatic
@@ -1876,28 +1905,31 @@ class Dimension:
         keys = {}
         for property in properties:
             key = property['property']
-            df_hierarchy[key] = ''
-            df_hierarchy[f'{key}.inherited'] = ''
-            df_hierarchy[f'{key}.ancestor'] = ''
+            col = f'property.{key}'
+            df_hierarchy[col] = ''
+            df_hierarchy[f'{col}.inherited'] = ''
+            df_hierarchy[f'{col}.ancestor'] = ''
 
         for property in properties:
             index = property['node']
             key = property['property']
+            col = f'property.{key}'
             value = property.get("value", "")
             inherited = property.get("inherited", "")
             ancestor = property.get("ancestor", "")
-            df_hierarchy.at[index, key] = value
-            df_hierarchy.at[index, f'{key}.inherited'] = inherited
-            df_hierarchy.at[index, f'{key}.ancestor'] = ancestor
+            df_hierarchy.at[index, col] = value
+            df_hierarchy.at[index, f'{col}.inherited'] = inherited
+            df_hierarchy.at[index, f'{col}.ancestor'] = ancestor
         return
 
     # noinspection PyMethodMayBeStatic
     def _append_values(self, df_hierarchy):
         data = self.get_all_values()
         for key in data.keys():
-            df_hierarchy[key] = ''
+            col = f'value.{key}'
+            df_hierarchy[col] = ''
             for index, row in df_hierarchy.iterrows():
-                df_hierarchy.at[index, key] = data[key].get(index, np.NaN)
+                df_hierarchy.at[index, col] = data[key].get(index, np.NaN)
         return
 
     # --------------------------------------------------------------------------------------------------
