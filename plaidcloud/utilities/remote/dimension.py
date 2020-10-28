@@ -1840,7 +1840,7 @@ class Dimension:
                 - attributes/aliases/properties/values appended as columns
         """
         df = self.get_hierarchy_dataframe(hierarchy=hierarchy)
-        self._append_attributes(hierarchy, df)
+        self._append_attributes(df)
         self._append_aliases(df)
         self._append_properties(hierarchy, df)
         self._append_values(df)
@@ -1883,26 +1883,31 @@ class Dimension:
         return
 
     # noinspection PyMethodMayBeStatic
-    def _append_attributes(self, hierarchy, df_hierarchy):
-        data = self.get_all_inherited_attributes()
-        df_hierarchy['attribute'] = ''
-        df_hierarchy['attribute.inherited'] = ''
-        df_hierarchy['attribute.ancestor'] = ''
+    def _append_attributes(self, df_hierarchy):
+        for hierarchy in self.get_alt_hierarchies():
+            prefix = f'attribute.{hierarchy}'
+            df_hierarchy[prefix] = ''
+            df_hierarchy[f'{prefix}.inherited'] = ''
+            df_hierarchy[f'{prefix}.ancestor'] = ''
 
-        for index, row in df_hierarchy.iterrows():
-            values = data.get(index, [])
-            for value in values:
-                if value['hierarchy'] == hierarchy:
-                    df_hierarchy.at[index, 'attribute'] = value.get('attribute', '')
-                    df_hierarchy.at[index, 'attribute.inherited'] = value.get('inherited', '')
-                    df_hierarchy.at[index, 'attribute.ancestor'] = value.get('ancestor', '')
+        data = self.get_all_inherited_attributes()
+
+        for node, items in data.items():
+            for item in items:
+                print(node, item)
+                attribute = item['attribute']
+                hierarchy = item['hierarchy']
+                if attribute:
+                    prefix = f'attribute.{hierarchy}'
+                    df_hierarchy.at[node, prefix] = attribute
+                    df_hierarchy.at[node, f'{prefix}.inherited'] = item['inherited']
+                    df_hierarchy.at[node, f'{prefix}.ancestor'] = item['ancestor']
         return
 
     # noinspection PyListCreation, PyMethodMayBeStatic
     def _append_properties(self, hierarchy, df_hierarchy):
         data = self.get_all_inherited_properties()
         properties = data.get(hierarchy, [])
-        keys = {}
         for property in properties:
             key = property['property']
             col = f'property.{key}'
