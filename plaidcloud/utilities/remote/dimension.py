@@ -1715,11 +1715,8 @@ class Dimension:
         Returns:
             df (Dataframe): Datafame with alias nodes and values
         """
-        # TODO: DO NOT REMOVE
-        # data = self.dim.get_aliases_dataframe(project_id=self.project_id, name=self.name)
-        # df = self._decode_dataframe(data)
-        data = self.get_all_aliases()
-        df = self._get_flattened_dataframe(data)
+        json_df = self.dim.get_aliases_dataframe(project_id=self.project_id, name=self.name)
+        df = pd.read_json(json_df)
         return df
 
     def get_attributes_dataframe(self):
@@ -1730,33 +1727,21 @@ class Dimension:
         Returns:
             df (Dataframe): Datafame with attribute nodes and values
         """
-        # TODO: DO NOT REMOVE
-        # json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
-        # df = pd.read_json(json_df)
-        rows = []
-        columns = ['node', 'attribute', 'hierarchy', 'inherited', 'ancestor']
-
-        for name, attributes in self.get_all_inherited_attributes().items():
-            for attribute in attributes:
-                rows.append(attribute.values())
-        df = pd.DataFrame.from_records(rows, columns=columns)
+        json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
+        df = pd.read_json(json_df)
         return df
 
     def get_hierarchy_dataframe(self, hierarchy=MAIN):
         """get_hierarchy_dataframe(hierarchy=MAIN)
-        Get attributes as a Dataframe
+        Get hierarchy as a Dataframe
         Args:
             hierarchy (str): Hierarchy unique ID
 
         Returns:
             df (Dataframe): Datafame with hierarchy data
         """
-        # TODO: DO NOT REMOVE
-        # json_df = self.dim.get_hierarchy_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
-        # df = pd.read_json(json_df)
-        rows = self.get_hierarchy(hierarchy=hierarchy)
-        columns = [ 'id', 'level', 'display', 'consol', 'parent', 'leaf', 'main']
-        df = pd.DataFrame(rows, columns=columns).set_index('id')
+        json_df = self.dim.get_hierarchy_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+        df = pd.read_json(json_df)
         return df
 
     def get_properties_dataframe(self):
@@ -1767,17 +1752,8 @@ class Dimension:
         Returns:
             df (Dataframe): Datafame with property nodes and values
         """
-        # TODO: DO NOT REMOVE
-        # json_df = self.dim.get_properties_dataframe(project_id=self.project_id, name=self.name)
-        # df = pd.read_json(json_df)
-        rows = []
-        columns = ['node', 'property', 'value', 'hierarchy', 'inherited', 'ancestor']
-
-        for name, properties in self.get_all_inherited_properties().items():
-            for property in properties:
-                rows.append(property.values())
-
-        df = pd.DataFrame(rows, columns=columns)
+        json_df = self.dim.get_properties_dataframe(project_id=self.project_id, name=self.name)
+        df = pd.read_json(json_df)
         return df
 
     def get_values_dataframe(self):
@@ -1788,11 +1764,8 @@ class Dimension:
         Returns:
             df (Dataframe): Datafame with alias nodes and values
         """
-        # TODO: DO NOT REMOVE
-        # data = self.dim.get_values_dataframe(project_id=self.project_id, name=self.name)
-        # df = self._decode_dataframe(data)
-        data = self.get_all_values()
-        df = self._get_flattened_dataframe(data)
+        json_df = self.dim.get_values_dataframe(project_id=self.project_id, name=self.name)
+        df = pd.read_json(json_df)
         return df
 
     # --------------------------------------------------------------------------------------------------
@@ -1819,14 +1792,11 @@ class Dimension:
                 - hierarchially sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
-        hierarchies = self.get_alt_hierarchies()
-        hierarchies.sort()
-        hierarchies.insert(0, MAIN)
-        data = {}
-        for hierarchy in hierarchies:
-            df = self.hierarchy_table(hierarchy)
-            data[hierarchy] = df
-        return data
+        json_dict_df = self.dim.dimension_table(project_id=self.project_id, name=self.name)
+        table = {}
+        for hierarchy, df in json_dict_df.items():
+            table[hierarchy] = pd.read_json(df)
+        return table
 
     def hierarchy_table(self, hierarchy=MAIN):
         """hierarchy_table(hierarchy=MAIN)
@@ -1839,103 +1809,9 @@ class Dimension:
                 - hierarchially sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
-        df = self.get_hierarchy_dataframe(hierarchy=hierarchy)
-        self._append_attributes(df)
-        self._append_aliases(df)
-        self._append_properties(hierarchy, df)
-        self._append_values(df)
+        json_df = self.dim.hierarchy_table(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+        df = pd.read_json(json_df)
         return df
-
-    # noinspection PyMethodMayBeStatic
-    def _get_flattened_dataframe(self, data):
-        # Example on how to flatten data for Aliases/Attributes/Properties/Values
-        # Does not work when using inherited versions of data
-        output = []
-        names = list(data.keys())
-        columns = list(data.keys())
-        columns.insert(0, 'node')
-        nodes = set()
-
-        # Get all the nodes
-        for name in names:
-            nodes = nodes.union(set(data[name].keys()))
-
-        # Now flatten data node by name
-        nodes = sorted(nodes)
-        for node in nodes:
-            node_values = {}
-            node_values.update({'node': node})
-            for name in names:
-                node_values.update({name: data[name].get(node, None)})
-            output.append(node_values)
-
-        df = pd.DataFrame(output, columns=columns).set_index('node')
-        return df
-
-    # noinspection PyMethodMayBeStatic
-    def _append_aliases(self, df_hierarchy):
-        data = self.get_all_aliases()
-        for key in data.keys():
-            col = f'alias.{key}'
-            df_hierarchy[col] = ''
-            for index, row in df_hierarchy.iterrows():
-                df_hierarchy.at[index, col] = data[key].get(index, '')
-        return
-
-    # noinspection PyMethodMayBeStatic
-    def _append_attributes(self, df_hierarchy):
-        for hierarchy in self.get_alt_hierarchies():
-            prefix = f'attribute.{hierarchy}'
-            df_hierarchy[prefix] = ''
-            df_hierarchy[f'{prefix}.inherited'] = ''
-            df_hierarchy[f'{prefix}.ancestor'] = ''
-
-        data = self.get_all_inherited_attributes()
-
-        for node, items in data.items():
-            for item in items:
-                print(node, item)
-                attribute = item['attribute']
-                hierarchy = item['hierarchy']
-                if attribute:
-                    prefix = f'attribute.{hierarchy}'
-                    df_hierarchy.at[node, prefix] = attribute
-                    df_hierarchy.at[node, f'{prefix}.inherited'] = item['inherited']
-                    df_hierarchy.at[node, f'{prefix}.ancestor'] = item['ancestor']
-        return
-
-    # noinspection PyListCreation, PyMethodMayBeStatic
-    def _append_properties(self, hierarchy, df_hierarchy):
-        data = self.get_all_inherited_properties()
-        properties = data.get(hierarchy, [])
-        for property in properties:
-            key = property['property']
-            col = f'property.{key}'
-            df_hierarchy[col] = ''
-            df_hierarchy[f'{col}.inherited'] = ''
-            df_hierarchy[f'{col}.ancestor'] = ''
-
-        for property in properties:
-            index = property['node']
-            key = property['property']
-            col = f'property.{key}'
-            value = property.get("value", "")
-            inherited = property.get("inherited", "")
-            ancestor = property.get("ancestor", "")
-            df_hierarchy.at[index, col] = value
-            df_hierarchy.at[index, f'{col}.inherited'] = inherited
-            df_hierarchy.at[index, f'{col}.ancestor'] = ancestor
-        return
-
-    # noinspection PyMethodMayBeStatic
-    def _append_values(self, df_hierarchy):
-        data = self.get_all_values()
-        for key in data.keys():
-            col = f'value.{key}'
-            df_hierarchy[col] = ''
-            for index, row in df_hierarchy.iterrows():
-                df_hierarchy.at[index, col] = data[key].get(index, np.NaN)
-        return
 
     # --------------------------------------------------------------------------------------------------
     # ==== RECURSIVE METHODS ===========================================================================
