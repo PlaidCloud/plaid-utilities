@@ -67,8 +67,7 @@ setup(
     setup_requires=['pytest-runner'],
     extras_require=extras,
     dependency_links=[
-        # 'https://github.com/PlaidCloud/sqlalchemy-greenplum/tarball/master#egg=sqlalchemy-greenplum-0.0.1',
-        'file:///usr/sap/hdbclient/hdbcli-2.2.36.tar.gz#egg=hdbcli'
+        'git+git://github.com/PlaidCloud/plaid-rpc.git@master#egg=plaidcloud-rpc'
     ],
     long_description=long_description,
     long_description_content_type='text/markdown',

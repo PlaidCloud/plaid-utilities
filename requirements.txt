@@ -6,6 +6,7 @@ nose
 numpy;python_version>="3.5"
 numpy<=1.16.5;python_version<"3.5"
 pandas
+-e git+git://github.com/PlaidCloud/plaid-rpc.git@master#egg=plaidcloud-rpc
 pytest
 pytest-cov
 pyyaml
