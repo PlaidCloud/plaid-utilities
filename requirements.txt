@@ -17,6 +17,7 @@ six
 sqlalchemy
 sqlalchemy-greenplum
 sqlalchemy-hana
+tables
 texttable
 toolz==0.10.0
 unicodecsv
