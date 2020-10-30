@@ -219,6 +219,59 @@ class Dimensions:
         """
         return self.dims.get_table_dimensions(project_id=self.project_id, table=table)
 
+    # --------------------------------------------------------------------------------------------------
+    # ==== IMPORT/EXPORT METHODS =======================================================================
+    # --------------------------------------------------------------------------------------------------
+    def backup(self, name):
+        """backup(duid)
+        Backup all nodes and hierarchies in dimension
+
+        Args:
+            name (str): Dimension unique ID
+
+        Returns:
+            yaml (str): Dimension persisted in YAML format
+        """
+        data = self.dims.backup(project_id=self.project_id, name=name)
+        return data
+
+    def backup_all(self):
+        """backup_all()
+        Backup all dimensions in project
+
+        Args:
+
+        Returns:
+            yaml (str): Dimensions persisted in YAML format
+        """
+        data = self.dims.backup_all(project_id=self.project_id)
+        return data
+
+    def restore(self, data):
+        """restore(data)
+        Restore dimension in project
+
+        Args:
+            data (str): Dimension persisted in YAML format
+
+        Returns:
+            None
+        """
+        # Load the YAML into dict
+        self.dims.restore(project_id=self.project_id, data=data)
+
+    def restore_all(self, data):
+        """restore_all(data)
+        Restore all dimensions in project
+
+        Args:
+            data (str): Dimensions persisted in YAML format
+
+        Returns:
+            None
+        """
+        self.dims.restore_all(project_id=self.project_id, data=data)
+
 
 class Dimension:
     """
