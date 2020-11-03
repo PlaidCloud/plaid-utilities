@@ -1758,6 +1758,60 @@ class Dimension:
                                     hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
+    # ==== SAVE METHODS ================================================================================
+    # --------------------------------------------------------------------------------------------------
+    def save_hierarchy_to_dataframe(self, hierarchy=None):
+        """save_hierarchy_to_dataframe(hierarchy=MAIN)
+        Get hierarchy as a Dataframe for reloading
+        Args:
+            hierarchy (str, list or none) - List of hierarchies to save, None means all
+
+        Returns:
+            df (Dataframe): Datafame with hierarchy data
+        """
+        json_df = self.dim.save_hierarchy_to_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+        df = self._decode_dataframe(json_df)
+        return df
+
+    def save_aliases_to_dataframe(self, alias=None):
+        """save_aliases_to_dataframe(alias=None)
+        Get aliases as a Dataframe for reloading
+        Args:
+            alias (str, list or none) - List of aliases to save, None means all
+
+        Returns:
+            df (Dataframe): Datafame with alias nodes and values
+        """
+        json_df = self.dim.save_aliases_to_dataframe(project_id=self.project_id, name=self.name, alias=alias)
+        df = self._decode_dataframe(json_df)
+        return df
+
+    def save_properties_to_dataframe(self, property=None):
+        """save_properties_to_dataframe(property=None)
+        Get properties as a Dataframe for reloading
+        Args:
+            property (str, list or none) - List of properties to save, None means all
+        Returns:
+            df (Dataframe): Datafame with property nodes and values
+        """
+        json_df = self.dim.save_properties_to_dataframe(project_id=self.project_id, name=self.name, property=property)
+        df = self._decode_dataframe(json_df)
+        return df
+
+    def save_values_to_dataframe(self, value=None):
+        """save_values_to_dataframe(value=None))
+        Get values as a Dataframe for reloading
+        Args:
+            value (str, list or none) - List of values to save, None means all
+
+        Returns:
+            df (Dataframe): Datafame with values nodes and values
+        """
+        json_df = self.dim.save_values_to_dataframe(project_id=self.project_id, name=self.name, value=value)
+        df = self._decode_dataframe(json_df)
+        return df
+
+    # --------------------------------------------------------------------------------------------------
     # ==== GET DATAFRAME METHODS =======================================================================
     # --------------------------------------------------------------------------------------------------
     def get_aliases_dataframe(self):
