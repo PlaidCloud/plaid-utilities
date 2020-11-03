@@ -1658,13 +1658,13 @@ class Dimension:
                     - code (int): Result code
                     - message (str): Message string
         """
-        json_df = df.to_json(orient='records')
+        json_df = self._encode_dataframe(df)
 
         results_df = self.dim.load_hierarchy_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
                                                             parents=parents, children=children,
                                                             consolidations=consolidations,
                                                             consol_default=consol_default, hierarchy=hierarchy)
-        return_df = pd.read_json(results_df, orient='records')
+        return_df = self._decode_dataframe(results_df)
         return return_df
 
     # noinspection PyUnusedLocal
@@ -1679,7 +1679,7 @@ class Dimension:
         Returns:
             None
         """
-        json_df = df.to_json()
+        json_df = self._encode_dataframe(df)
         self.dim.load_aliases_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
                                              nodes=nodes, names=names, values=values)
 
@@ -1695,7 +1695,7 @@ class Dimension:
         Returns:
             None
         """
-        json_df = df.to_json()
+        json_df = self._encode_dataframe(df)
         self.dim.load_properties_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
                                                 nodes=nodes, names=names, values=values)
 
@@ -1711,7 +1711,7 @@ class Dimension:
         Returns:
             None
         """
-        json_df = df.to_json()
+        json_df = self._encode_dataframe(df)
         self.dim.load_values_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
                                             nodes=nodes, names=names, values=values)
 
@@ -1769,7 +1769,7 @@ class Dimension:
             df (Dataframe): Datafame with alias nodes and values
         """
         json_df = self.dim.get_aliases_dataframe(project_id=self.project_id, name=self.name)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
 
     def get_attributes_dataframe(self):
@@ -1781,7 +1781,7 @@ class Dimension:
             df (Dataframe): Datafame with attribute nodes and values
         """
         json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
 
     def get_hierarchy_dataframe(self, hierarchy=MAIN):
@@ -1794,7 +1794,7 @@ class Dimension:
             df (Dataframe): Datafame with hierarchy data
         """
         json_df = self.dim.get_hierarchy_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
 
     def get_properties_dataframe(self):
@@ -1806,7 +1806,7 @@ class Dimension:
             df (Dataframe): Datafame with property nodes and values
         """
         json_df = self.dim.get_properties_dataframe(project_id=self.project_id, name=self.name)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
 
     def get_values_dataframe(self):
@@ -1818,19 +1818,8 @@ class Dimension:
             df (Dataframe): Datafame with alias nodes and values
         """
         json_df = self.dim.get_values_dataframe(project_id=self.project_id, name=self.name)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
-
-    # --------------------------------------------------------------------------------------------------
-    # ==== DATAFRAME RPC METHODS  ======================================================================
-    # --------------------------------------------------------------------------------------------------
-    # noinspection PyMethodMayBeStatic
-    def _decode_dataframe(self, df):
-        return pickle.loads(base64.b64decode(df))
-
-    # noinspection PyMethodMayBeStatic
-    def _encode_dataframe(self, df):
-        return base64.b64encode(pickle.dumps(df)).decode()
 
     # --------------------------------------------------------------------------------------------------
     # ==== FLATTENED DATAFRAME METHODS  ================================================================
@@ -1848,7 +1837,7 @@ class Dimension:
         json_dict_df = self.dim.dimension_table(project_id=self.project_id, name=self.name)
         table = {}
         for hierarchy, df in json_dict_df.items():
-            table[hierarchy] = pd.read_json(df)
+            table[hierarchy] = self._decode_dataframe(df)
         return table
 
     def hierarchy_table(self, hierarchy=MAIN):
@@ -1863,8 +1852,19 @@ class Dimension:
                 - attributes/aliases/properties/values appended as columns
         """
         json_df = self.dim.hierarchy_table(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
-        df = pd.read_json(json_df)
+        df = self._decode_dataframe(json_df)
         return df
+
+    # --------------------------------------------------------------------------------------------------
+    # ==== DATAFRAME RPC METHODS  ======================================================================
+    # --------------------------------------------------------------------------------------------------
+    # noinspection PyMethodMayBeStatic
+    def _decode_dataframe(self, df):
+        return pd.read_json(df, orient='table')
+
+    # noinspection PyMethodMayBeStatic
+    def _encode_dataframe(self, df):
+        return df.to_json(orient='table')
 
     # --------------------------------------------------------------------------------------------------
     # ==== RECURSIVE METHODS ===========================================================================
