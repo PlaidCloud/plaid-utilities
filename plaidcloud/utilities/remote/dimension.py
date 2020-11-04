@@ -457,6 +457,20 @@ class Dimension:
         self.dim.add_nodes(project_id=self.project_id, name=self.name, parent=parent, children=children,
                            consolidation=consolidation, hierarchy=hierarchy, before=before, after=after)
 
+    def clone_node(self, parent, child, hierarchy=MAIN):
+        """Clones a node, copying all properties, attributes etc
+
+        Args:
+            parent (str): parent node key
+            child (str): child node key
+            hierarchy:
+
+        Returns:
+
+        """
+        self.dim.clone_node(project_id=self.project_id, name=self.name, parent=parent,
+                            child=child,  hierarchy=hierarchy)
+
     def delete_node(self, parent, child, hierarchy=MAIN):
         """delete_node(project_id, name, parent, child, hierarchy=MAIN)
         Deletes the node and removes all aliases and properties
@@ -501,7 +515,7 @@ class Dimension:
         Returns:
             str: New parent of node
         """
-        self.dim.move_node(project_id=self.project_id, name=self.name,  child=child,
+        self.dim.move_node(project_id=self.project_id, name=self.name, child=child,
                            new_parent=new_parent, hierarchy=hierarchy, before=before, after=after)
 
     def move_nodes(self, moves, new_parent, hierarchy='main', before=None, after=None):
