@@ -1,6 +1,11 @@
 import os
 
-def upload_udf(local_path, conn):
+#TODO: make it look upward for the downloaded_udfs folder (under a folder
+# specified in the config?) then use that to determine paths for new things.
+# Directly under downloaded_udfs are projects. Below that are folders.
+# Are projects hierarchical? Yes, but let's not worry about that for now
+
+def upload_udf(local_path, conn, create=False, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
     '''
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
@@ -25,8 +30,22 @@ def upload_udf(local_path, conn):
     Returns:
         None
     '''
-    dir, udf_path = os.path.split(local_path)
-    _, project_name = os.path.split(dir)
+    def parts_from_downloaded_udfs(path):
+        head, tail = os.path.split(path)
+        if tail == 'downloaded_udfs':
+            return []
+        else:
+            return parts_from_downloaded_udfs(head) + [tail]
+    parts = parts_from_downloaded_udfs(local_path)
+    intuited_project_name = parts[0]
+    intuited_parent_path = '/'.join(parts[1:-1])
+    intuited_udf_path = parts[-1]
+    if not project_name:
+        project_name = intuited_project_name
+    if not udf_path:
+        udf_path=intuited_udf_path
+    if not parent_path:
+        parent_path = intuited_parent_path
     projects = conn.analyze.project.projects()
     for project in projects:
         if project['name'].lower() == project_name.lower():
@@ -40,7 +59,22 @@ def upload_udf(local_path, conn):
             udf_id = udf['id']
             break
     else:
-        raise Exception('udf {} does not exist!'.format(udf_path))
+        if create:
+            if not parent_path:
+                parent_path = '/'
+            if not name:
+                if udf_path.endswith('.py'):
+                    name = udf_path[:-3]
+                else:
+                    name = udf_path
+            udf = conn.analyze.udf.create(
+                project_id=project_id, branch=branch, path=parent_path,
+                name=name, file_path=udf_path, view_manager=view_manager,
+                view_explorer=view_explorer, memo=memo,
+            )
+            udf_id = udf['id']
+        else:
+            raise Exception('udf {} does not exist!'.format(udf_path))
 
     with open(local_path, 'r') as f:
         code = f.read()
