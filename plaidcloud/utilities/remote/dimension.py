@@ -7,9 +7,6 @@ A highly optimized class for fast dimensional hierarchy operations
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
-import base64
-import pickle
-import numpy as np
 import pandas as pd
 
 __author__ = 'Dave Parsons'
@@ -1415,33 +1412,25 @@ class Dimension:
         """
         self.dim.delete_node_property(project_id=self.project_id, name=self.name, node=node, property=property)
 
-    def get_all_properties(self):
-        """get_all_properties()
-        Returns all properties in dimension
-
-        Args:
-
-        Returns:
-            dict: Dict of dicts by property name/node/property
-        """
-        return self.dim.get_all_properties(project_id=self.project_id, name=self.name)
-
-    def get_all_inherited_properties(self, hierarchy=None):
+    def get_all_properties(self, inherit=False, hierarchy=None):
         """get_all_inherited_properties(hierarchy=None)
         Returns all properties including inherited properties in dimension
 
         Args:
+            inherit (bool): Find inherited property
             hierarchy (str): Hierarchy unique ID or None returns all hierarchies
 
         Returns:
-            dict: Dict of dicts by hier
+            dict : Dict of dicts
                 - node (str): Unique hierarchy node identifier
+                - property(str): Property type
                 - value (str): Value or None
+                - hierarchy (str): Hierarchy unique ID
                 - inherited (bool): Inherited value returned
                 - ancestor (str): Node holding inherited value
 
         """
-        return self.dim.get_all_inherited_properties(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+        return self.dim.get_all_properties(project_id=self.project_id, name=self.name, inherit=inherit, hierarchy=hierarchy)
 
     # noinspection PyShadowingBuiltins
     def get_node_property(self, node, property, inherit=False, hierarchy=MAIN):
@@ -1457,7 +1446,9 @@ class Dimension:
         Returns:
             dict:
                 - node (str): Unique hierarchy node identifier
+                - property(str): Property type
                 - value (str): Value or None
+                - hierarchy (str): Hierarchy unique ID
                 - inherited (bool): Inherited value returned
                 - ancestor (str): Node holding inherited value
         """
