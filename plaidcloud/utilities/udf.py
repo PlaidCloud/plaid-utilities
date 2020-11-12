@@ -1,10 +1,5 @@
 import os
 
-#TODO: make it look upward for the downloaded_udfs folder (under a folder
-# specified in the config?) then use that to determine paths for new things.
-# Directly under downloaded_udfs are projects. Below that are folders.
-# Are projects hierarchical? Yes, but let's not worry about that for now
-
 def upload_udf(local_path, conn, create=False, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
     '''
     Uploads a local file as a udf. Determines which project to upload to based
