@@ -134,7 +134,7 @@ class Dimensions:
         dimensions = {}
         for gst_dim in gst_dims:
             dimensions[gst_dim['id']] = [gst_dim['name'], Dimension(conn=self.conn, name=gst_dim['name'])]
-        return
+        return dimensions
 
     def is_dimension(self, name):
         """is_dimension(name)
@@ -560,6 +560,16 @@ class Dimension:
         """
         self.dim.reorder_nodes(project_id=self.project_id, name=self.name,
                                ancestor=ancestor, children=children, hierarchy=hierarchy)
+
+    def get_all_nodes(self):
+        """get_all_nodes()
+        Returns all nodes used in dimension
+        Args:
+
+        Returns:
+            set: Set of all node names
+        """
+        return self.dim.get_all_nodes(project_id=self.project_id, name=self.name)
 
     def get_node_details(self, node, hierarchy='main'):
         """get_node_details(node, hierarchy=MAIN)
