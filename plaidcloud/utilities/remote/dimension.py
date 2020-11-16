@@ -137,7 +137,7 @@ class Dimensions:
         dimensions = {}
         for gst_dim in gst_dims:
             dimensions[gst_dim['id']] = [gst_dim['name'], Dimension(conn=self.conn, name=gst_dim['name'])]
-        return
+        return dimensions
 
     def is_dimension(self, name):
         """is_dimension(name)
