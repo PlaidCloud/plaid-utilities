@@ -2,17 +2,30 @@ import os
 
 DEFAULT_LOCAL_ROOT = 'downloaded_udfs'
 
-def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT):
-    project = conn.analyze.project.project(project_id=project_id)
-    udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
-    code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
+def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_path=None):
+    '''
+    Downloads a udf from plaid and puts it into a local file, the location of
+    which reflects the plaid udf hierarchy
 
-    local_path = os.path.join(
-        local_root,
-        project['name'],
-        udf['paths'][0].lstrip('/'),
-        udf['file_path'],
-    )
+    Args:
+        conn: a PlaidConnection object
+        project_id: the project to download from
+        udf_id: the udf to download
+
+    Returns:
+        None
+    '''
+    code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
+    if not local_path:
+        project = conn.analyze.project.project(project_id=project_id)
+        udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
+
+        local_path = os.path.join(
+            local_root,
+            project['name'],
+            udf['paths'][0].lstrip('/'),
+            udf['file_path'],
+        )
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     with open(local_path, 'w') as f:
         f.write(code)
