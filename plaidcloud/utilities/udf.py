@@ -1,5 +1,20 @@
 import os
 
+def download_udf(conn, project_id, udf_id, local_root):
+    project = conn.analyze.project.project(project_id=project_id)
+    udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
+    code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
+
+    local_path = os.path.join(
+        local_root,
+        project['name'],
+        udf['paths'][0].lstrip('/'),
+        udf['file_path'],
+    )
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, 'w') as f:
+        f.write(code)
+
 def upload_udf(local_path, conn, create=False, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
     '''
     Uploads a local file as a udf. Determines which project to upload to based
