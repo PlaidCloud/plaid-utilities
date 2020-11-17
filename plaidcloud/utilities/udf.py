@@ -1,6 +1,36 @@
 import os
 
-def upload_udf(local_path, conn, create=False, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
+DEFAULT_LOCAL_ROOT = 'downloaded_udfs'
+
+def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_path=None):
+    '''
+    Downloads a udf from plaid and puts it into a local file, the location of
+    which reflects the plaid udf hierarchy
+
+    Args:
+        conn: a PlaidConnection object
+        project_id: the project to download from
+        udf_id: the udf to download
+
+    Returns:
+        None
+    '''
+    code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
+    if not local_path:
+        project = conn.analyze.project.project(project_id=project_id)
+        udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
+
+        local_path = os.path.join(
+            local_root,
+            project['name'],
+            udf['paths'][0].lstrip('/'),
+            udf['file_path'],
+        )
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, 'w') as f:
+        f.write(code)
+
+def upload_udf(local_path, conn, create=False, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
     '''
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
@@ -27,7 +57,7 @@ def upload_udf(local_path, conn, create=False, project_name=None, udf_path=None,
     '''
     def parts_from_downloaded_udfs(path):
         head, tail = os.path.split(path)
-        if tail == 'downloaded_udfs':
+        if tail == DEFAULT_LOCAL_ROOT:
             return []
         else:
             return parts_from_downloaded_udfs(head) + [tail]
