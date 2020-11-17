@@ -1423,7 +1423,7 @@ class Dimension:
         self.dim.delete_node_property(project_id=self.project_id, name=self.name, node=node, property=property)
 
     def get_all_properties(self, inherit=False, hierarchy=None):
-        """get_all_inherited_properties(hierarchy=None)
+        """get_all_properties(inherit=False, hierarchy=None)
         Returns all properties including inherited properties in dimension
 
         Args:
