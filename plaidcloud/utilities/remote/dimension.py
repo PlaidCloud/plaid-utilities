@@ -1907,6 +1907,7 @@ class Dimension:
         table = {}
         for hierarchy, df in json_dict_df.items():
             table[hierarchy] = self._decode_dataframe(df)
+            table[hierarchy].reset_index(inplace=True)
         return table
 
     def hierarchy_table(self, hierarchy=MAIN):
@@ -1922,6 +1923,7 @@ class Dimension:
         """
         json_df = self.dim.hierarchy_table(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     # --------------------------------------------------------------------------------------------------
