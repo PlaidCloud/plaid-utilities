@@ -561,15 +561,38 @@ class Dimension:
         self.dim.reorder_nodes(project_id=self.project_id, name=self.name,
                                ancestor=ancestor, children=children, hierarchy=hierarchy)
 
-    def get_all_nodes(self):
-        """get_all_nodes()
-        Returns all nodes used in dimension
+    def get_all_leaves(self, hierarchy=MAIN):
+        """get_all_leaves(hierarchy=MAIN)
+        Returns all leaf nodes in hierarchy
         Args:
+            hierarchy (str): Hierarchy unique ID
 
         Returns:
             set: Set of all node names
         """
-        return self.dim.get_all_nodes(project_id=self.project_id, name=self.name)
+        return self.dim.get_all_leaves(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+
+    def get_all_nodes(self, hierarchy=None):
+        """get_all_nodes()
+        Returns all nodes used in dimension or hierarchy
+        Args:
+            hierarchy (str): Hierarchy unique ID or None returns all dim nodes
+
+        Returns:
+            set: Set of all node names
+        """
+        return self.dim.get_all_nodes(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+
+    def get_all_parents(self, hierarchy=MAIN):
+        """get_all_parents(hierarchy=MAIN)
+        Returns all parent nodes in hierarchy
+        Args:
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            set: Set of all node names
+        """
+        return self.dim.get_all_parents(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
 
     def get_node_details(self, node, hierarchy='main'):
         """get_node_details(node, hierarchy=MAIN)
@@ -638,19 +661,33 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     # ==== NAVIGATION METHODS ==========================================================================
     # --------------------------------------------------------------------------------------------------
-    def get_ancestor(self, node, level, hierarchy=MAIN):
-        """get_ancestor(node, level, hierarchy=MAIN)
+    def get_ancestor_at_generation(self, node, generation, hierarchy=MAIN):
+        """get_ancestor_at_generation(node, generation, hierarchy=MAIN)
         Traverses up the hierarchy to find the specified ancestor
 
         Args:
             node (str): Unique hierarchy node identifier
-            level (int): Number of generations to go back for ancenstor
+            generation (int): Number of generations to traverse for ancestor
             hierarchy (str): Hierarchy unique ID
 
         Returns:
             str: Ancestor node unique identifier
         """
-        return self.dim.get_ancestor(project_id=self.project_id, name=self.name, node=node, level=level, hierarchy=hierarchy)
+        return self.dim.get_ancestor_at_generation(project_id=self.project_id, name=self.name, node=node, generation=generation, hierarchy=hierarchy)
+
+    def get_ancestor_at_level(self, node, level, hierarchy=MAIN):
+        """get_ancestor_at_level(node, level, hierarchy=MAIN)
+        Traverses up the hierarchy to find the specified ancestor
+
+        Args:
+            node (str): Unique hierarchy node identifier
+            level (int): Number of levels to go back for ancestor
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            str: Ancestor node unique identifier
+        """
+        return self.dim.get_ancestor_at_level(project_id=self.project_id, name=self.name, node=node, level=level, hierarchy=hierarchy)
 
     def get_ancestors(self, node, hierarchy=MAIN):
         """get_ancestors(node, hierarchy=MAIN)
@@ -730,19 +767,20 @@ class Dimension:
         """
         return self.dim.get_descendents(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
-    def get_descendents_at_level(self, node, level, hierarchy=MAIN):
-        """get_descendents_at_level(node, level, hierarchy=MAIN)
+    def get_descendents_at_generation(self, node, generation, hierarchy=MAIN):
+        """get_descendents_at_generation(node, generation, hierarchy=MAIN)
         Finds all node types of a branch at the specified level
 
         Args:
             node (str): Unique hierarchy node identifier
-            level (int): Number of generations to descend for leaves
+            generation (int): Number of generations to descend for leaves
             hierarchy (str): Hierarchy unique ID
 
         Returns:
             list: List of node unique identifiers at the specified level
         """
-        return self.dim.get_descendents_at_level(project_id=self.project_id, name=self.name, node=node, level=level, hierarchy=hierarchy)
+        return self.dim.get_descendents_at_generation(project_id=self.project_id, name=self.name, node=node,
+                                                      generation=generation, hierarchy=hierarchy)
 
     def get_difference(self, hierarchies):
         """get_difference(hierarchies)
@@ -754,7 +792,7 @@ class Dimension:
         Returns:
             list: Difference of all nodes across hierarchies
         """
-        return self.dim.get_difference(project_id=self.project_id, hierarchies=hierarchies)
+        return self.dim.get_difference(project_id=self.project_id, name=self.name, hierarchies=hierarchies)
 
     def get_down(self, parent, child, hierarchy=MAIN):
         """get_down(parent, child, hierarchy=MAIN)
@@ -796,22 +834,22 @@ class Dimension:
         """
         return self.dim.get_grandparent(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
-    def get_hierarchy(self, node=ROOT, hierarchy=MAIN, alias=None, level=None, leaf_only=False):
-        """get_hierarchy(hierarchy=MAIN, alias=None, level=None, leaf_only=False)
+    def get_hierarchy(self, node=ROOT, hierarchy=MAIN, alias=None, generation=None, leaf_only=False):
+        """get_hierarchy(hierarchy=MAIN, alias=None, generation=None, leaf_only=False)
         Returns the specified hierarchy
 
         Args:
             node (str): Unique hierarchy node identifier
             hierarchy (str): Hierarchy unique ID
             alias (str): Alias unique ID
-            level (int): Level to descend to or None for all
+            generation (int): Generation to descend to or None for all
             leaf_only (bool): Only return leaf nodes no parents
 
         Returns:
             dict: Hierarchy from specified node with node details
         """
         return self.dim.get_hierarchy(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy,
-                                      alias=alias, level=level, leaf_only=leaf_only)
+                                      alias=alias, generation=generation, leaf_only=leaf_only)
 
     def get_intersection(self, hierarchies):
         """get_intersection(hierarchies)
@@ -823,7 +861,7 @@ class Dimension:
         Returns:
             list: Intersection of all nodes across hierarchies
         """
-        return self.dim.get_intersection(project_id=self.project_id, hierarchies=hierarchies)
+        return self.dim.get_intersection(project_id=self.project_id, name=self.name, hierarchies=hierarchies)
 
     def get_leaves(self, node, hierarchy=MAIN):
         """get_leaves(node, hierarchy=MAIN)
@@ -838,13 +876,27 @@ class Dimension:
         """
         return self.dim.get_leaves(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
+    def get_leaves_at_generation(self, node, generation, hierarchy=MAIN):
+        """get_leaves_at_generation(node, generation, hierarchy=MAIN)
+        Finds leaves of a branch at the specified level
+
+        Args:
+            node (str): Unique hierarchy node identifier
+            generation (int): Number of generations to descend for leaves
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            list: List of leaf level node objects
+        """
+        return self.dim.get_leaves_at_generation(project_id=self.project_id, name=self.name, node=node, generation=generation, hierarchy=hierarchy)
+
     def get_leaves_at_level(self, node, level, hierarchy=MAIN):
         """get_leaves_at_level(node, level, hierarchy=MAIN)
         Finds leaves of a branch at the specified level
 
         Args:
             node (str): Unique hierarchy node identifier
-            level (int): Number of generations to descend for leaves
+            level (int): Number of levels to ascend for leaves
             hierarchy (str): Hierarchy unique ID
 
         Returns:
@@ -1950,7 +2002,9 @@ class Dimension:
             alias (str): Alias type
 
         Returns:
-            file: JSON file
+            List: List of lists
+                  (int): of node generation
+                  (str): node unique identifier
         """
         return self.dim.ascend(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy, alias=alias)
 
@@ -1964,6 +2018,8 @@ class Dimension:
             alias (str): Alias type
 
         Returns:
-            file: JSON file
+            List: List of lists
+                  (int): of node generation
+                  (str): node unique identifier
         """
         return self.dim.descend(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy, alias=alias)
