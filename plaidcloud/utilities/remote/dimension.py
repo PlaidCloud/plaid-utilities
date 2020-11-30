@@ -662,7 +662,7 @@ class Dimension:
     # ==== NAVIGATION METHODS ==========================================================================
     # --------------------------------------------------------------------------------------------------
     def get_ancestor_at_generation(self, node, generation, hierarchy=MAIN):
-        """get_ancestor_at_level(node, generation, hierarchy=MAIN)
+        """get_ancestor_at_generation(node, generation, hierarchy=MAIN)
         Traverses up the hierarchy to find the specified ancestor
 
         Args:
@@ -891,7 +891,7 @@ class Dimension:
         return self.dim.get_leaves_at_generation(project_id=self.project_id, name=self.name, node=node, generation=generation, hierarchy=hierarchy)
 
     def get_leaves_at_level(self, node, level, hierarchy=MAIN):
-        """get_leaves_at_generation(node, level, hierarchy=MAIN)
+        """get_leaves_at_level(node, level, hierarchy=MAIN)
         Finds leaves of a branch at the specified level
 
         Args:
