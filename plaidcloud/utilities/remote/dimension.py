@@ -1579,6 +1579,19 @@ class Dimension:
         """
         self.dim.add_value(project_id=self.project_id, name=self.name, value=value)
 
+    def consolidate_values(self, values, hierarchy=MAIN):
+        """consolidate_values(values, hierarchy=MAIN)
+        Returns consolidated values for node in hierarchy
+
+        Args:
+            values (list): Value name(s) to process
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            list: List of lists by value name/consolidated value
+        """
+        return self.dim.consolidate_values(project_id=self.project_id, values=values, name=self.name, hierarchy=hierarchy)
+
     def delete_value(self, value):
         """delete_value(value)
         Delete a value
