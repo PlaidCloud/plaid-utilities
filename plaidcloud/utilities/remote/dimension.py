@@ -1370,19 +1370,22 @@ class Dimension:
     # ==== PROPERTY METHODS ============================================================================
     # --------------------------------------------------------------------------------------------------
     # noinspection PyShadowingBuiltins
-    def add_property(self, property, type=None, config=None):
-        """add_property(property, type=None, config=None)
+    def add_property(self, property, type=None, display=None, role=None, config=None):
+        """add_property(property, type=None, display=None, role=None, config=None)
         Adds a new property
 
         Args:
             property (str): Property unique ID
             type (str): property type for data editor
+            display (str): property display option
+            role (str): role in allocations (if dimensions is used this way)
             config (dict): property config for a type
 
         Returns:
             None
         """
-        self.dim.add_property(project_id=self.project_id, name=self.name, property=property, type=type, config=config)
+        self.dim.add_property(project_id=self.project_id, name=self.name, property=property, type=type,
+                              display=display, role=role, config=config)
 
     # noinspection PyShadowingBuiltins
     def delete_property(self, property):
@@ -1420,19 +1423,21 @@ class Dimension:
         """
         return self.dim.get_property_config(project_id=self.project_id, name=self.name, property=property)
 
-    def set_property_config(self, property, type, config):
-        """set_property_config(property, type, config)
+    def set_property_config(self, property, type, display, role, config):
+        """set_property_config(property, type, display, role, config)
         Set the config for the property
 
         Args:
             property (str): Property unique ID
             type (str): Property type ID
+            display (str): Property display option
+            role (str): role in allocations (if dimensions is used this way)
             config (str): JSON config string
         Returns:
             None
         """
         self.dim.set_property_config(project_id=self.project_id, name=self.name, property=property,
-                                     type=type, config=config)
+                                     type=type, display=display, role=role, config=config)
 
     # noinspection PyShadowingBuiltins
     def is_property(self, property):
