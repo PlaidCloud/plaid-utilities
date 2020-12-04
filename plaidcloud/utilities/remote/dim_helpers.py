@@ -8,6 +8,13 @@ from __future__ import unicode_literals
 from plaidcloud.utilities.remote.dimension import Dimensions
 from plaidcloud.utilities.remote.dimension import Dimension
 
+__author__ = 'Dave Parsons'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Dave Parsons']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Dave Parsons'
+__email__ = 'dave.parsons@tartansolutions.com'
+
 
 # @DAVE back story, I initially tried adding methods within the Dimensions class, but I realized I was doing things in
 # a way that felt inconsistent with what I saw.  I'm putting this stuff here for now. The use case is UDF helpers. I feel what's

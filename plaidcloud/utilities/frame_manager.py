@@ -34,7 +34,7 @@ from plaidcloud.utilities import data_helpers as dh
 __author__ = 'Paul Morel'
 __maintainer__ = 'Paul Morel <paul.morel@tartansolutions.com>'
 __copyright__ = '© Copyright 2013-2019, Tartan Solutions, Inc'
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 
 
 CSV_TYPE_DELIMITER = '::'

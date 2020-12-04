@@ -22,7 +22,7 @@ import functools
 __author__ = 'Michael Rea'
 __copyright__ = ' Copyright 2014-2019, Tartan Solutions, Inc'
 __credits__ = ['Michael Rea', 'Andrew Hodgson']
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 __maintainer__ = 'Michael Rea'
 __email__ = 'michael.rea@tartansolutions.com'
 

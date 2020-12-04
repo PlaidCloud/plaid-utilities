@@ -13,7 +13,7 @@ from plaidcloud.utilities import clean_files
 __author__ = "Pat Buxton"
 __copyright__ = "© Copyright 2009-2018, Tartan Solutions, Inc"
 __credits__ = ["Pat Buxton"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Pat Buxton"
 __email__ = "patrick.buxton@tartansolutions.com"
 

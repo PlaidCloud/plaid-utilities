@@ -19,7 +19,7 @@ import six
 __author__ = "Paul Morel, Andrew Hodgson, Michael Rea"
 __copyright__ = "Copyright 2010-2019, Tartan Solutions, Inc"
 __credits__ = ["Paul Morel"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Michael Rea"
 __email__ = "michael.rea@tartansolutions.com"
 

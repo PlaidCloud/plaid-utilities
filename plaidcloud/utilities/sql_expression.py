@@ -26,7 +26,7 @@ from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import
 __author__ = 'Adams Tower'
 __maintainer__ = 'Adams Tower <adams.tower@tartansolutions.com>'
 __copyright__ = '© Copyright 2017-2020, Tartan Solutions, Inc'
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 
 # TODO: move transform functions here, document them, and refactor their api
 # TODO: write unit tests

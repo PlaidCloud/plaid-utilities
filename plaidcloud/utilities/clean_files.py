@@ -21,6 +21,13 @@ from plaidcloud.rpc import config
 from plaidcloud.utilities import utility
 from six.moves import map
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 logger = logging.getLogger(__name__)
 conf = config.get_dict()
 

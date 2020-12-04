@@ -28,6 +28,13 @@ from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.database import PlaidDate
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 
 # Primarily used in workflow-runner :(, frame_manager :( and
 # plaidtools.cconnect, which is primarily used in udfs

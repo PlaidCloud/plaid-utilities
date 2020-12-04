@@ -1,9 +1,16 @@
 import os
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 DEFAULT_LOCAL_ROOT = 'downloaded_udfs'
 
 def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_path=None):
-    '''
+    """
     Downloads a udf from plaid and puts it into a local file, the location of
     which reflects the plaid udf hierarchy
 
@@ -14,7 +21,7 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
 
     Returns:
         None
-    '''
+    """
     code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
     if not local_path:
         project = conn.analyze.project.project(project_id=project_id)
@@ -31,7 +38,7 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
         f.write(code)
 
 def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
-    '''
+    """
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
     to based on th name of the file.
@@ -54,7 +61,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
 
     Returns:
         None
-    '''
+    """
     def parts_from_downloaded_udfs(path):
         head, tail = os.path.split(path)
         if tail == DEFAULT_LOCAL_ROOT:

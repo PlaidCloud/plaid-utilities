@@ -12,7 +12,7 @@ import pandas as pd
 __author__ = 'Dave Parsons'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
 __credits__ = ['Dave Parsons']
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 __maintainer__ = 'Dave Parsons'
 __email__ = 'dave.parsons@tartansolutions.com'
 

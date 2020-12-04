@@ -10,6 +10,13 @@ from sqlalchemy_greenplum.dialect import GreenplumDialect
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 SCHEMA_PREFIX = 'anlz'
 
 

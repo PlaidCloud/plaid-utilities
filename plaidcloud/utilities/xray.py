@@ -6,10 +6,11 @@ For development and debugging purposes
 """
 
 from __future__ import absolute_import
+
 __author__ = "Michael Rea"
 __copyright__ = "© Copyright 2010-2011, Tartan Solutions, Inc"
 __credits__ = ["Michael Rea, Paul Morel"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Michael Rea"
 __email__ = "michael.rea@tartansolutions.com"
 
