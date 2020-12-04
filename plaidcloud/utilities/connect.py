@@ -71,7 +71,7 @@ class PlaidConnection(Connect, Connection):
     def get_workbook(self, xl_path):
         xl_path = self.path(xl_path)
         if not os.path.exists(xl_path):
-            template_path = self.path('DEBUG') + '/template.xlsm'
+            template_path = self.path('TEMPLATE') + '/template.xlsm'
             if not os.path.exists(template_path):
                 raise Exception('Excel template does not exist at {}'.format(template_path))
             shutil.copyfile(template_path, xl_path)
