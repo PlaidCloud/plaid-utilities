@@ -12,7 +12,7 @@ import pandas as pd
 __author__ = 'Dave Parsons'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
 __credits__ = ['Dave Parsons']
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 __maintainer__ = 'Dave Parsons'
 __email__ = 'dave.parsons@tartansolutions.com'
 
@@ -59,7 +59,7 @@ class Dimensions:
         Returns:
             dimensions (dim): Dimension object
         """
-        self.dims.create(project_id=self.project_id, path=path, name=name, memo='', branch='master')
+        self.dims.create(project_id=self.project_id, path=path, name=name, memo='')
         dim = Dimension(conn=self.conn, name=name)
         return dim
 
@@ -88,7 +88,7 @@ class Dimensions:
         Returns:
             None
         """
-        self.dims.delete(project_id=self.project_id, dimension_id=name, branch='master')
+        self.dims.delete(project_id=self.project_id, dimension_id=name)
 
     def get_dimension(self, name, replace=False):
         """get_dimension(name, replace=False)
@@ -128,7 +128,7 @@ class Dimensions:
                 - name (str): Dimension Name
                 - dim (Dimension: Dimension object
         """
-        gst_dims = self.dims.dimensions(project_id=self.project_id, branch='master', id_filter=None, sort=None,
+        gst_dims = self.dims.dimensions(project_id=self.project_id, id_filter=None, sort=None,
                                         keys=None, member_details=False)
 
         dimensions = {}
@@ -1908,6 +1908,23 @@ class Dimension:
         """
         json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
+        return df
+
+    def get_consolidation_dataframe(self, value, hierarchy=MAIN):
+        """get_consolidation_dataframe(value, hierarchy=MAIN)
+        Returns consolidated values for nodes in hierarchy
+
+        Args:
+            value (str): Value name to process
+            hierarchy (str): Hierarchy unique ID to process
+
+        Returns:
+            df (Dataframe): Dataframe with hierarchy plus input values & consolidated values
+        """
+        json_df = self.dim.get_consolidation_dataframe(project_id=self.project_id, name=self.name,
+                                                       value=value, hierarchy=hierarchy)
+        df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def get_hierarchy_dataframe(self, hierarchy=MAIN):

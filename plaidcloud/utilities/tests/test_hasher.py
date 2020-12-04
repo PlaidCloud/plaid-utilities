@@ -8,7 +8,7 @@ import time
 __author__ = "Kellen Kapper"
 __copyright__ = "© Copyright 2018, Tartan Solutions, Inc"
 __credits__ = ["Kellen Kapper"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Kellen Kapper"
 __email__ = "kellen.kapperl@tartansolutions.com"
 

@@ -1,6 +1,13 @@
 from __future__ import absolute_import
 import xlwings as xw  # pylint: disable=import-error
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 
 def activate_sheet(sheet):
     """

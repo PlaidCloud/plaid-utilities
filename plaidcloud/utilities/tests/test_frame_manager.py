@@ -13,7 +13,7 @@ from plaidcloud.utilities.frame_manager import coalesce
 __author__ = "Andrew Hodgson"
 __copyright__ = "© Copyright 2009-2014, Tartan Solutions, Inc"
 __credits__ = ["Paul Morel", "Adams Tower"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Andrew Hodgson"
 __email__ = "andrew.hodgson@tartansolutions.com"
 

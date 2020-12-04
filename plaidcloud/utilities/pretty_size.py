@@ -6,7 +6,7 @@
 __author__ = 'Paul Morel'
 __maintainer__ = 'Paul Morel'
 __copyright__ = '© Copyright 2014 Tartan Solutions, Inc.'
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 
 
 def pretty_size(num, divisor=1024.0):

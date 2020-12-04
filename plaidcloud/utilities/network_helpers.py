@@ -5,6 +5,12 @@ from __future__ import absolute_import
 import random
 import time
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
 
 def retry_random_exp(fn, retries=5, current_exp=1):
     """Runs a function, retrying with a random exponential backoff.

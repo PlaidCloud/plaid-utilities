@@ -27,7 +27,7 @@ except:
 __author__ = 'Pat Buxton'
 __maintainer__ = 'Pat Buxton <patrick.buxton@tartansolutions.com>'
 __copyright__ = '© Copyright 2020, Tartan Solutions, Inc'
-__license__ = 'Proprietary'
+__license__ = 'Apache 2.0'
 
 def create_connection(*args, **kwargs):
     """

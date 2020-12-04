@@ -10,6 +10,13 @@ from sqlalchemy_greenplum.dialect import GreenplumDialect
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
+
 SCHEMA_PREFIX = 'anlz'
 
 
@@ -36,7 +43,7 @@ def lookup_table(project_id, table, rpc=None):
 
 
 class AnalyzeTable(sqlalchemy.Table):
-    def __new__(cls, project, table, branch='master', metadata=None, rpc=None):
+    def __new__(cls, project, table, metadata=None, rpc=None):
         if rpc:
             _rpc = rpc
         else:
@@ -53,7 +60,7 @@ class AnalyzeTable(sqlalchemy.Table):
         _table_id = lookup_table(_project_id, table, _rpc)
 
         columns = _rpc.analyze.table.table_meta(
-            project_id=_project_id, table_id=_table_id, branch=branch,
+            project_id=_project_id, table_id=_table_id,
         )
         if not columns:
             columns = []  # If the table doesn't actually exist, we assume it's
@@ -85,7 +92,6 @@ class AnalyzeTable(sqlalchemy.Table):
         table_object._rpc = _rpc
         table_object._project_id = _project_id
         table_object._table_id = _table_id
-        table_object._branch = branch
         table_object._schema = _schema
 
         return table_object
@@ -99,16 +105,13 @@ class AnalyzeTable(sqlalchemy.Table):
     def table_id(self):
         return self._table_id  # pylint: disable=no-member
 
-    def branch(self):
-        return self._branch  # pylint: disable=no-member
-
     def schema(self):  # pylint: disable=method-hidden
         return self._schema  # pylint: disable=no-member
 
     def table_info(self, keys):
         return self._rpc.analyze.table(  # pylint: disable=no-member
             project_id=self.project_id, table_id=self.table_id,
-            branch=self.branch, keys=keys,
+            keys=keys,
         )
 
     def head(self, rows=10):

@@ -4,7 +4,15 @@ import unittest
 import pytest
 import os
 import tempfile
+
 from plaidcloud.utilities.dimension import Dimension, Node
+
+__author__ = 'Dave Parsons'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Dave Parsons']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Dave Parsons'
+__email__ = 'dave.parsons@tartansolutions.com'
 
 
 class TestDimension(unittest.TestCase):

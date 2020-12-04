@@ -11,6 +11,12 @@ from sqlalchemy.types import Numeric
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
 
 class elapsed_seconds(FunctionElement):
     type = Numeric()

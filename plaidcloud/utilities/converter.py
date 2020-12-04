@@ -9,7 +9,7 @@ from plaidcloud.rpc.functions import deepmerge
 __author__ = "Paul Morel"
 __copyright__ = "© Copyright 2009-2018, Tartan Solutions, Inc"
 __credits__ = ["Paul Morel"]
-__license__ = "Proprietary"
+__license__ = "Apache 2.0"
 __maintainer__ = "Paul Morel"
 __email__ = "paul.morel@tartansolutions.com"
 

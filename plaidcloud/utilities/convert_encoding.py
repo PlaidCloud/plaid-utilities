@@ -11,6 +11,12 @@ import codecs
 starting_chunksize = 1 * 1024 * 1024  # 1 MB
 max_chunksize = 8 * 1024 * 1024  # 8 MB
 
+__author__ = 'Paul Morel'
+__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__credits__ = ['Paul Morel']
+__license__ = 'Apache 2.0'
+__maintainer__ = 'Paul Morel'
+__email__ = 'paul.morel@tartansolutions.com'
 
 def convert(target_encoding, in_path, out_path, include_bom=False):
     """Converts character encoding of a file to `target_encoding`
