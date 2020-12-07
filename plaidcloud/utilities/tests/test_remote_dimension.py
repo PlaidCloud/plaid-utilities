@@ -6,8 +6,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import filecmp
-from unittest import TestCase
 import os
+from unittest import TestCase
+
 import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
@@ -652,6 +653,34 @@ class TestDimension(TestCase):
         expected = 3
         count = self.dim.get_children_count('Q1', hierarchy=MAIN)
         return self.assertEqual(expected, count)
+
+    def test_031_get_generation(self):
+        expected = 2
+        count = self.dim.get_generation('Q1', hierarchy=MAIN)
+        return self.assertEqual(expected, count)
+
+    def test_032_get_grandparent(self):
+        expected = 'Year'
+        node = self.dim.get_grandparent('February', hierarchy=MAIN)
+        return self.assertEqual(expected, node)
+
+    def test_033_get_leaves(self):
+        expected = [[2, 'January'],
+                    [2, 'February'],
+                    [2, 'March'],
+                    [2, 'April'],
+                    [2, 'May'],
+                    [2, 'June'],
+                    [2, 'July'],
+                    [2, 'August'],
+                    [2, 'September'],
+                    [2, 'October'],
+                    [2, 'November'],
+                    [2, 'December'],
+                    [3, 'Janusday']]
+
+        nodes = self.dim.get_leaves('Year', hierarchy=MAIN)
+        return self.assertEqual(expected, nodes)
 
     def tearDown(self):
         self.dim = None
