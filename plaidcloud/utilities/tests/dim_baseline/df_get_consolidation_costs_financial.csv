@@ -1,0 +1,16 @@
+,id,consol,display,generation,leaf,main,parent,value.Costs,value.Costs.consolidated
+0,!!root!!,,!!root!!,0,False,False,,0.0,8840.0
+1,YTD,+,YTD,1,False,False,!!root!!,0.0,-1130.0
+2,January,+,January,2,True,True,YTD,-10.0,-10.0
+3,February,+,February,2,True,True,YTD,-100.0,-100.0
+4,March,+,March,2,True,True,YTD,-1000.0,-1000.0
+5,April,+,April,2,True,True,YTD,-20.0,-20.0
+6,YTG,+,YTG,1,False,False,!!root!!,0.0,9970.0
+7,May,-,May,2,True,True,YTG,-200.0,-200.0
+8,June,-,June,2,True,True,YTG,-2000.0,-2000.0
+9,July,-,July,2,True,True,YTG,-30.0,-30.0
+10,August,-,August,2,True,True,YTG,-300.0,-300.0
+11,September,-,September,2,True,True,YTG,-3000.0,-3000.0
+12,October,-,October,2,True,True,YTG,-40.0,-40.0
+13,November,-,November,2,True,True,YTG,-400.0,-400.0
+14,December,-,December,2,True,True,YTG,-4000.0,-4000.0

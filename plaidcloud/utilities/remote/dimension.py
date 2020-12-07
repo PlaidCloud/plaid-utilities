@@ -603,7 +603,7 @@ class Dimension:
         Returns:
             dict: Dict with child node unique identifiers/consolidations/leaf/aliases etc.
         """
-        self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+        return self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
     # ==== SHIFT METHODS ===============================================================================

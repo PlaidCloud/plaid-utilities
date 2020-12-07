@@ -1,0 +1,20 @@
+,id,generation,display,consol,parent,leaf,main,attribute.financial,attribute.financial.inherited,attribute.financial.ancestor,attribute.halves,attribute.halves.inherited,attribute.halves.ancestor,alias.Russian,alias.French,alias.Korean,alias.Welsh,alias.Emoji,property.Season,property.Season.inherited,property.Season.ancestor,property.Colour,property.Colour.inherited,property.Colour.ancestor,value.Costs,value.Profit
+0,!!root!!,0,!!root!!,,,False,False,,,,,,,,,,,,,False,,Magenta,False,,,
+1,H1,1,H1,~,!!root!!,False,False,,,,,,,,,,Haneri 1,,,False,,Magenta,True,!!root!!,,
+2,Q1,2,Q1,+,H1,False,True,,,,H1,False,,,Trimestre 1,,,,Winter,False,,Red,False,,,
+3,January,3,January,+,Q1,True,True,YTD,False,,H1,True,Q1,Январь,Janvier,일월,Ionawr,☃️,Winter,True,Q1,Red,True,Q1,-10,10
+4,February,3,February,+,Q1,True,True,YTD,False,,H1,True,Q1,Февраль,Fevier,이월,Chwefror,💘,Winter,True,Q1,Red,True,Q1,-100,100
+5,March,3,March,+,Q1,True,True,YTD,False,,H1,True,Q1,Март,Mars,삼월,Mawrth,☘️,Winter,True,Q1,Red,True,Q1,-1000,1000
+6,Q2,2,Q2,+,H1,False,True,,,,H1,False,,,Trimestre 2,,,,Spring,False,,Orange,False,,,
+7,April,3,April,+,Q2,True,True,YTD,False,,H1,True,Q2,Апрель,Avril,사월,Ebrill,☔,Spring,True,Q2,Green,False,,-20,20
+8,May,3,May,+,Q2,True,True,YTG,False,,H1,True,Q2,Май,Mai,오월,Mai,🌺,Spring,True,Q2,Green,False,,-200,200
+9,June,3,June,+,Q2,True,True,YTG,False,,H1,True,Q2,Июнь,Juin,유월,Mehefin,🌞,Spring,True,Q2,Orange,True,Q2,-2000,2000
+10,H2,1,H2,~,!!root!!,False,False,,,,,,,,,,Haneri 2,,,False,,Magenta,True,!!root!!,,
+11,Q3,2,Q3,+,H2,False,True,,,,H2,False,,,Trimestre 3,,,,Summer,False,,Magenta,True,!!root!!,,
+12,July,3,July,+,Q3,True,True,YTG,False,,H2,True,Q3,Июль,Julliet,칠월,Gorffennaf,🍦,Summer,True,Q3,Blue,False,,-30,30
+13,August,3,August,+,Q3,True,True,YTG,False,,H2,True,Q3,Август,Aout,팔월,Awst,🏖️,Summer,True,Q3,Blue,False,,-300,300
+14,September,3,September,+,Q3,True,True,YTG,False,,H2,True,Q3,Сентябрь,Septembre,구월,Medi,🍎,Summer,True,Q3,Blue,False,,-3000,3000
+15,Q4,2,Q4,+,H2,False,True,,,,H2,False,,,Trimestre 4,,,,Autumn,False,,White,False,,,
+16,October,3,October,+,Q4,True,True,YTG,False,,H2,True,Q4,Октябрь,Octobre,시월,Hydref,🎃,Autumn,True,Q4,Red,False,,-40,40
+17,November,3,November,+,Q4,True,True,YTG,False,,H2,True,Q4,Ноябрь,Novembre,십일월,Tachwedd,🍂,Autumn,True,Q4,Green,False,,-400,400
+18,December,3,December,+,Q4,True,True,YTG,False,,H2,True,Q4,Декабрь,Decembre,십이월,Rhagfyr,🎅,Autumn,True,Q4,Red,False,,-4000,4000

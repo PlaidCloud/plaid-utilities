@@ -1,0 +1,7 @@
+,hierarchy,parent,child,consolidation,status,code,message
+0,halves,!!root!!,H1,~,True,2,Child added
+1,halves,!!root!!,H2,~,True,2,Child added
+2,halves,H1,Q1,+,True,2,Child added
+3,halves,H1,Q2,+,True,2,Child added
+4,halves,H2,Q3,+,True,2,Child added
+5,halves,H2,Q4,+,True,2,Child added
