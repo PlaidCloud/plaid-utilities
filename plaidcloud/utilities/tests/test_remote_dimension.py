@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 import filecmp
 import os
+import unittest
 from unittest import TestCase
 
 import numpy as np
@@ -28,6 +29,9 @@ __email__ = 'dave.parsons@tartansolutions.com'
 # Folders for comparison
 BASELINE = './dim_baseline/'
 FOLDER = './dim_current/'
+
+if not os.path.exists('./plaid'):
+    exit(0)
 
 conn = create_connection(verify_ssl=False)
 
