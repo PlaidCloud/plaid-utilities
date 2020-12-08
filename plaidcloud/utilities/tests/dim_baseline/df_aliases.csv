@@ -1,67 +1,67 @@
-,node,name,value
-27,April,Emoji,☔
-31,August,Emoji,🏖️
-35,December,Emoji,🎅
-25,February,Emoji,💘
-24,January,Emoji,☃️
-30,July,Emoji,🍦
-29,June,Emoji,🌞
-26,March,Emoji,☘️
-28,May,Emoji,🌺
-34,November,Emoji,🍂
-33,October,Emoji,🎃
-32,September,Emoji,🍎
-43,April,French,Avril
-47,August,French,Aout
-51,December,French,Decembre
-41,February,French,Fevier
-40,January,French,Janvier
-46,July,French,Julliet
-45,June,French,Juin
-42,March,French,Mars
-44,May,French,Mai
-50,November,French,Novembre
-49,October,French,Octobre
-36,Q1,French,Trimestre 1
-37,Q2,French,Trimestre 2
-38,Q3,French,Trimestre 3
-39,Q4,French,Trimestre 4
-48,September,French,Septembre
-3,April,Korean,사월
-7,August,Korean,팔월
-11,December,Korean,십이월
-1,February,Korean,이월
-0,January,Korean,일월
-6,July,Korean,칠월
-5,June,Korean,유월
-2,March,Korean,삼월
-4,May,Korean,오월
-10,November,Korean,십일월
-9,October,Korean,시월
-8,September,Korean,구월
-15,April,Russian,Апрель
-19,August,Russian,Август
-23,December,Russian,Декабрь
-13,February,Russian,Февраль
-12,January,Russian,Январь
-18,July,Russian,Июль
-17,June,Russian,Июнь
-14,March,Russian,Март
-16,May,Russian,Май
-22,November,Russian,Ноябрь
-21,October,Russian,Октябрь
-20,September,Russian,Сентябрь
-57,April,Welsh,Ebrill
-61,August,Welsh,Awst
-65,December,Welsh,Rhagfyr
-55,February,Welsh,Chwefror
-52,H1,Welsh,Haneri 1
-53,H2,Welsh,Haneri 2
-54,January,Welsh,Ionawr
-60,July,Welsh,Gorffennaf
-59,June,Welsh,Mehefin
-56,March,Welsh,Mawrth
-58,May,Welsh,Mai
-64,November,Welsh,Tachwedd
-63,October,Welsh,Hydref
-62,September,Welsh,Medi
+node,name,value
+April,Emoji,☔
+August,Emoji,🏖️
+December,Emoji,🎅
+February,Emoji,💘
+January,Emoji,☃️
+July,Emoji,🍦
+June,Emoji,🌞
+March,Emoji,☘️
+May,Emoji,🌺
+November,Emoji,🍂
+October,Emoji,🎃
+September,Emoji,🍎
+April,French,Avril
+August,French,Aout
+December,French,Decembre
+February,French,Fevier
+January,French,Janvier
+July,French,Julliet
+June,French,Juin
+March,French,Mars
+May,French,Mai
+November,French,Novembre
+October,French,Octobre
+Q1,French,Trimestre 1
+Q2,French,Trimestre 2
+Q3,French,Trimestre 3
+Q4,French,Trimestre 4
+September,French,Septembre
+April,Korean,사월
+August,Korean,팔월
+December,Korean,십이월
+February,Korean,이월
+January,Korean,일월
+July,Korean,칠월
+June,Korean,유월
+March,Korean,삼월
+May,Korean,오월
+November,Korean,십일월
+October,Korean,시월
+September,Korean,구월
+April,Russian,Апрель
+August,Russian,Август
+December,Russian,Декабрь
+February,Russian,Февраль
+January,Russian,Январь
+July,Russian,Июль
+June,Russian,Июнь
+March,Russian,Март
+May,Russian,Май
+November,Russian,Ноябрь
+October,Russian,Октябрь
+September,Russian,Сентябрь
+April,Welsh,Ebrill
+August,Welsh,Awst
+December,Welsh,Rhagfyr
+February,Welsh,Chwefror
+H1,Welsh,Haneri 1
+H2,Welsh,Haneri 2
+January,Welsh,Ionawr
+July,Welsh,Gorffennaf
+June,Welsh,Mehefin
+March,Welsh,Mawrth
+May,Welsh,Mai
+November,Welsh,Tachwedd
+October,Welsh,Hydref
+September,Welsh,Medi

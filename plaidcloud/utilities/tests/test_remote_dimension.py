@@ -91,7 +91,7 @@ class TestDimension(TestCase):
     def test_002_save_hierarchy_main(self):
         # main hierarchy
         df = self.dim.save_hierarchy_to_dataframe(MAIN)
-        df.to_csv(f'{FOLDER}df_main_hierarchy.csv')
+        df.to_csv(f'{FOLDER}df_main_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_main_hierarchy.csv', f'{BASELINE}df_main_hierarchy.csv')
         return
 
@@ -118,7 +118,7 @@ class TestDimension(TestCase):
     def test_004_save_hierarchy_halves(self):
         # halves hierarchy
         df = self.dim.save_hierarchy_to_dataframe('halves')
-        df.to_csv(f'{FOLDER}df_halves_hierarchy.csv')
+        df.to_csv(f'{FOLDER}df_halves_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_halves_hierarchy.csv', f'{BASELINE}df_halves_hierarchy.csv')
         return
 
@@ -153,7 +153,7 @@ class TestDimension(TestCase):
     def test_006_save_hierarchy_financial(self):
         # financial hierarchy
         df = self.dim.save_hierarchy_to_dataframe('financial')
-        df.to_csv(f'{FOLDER}df_financial_hierarchy.csv')
+        df.to_csv(f'{FOLDER}df_financial_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_financial_hierarchy.csv', f'{BASELINE}df_financial_hierarchy.csv')
         return
 
@@ -263,7 +263,7 @@ class TestDimension(TestCase):
         self.dim.load_aliases_from_dataframe(df_aliases, 'NodeName', 'AliasName', 'AliasValue')
         df = self.dim.save_aliases_to_dataframe(None)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
-        df.to_csv(f'{FOLDER}df_aliases.csv')
+        df.to_csv(f'{FOLDER}df_aliases.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_aliases.csv', f'{BASELINE}df_aliases.csv')
         return
 
@@ -295,7 +295,7 @@ class TestDimension(TestCase):
         self.dim.load_properties_from_dataframe(df_properties, 'NodeName', 'PropertyName', 'PropertyValue')
         df = self.dim.save_properties_to_dataframe(None)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
-        df.to_csv(f'{FOLDER}df_properties.csv')
+        df.to_csv(f'{FOLDER}df_properties.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_properties.csv', f'{BASELINE}df_properties.csv')
         return
 
@@ -334,87 +334,87 @@ class TestDimension(TestCase):
         self.dim.load_values_from_dataframe(df_values, 'NodeName', 'ValueName', 'Value')
         df = self.dim.save_values_to_dataframe(None)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
-        df.to_csv(f'{FOLDER}df_values.csv')
+        df.to_csv(f'{FOLDER}df_values.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_values.csv', f'{BASELINE}df_values.csv')
         return
 
     def test_011_get_hierarchy_dataframe(self):
         df = self.dim.get_hierarchy_dataframe(hierarchy=MAIN)
-        df.to_csv(f'{FOLDER}df_get_hierarchy_main.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_main.csv', f'{BASELINE}df_get_hierarchy_main.csv')
 
         df = self.dim.get_hierarchy_dataframe(hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_halves.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_halves.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_halves.csv', f'{BASELINE}df_get_hierarchy_halves.csv')
 
         df = self.dim.get_hierarchy_dataframe(hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_financial.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_financial.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_financial.csv', f'{BASELINE}df_get_hierarchy_financial.csv')
         return
 
     def test_012_get_aliases_dataframe(self):
         df = self.dim.get_aliases_dataframe()
         df = df.reindex(columns=sorted(df.columns))
-        df.to_csv(f'{FOLDER}df_get_aliases.csv')
+        df.to_csv(f'{FOLDER}df_get_aliases.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_aliases.csv', f'{BASELINE}df_get_aliases.csv')
         return
 
     def test_013_get_attributes_dataframe(self):
         df = self.dim.get_attributes_dataframe()
-        df.to_csv(f'{FOLDER}df_get_attributes.csv')
+        df.to_csv(f'{FOLDER}df_get_attributes.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_attributes.csv', f'{BASELINE}df_get_attributes.csv')
         return
 
     def test_014_get_consolidation_dataframe(self):
         df = self.dim.get_consolidation_dataframe('Costs', hierarchy=MAIN)
-        df.to_csv(f'{FOLDER}df_get_consolidation_costs_main.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_costs_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_main.csv', f'{BASELINE}df_get_consolidation_costs_main.csv')
 
         df = self.dim.get_consolidation_dataframe('Costs', hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_consolidation_costs_halves.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_costs_halves.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_halves.csv', f'{BASELINE}df_get_consolidation_costs_halves.csv')
 
         df = self.dim.get_consolidation_dataframe('Costs', hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_consolidation_costs_financial.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_costs_financial.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_financial.csv', f'{BASELINE}df_get_consolidation_costs_financial.csv')
 
         df = self.dim.get_consolidation_dataframe('Profit', hierarchy=MAIN)
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_main.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_profit_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_main.csv', f'{BASELINE}df_get_consolidation_profit_main.csv')
 
         df = self.dim.get_consolidation_dataframe('Profit', hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_halves.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_profit_halves.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_halves.csv', f'{BASELINE}df_get_consolidation_profit_halves.csv')
 
         df = self.dim.get_consolidation_dataframe('Profit', hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_financial.csv')
+        df.to_csv(f'{FOLDER}df_get_consolidation_profit_financial.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_financial.csv', f'{BASELINE}df_get_consolidation_profit_financial.csv')
 
         return
 
     def test_015_get_properties_dataframe(self):
         df = self.dim.get_properties_dataframe()
-        df.to_csv(f'{FOLDER}df_get_properties.csv')
+        df.to_csv(f'{FOLDER}df_get_properties.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_properties.csv', f'{BASELINE}df_get_properties.csv')
         return
 
     def test_016_get_values_dataframe(self):
         df = self.dim.get_values_dataframe()
-        df.to_csv(f'{FOLDER}df_get_values.csv')
+        df.to_csv(f'{FOLDER}df_get_values.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_values.csv', f'{BASELINE}df_get_values.csv')
         return
 
     def test_017_get_hierarchy_table(self):
         df = self.dim.hierarchy_table(hierarchy=MAIN)
-        df.to_csv(f'{FOLDER}df_get_hierarchy_table_main.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_table_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_main.csv', f'{BASELINE}df_get_hierarchy_table_main.csv')
 
         df = self.dim.hierarchy_table(hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_table_halves.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_table_halves.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_halves.csv', f'{BASELINE}df_get_hierarchy_table_halves.csv')
 
         df = self.dim.hierarchy_table(hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_table_financial.csv')
+        df.to_csv(f'{FOLDER}df_get_hierarchy_table_financial.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_financial.csv', f'{BASELINE}df_get_hierarchy_table_financial.csv')
         return
 
