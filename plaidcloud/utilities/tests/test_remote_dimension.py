@@ -44,7 +44,7 @@ class TestDimension(TestCase):
     def setUp(self):
         if not os.path.exists(BASELINE):
             os.makedirs(BASELINE)
-        self.periods = 'periods_test_123456'
+        self.periods = 'periods_rpc_test'
         self.dims = Dimensions(conn=conn)
         self.dim = self.dims.get_dimension(name=self.periods, replace=False)
         return
@@ -681,6 +681,96 @@ class TestDimension(TestCase):
 
         nodes = self.dim.get_leaves('Year', hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
+
+    def test_034_get_leaves_at_generation(self):
+        expected = [[2, 'January'],
+                    [2, 'February'],
+                    [2, 'March'],
+                    [2, 'April'],
+                    [2, 'May'],
+                    [2, 'June'],
+                    [2, 'July'],
+                    [2, 'August'],
+                    [2, 'September'],
+                    [2, 'October'],
+                    [2, 'November'],
+                    [2, 'December']]
+
+        nodes = self.dim.get_leaves_at_generation('Year', 2,  hierarchy=MAIN)
+        return self.assertEqual(expected, nodes)
+
+    def test_035_get_leaves_at_level(self):
+        expected = [[3, 'January'],
+                    [3, 'February'],
+                    [3, 'March'],
+                    [3, 'April'],
+                    [3, 'May'],
+                    [3, 'June'],
+                    [3, 'July'],
+                    [3, 'August'],
+                    [3, 'September'],
+                    [3, 'October'],
+                    [3, 'November'],
+                    [3, 'December']]
+
+        nodes = self.dim.get_leaves_at_level('February', 0, hierarchy=MAIN)
+        return self.assertEqual(expected, nodes)
+
+    def test_036_get_parent(self):
+        expected = 'Q1'
+        nodes = self.dim.get_parent('February', hierarchy=MAIN)
+        return self.assertEqual(expected, nodes)
+
+    def test_037_get_parents(self):
+        expected = [['financial', 'halves', 'main'], ['YTD', 'Q1', 'Q1']]
+        nodes = self.dim.get_parents('February')
+        return self.assertEqual(expected, nodes)
+
+    def test_038_get_siblings(self):
+        expected = ['January', 'February', 'March']
+        nodes = self.dim.get_siblings('February', hierarchy=MAIN)
+        return self.assertEqual(expected, nodes)
+
+    def test_039_get_difference(self):
+        expected = sorted(['Janusday', 'Year', 'Q5', 'Donk-tober'])
+        nodes = sorted(self.dim.get_difference(['halves']))
+        return self.assertEqual(expected, nodes)
+
+    def test_040_get_intersection(self):
+        expected = sorted(['!!root!!', 'April', 'August', 'December', 'February', 'January', 'July', 'June', 'March',
+                           'May', 'November', 'October', 'Q1', 'Q2', 'Q3', 'Q4', 'September'])
+        nodes = sorted(self.dim.get_intersection(['halves']))
+        return self.assertEqual(expected, nodes)
+
+    def test_041_get_union(self):
+        expected = sorted(['!!root!!', 'April', 'August', 'December', 'Donk-tober', 'February', 'H1', 'H2', 'January',
+                           'Janusday', 'July', 'June', 'March', 'May', 'November', 'October', 'Q1', 'Q2', 'Q3', 'Q4',
+                           'Q5', 'September', 'Year'])
+        nodes = sorted(self.dim.get_union(['halves']))
+        return self.assertEqual(expected, nodes)
+
+    def test_041_add_node_to_alt(self):
+        expected = 'H2'
+        self.dim.add_node('H2', 'Q5', '+', hierarchy='halves', after='Q4')
+        node = self.dim.get_parent('Q5',  hierarchy='halves')
+        return self.assertEqual(expected, node)
+
+    def test_042_move_node_in_alt(self):
+        expected = 'H1'
+        self.dim.move_node('Q5', 'H1', hierarchy='halves', before='Q2')
+        node = self.dim.get_parent('Q5',  hierarchy='halves')
+        return self.assertEqual(expected, node)
+
+    def test_043_rename_node(self):
+        expected = 'Q5'
+        self.dim.rename_node('Donk-tober', 'Davetober')
+        node = self.dim.get_parent('Davetober',  hierarchy=MAIN)
+        return self.assertEqual(expected, node)
+
+    def test_044_delete_node(self):
+        self.dim.delete_node('Year', 'Q5', hierarchy=MAIN)
+        node = self.dim.node_exists('Q5')
+        return self.assertFalse(node)
 
     def tearDown(self):
         self.dim = None
