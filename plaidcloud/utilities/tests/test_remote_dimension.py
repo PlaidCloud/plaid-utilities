@@ -30,8 +30,6 @@ __email__ = 'dave.parsons@tartansolutions.com'
 BASELINE = './dim_baseline/'
 FOLDER = './dim_current/'
 
-if not os.path.exists('./plaid'):
-    exit(0)
 
 conn = create_connection(verify_ssl=False)
 
