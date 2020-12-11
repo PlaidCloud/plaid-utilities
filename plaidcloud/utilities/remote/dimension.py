@@ -603,7 +603,7 @@ class Dimension:
         Returns:
             dict: Dict with child node unique identifiers/consolidations/leaf/aliases etc.
         """
-        self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+        return self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
     # ==== SHIFT METHODS ===============================================================================
@@ -977,7 +977,7 @@ class Dimension:
         Returns:
             list: Union of all nodes across hierarchies
         """
-        return self.dim.get_union(project_id=self.project_id, hierarchies=hierarchies)
+        return self.dim.get_union(project_id=self.project_id, name=self.name, hierarchies=hierarchies)
 
     def get_up(self, parent, child, hierarchy=MAIN):
         """get_up(parent, child, hierarchy=MAIN)
