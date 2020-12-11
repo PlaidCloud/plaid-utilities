@@ -1104,6 +1104,22 @@ class Dimension:
         """
         return self.dim.node_in_hierarchy(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
+    def sort_children(self, node, hierarchy, ordering=None, alpha=True):
+        """sort_children(node, hierarchy, ordering=None, alpha=True)
+        Sort a parent's children
+
+        Args:
+            node (str): Unique hierarchy node identifier
+            hierarchy (str): Alternate hierarchy unique ID
+            ordering (str): DESC/desc to sort in descending order
+            alpha (bool): True = sort alphanumerically (default)
+                          False = sort numerically
+
+        Returns:
+            None
+        """
+        self.dim.sort_children(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy, ordering=ordering, alpha=alpha)
+
     def which_hierarchies(self, node):
         """which_hierarchies(node)
         Returns the hierarchies from the specified node
