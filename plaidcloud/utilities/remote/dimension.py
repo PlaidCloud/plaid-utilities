@@ -295,6 +295,7 @@ class Dimension:
         self.dim = self.conn.rpc.analyze.dimension
         self.project_id = conn.project_id
         self.name = name
+        self.duid = self.dim.lookup_by_name(project_id=self.project_id, name=self.name)
         if clear is True:
             self.clear()
 
@@ -603,7 +604,7 @@ class Dimension:
         Returns:
             dict: Dict with child node unique identifiers/consolidations/leaf/aliases etc.
         """
-        self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+        return self.dim.get_node_details(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
 
     # --------------------------------------------------------------------------------------------------
     # ==== SHIFT METHODS ===============================================================================
@@ -977,7 +978,7 @@ class Dimension:
         Returns:
             list: Union of all nodes across hierarchies
         """
-        return self.dim.get_union(project_id=self.project_id, hierarchies=hierarchies)
+        return self.dim.get_union(project_id=self.project_id, name=self.name, hierarchies=hierarchies)
 
     def get_up(self, parent, child, hierarchy=MAIN):
         """get_up(parent, child, hierarchy=MAIN)
@@ -1103,6 +1104,38 @@ class Dimension:
             bool: True if node is in specified hierarchy
         """
         return self.dim.node_in_hierarchy(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+
+    def sort_children(self, node, hierarchy, ordering=None, alpha=True):
+        """sort_children(node, hierarchy, ordering=None, alpha=True)
+        Sort a parent's children
+
+        Args:
+            node (str): Unique hierarchy node identifier
+            hierarchy (str): Alternate hierarchy unique ID
+            ordering (str): DESC/desc to sort in descending order
+            alpha (bool): True = sort alphanumerically (default)
+                          False = sort numerically
+
+        Returns:
+            None
+        """
+        self.dim.sort_children(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy, ordering=ordering, alpha=alpha)
+
+    def sort_descendents(self, node, hierarchy, ordering=None, alpha=True):
+        """sort_descendents(node, hierarchy, ordering=None, alpha=True)
+        Sort a parent's descendents
+
+        Args:
+            node (str): Unique hierarchy node identifier
+            hierarchy (str): Alternate hierarchy unique ID
+            ordering (str): DESC/desc to sort in descending order
+            alpha (bool): True = sort alphanumerically (default)
+                          False = sort numerically
+
+        Returns:
+            None
+        """
+        self.dim.sort_descendents(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy, ordering=ordering, alpha=alpha)
 
     def which_hierarchies(self, node):
         """which_hierarchies(node)

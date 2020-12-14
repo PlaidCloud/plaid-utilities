@@ -37,7 +37,7 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
     with open(local_path, 'w') as f:
         f.write(code)
 
-def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, branch='master', view_manager=False, view_explorer=False, memo=None):
+def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
     """
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
@@ -100,7 +100,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
                 else:
                     name = udf_path
             udf = conn.analyze.udf.create(
-                project_id=project_id, branch=branch, path=parent_path,
+                project_id=project_id, path=parent_path,
                 name=name, file_path=udf_path, view_manager=view_manager,
                 view_explorer=view_explorer, memo=memo,
             )

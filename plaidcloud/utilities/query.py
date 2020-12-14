@@ -358,7 +358,7 @@ class Connection(object):
         if columns:
             return [c['id'] for c in columns]
 
-    def _load_csv(self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\', date_format='YYYY-MM-DD', branch='master', source_columns=None, append=False, update_table_shape=True):
+    def _load_csv(self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\', date_format='YYYY-MM-DD', source_columns=None, append=False, update_table_shape=True):
         return self.rpc.analyze.table.load_csv(
             # auth_id,
             project_id=project_id,
@@ -371,7 +371,6 @@ class Connection(object):
             quote=quote,
             escape=escape,
             date_format=date_format,
-            branch=branch,
             source_columns=source_columns,
             append=append,
             update_table_shape=update_table_shape
@@ -568,13 +567,12 @@ class Table(sqlalchemy.Table):
     # or as a declarative object
     _conn = None
 
-    def __new__(cls, conn, table, branch='master', metadata=None, create_on_missing=True, columns=None, overwrite=False):
+    def __new__(cls, conn, table, metadata=None, create_on_missing=True, columns=None, overwrite=False):
         """
 
         Args:
             conn (Connection):
             table (str):
-            branch (str, optional):
             metadata (sqlalchemy.MetaData, optional):
             create_on_missing (bool, optional):
             columns (list, optional):
@@ -591,7 +589,7 @@ class Table(sqlalchemy.Table):
         else:
             _metadata = sqlalchemy.MetaData()
 
-        _table_id, _, _ = _get_table_id(_rpc, _project_id, branch, table, raise_if_not_found=False)
+        _table_id, _, _ = _get_table_id(_rpc, _project_id, table, raise_if_not_found=False)
 
         if create_on_missing and _table_id is None:
             # Since this is a new table.  Set overwrite to true to create physical table
@@ -618,16 +616,15 @@ class Table(sqlalchemy.Table):
                 path=path,
                 name=name,
                 memo=None,
-                branch=branch,
                 columns=columns
             )['id']
 
         if columns:
             # Only try to create a physical table if columns have been defined
-            _rpc.analyze.table.touch(project_id=_project_id, table_id=_table_id, branch=branch, meta=columns, overwrite=overwrite)
+            _rpc.analyze.table.touch(project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite)
 
         columns = _rpc.analyze.table.table_meta(
-            project_id=_project_id, table_id=_table_id, branch=branch,
+            project_id=_project_id, table_id=_table_id,
         )
         if not columns:
             columns = []  # If the table doesn't actually exist, we assume it's
@@ -660,12 +657,11 @@ class Table(sqlalchemy.Table):
         table_object._rpc = _rpc
         table_object._project_id = _project_id
         table_object._table_id = _table_id
-        table_object._branch = branch
         table_object._schema = _schema
 
         # table must be created in database, if it doesn't already exist
         _rpc.analyze.table.touch(
-            project_id=_project_id, table_id=_table_id, meta=columns, branch=branch, overwrite=overwrite
+            project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite
         )
 
         return table_object
@@ -682,10 +678,6 @@ class Table(sqlalchemy.Table):
         return self._table_id  # pylint: disable=no-member
 
     @property
-    def branch(self):
-        return self._branch  # pylint: disable=no-member
-
-    @property
     def fully_qualified_name(self):
         return '"{}"."{}"'.format(self.schema, self.id)
 
@@ -698,7 +690,7 @@ class Table(sqlalchemy.Table):
     def table_info(self, keys=None):
         return self._rpc.analyze.table(  # pylint: disable=no-member
             project_id=self.project_id, table_id=self.id,
-            branch=self.branch, keys=keys,
+            keys=keys,
         )
 
     def cols(self):
@@ -709,7 +701,6 @@ class Table(sqlalchemy.Table):
         return self._rpc.analyze.table.table_meta(  # pylint: disable=no-member
             project_id=self.project_id,
             table_id=self.id,
-            branch=self.branch,
         )
 
     def head(self, conn, rows=10):
@@ -723,17 +714,17 @@ class Table(sqlalchemy.Table):
         return self._conn.get_dataframe(self, clean=clean)
 
 
-def _get_table_id(rpc, project_id, branch, name, raise_if_not_found=True):
+def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
     if name.startswith('analyzetable_'):
         # This is already the ID.  Use it
         logger.warning('Table ID passed to _get_table_id. Not searching for paths or name.')
         return name, None, None
     # elif '/' in name:
-    #     # This is a path.  Peform a path lookup.
-    #     _table_id = rpc.analyze.table.lookup_by_full_path(project_id=_project_id, path=table, branch=branch)
+    #     # This is a path.  Perform a path lookup.
+    #     _table_id = rpc.analyze.table.lookup_by_full_path(project_id=_project_id, path=table)
     # else:
     #     # This must be a name only.  Perform a name lookup
-    #     _table_id = rpc.analyze.table.lookup_by_name(project_id=_project_id, name=table, branch=branch)
+    #     _table_id = rpc.analyze.table.lookup_by_name(project_id=_project_id, name=table)
     else:
         path, table_name = os.path.split(name)
         if not path.startswith('/'):
@@ -743,7 +734,6 @@ def _get_table_id(rpc, project_id, branch, name, raise_if_not_found=True):
             project_id=project_id,
             text=table_name,
             criteria='exact',
-            branch=branch,
             keys=['id', 'paths']
         )
         if len(tables_by_name) == 1:

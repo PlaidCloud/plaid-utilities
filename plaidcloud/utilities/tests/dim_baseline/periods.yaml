@@ -1,0 +1,110 @@
+api_kind: dimension
+api_version: v1
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies: !!set
+  main: 
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:!!root!!:children:
+- Year
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:!!root!!:consolidation:
+  Year: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q1:children:
+- January
+- February
+- March
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q1:consolidation:
+  February: +
+  January: +
+  March: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q2:children:
+- April
+- May
+- June
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q2:consolidation:
+  April: +
+  June: +
+  May: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q3:children:
+- July
+- August
+- September
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q3:consolidation:
+  August: +
+  July: +
+  September: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q4:children:
+- October
+- November
+- December
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Q4:consolidation:
+  December: +
+  November: +
+  October: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Year:children:
+- Q1
+- Q2
+- Q3
+- Q4
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:Year:consolidation:
+  Q1: +
+  Q2: +
+  Q3: +
+  Q4: +
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:members: !!set
+  '!!root!!': 
+  April: 
+  August: 
+  December: 
+  February: 
+  January: 
+  July: 
+  June: 
+  March: 
+  May: 
+  November: 
+  October: 
+  Q1: 
+  Q2: 
+  Q3: 
+  Q4: 
+  September: 
+  Year: 
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:hierarchies:main:parents:
+  April: Q2
+  August: Q3
+  December: Q4
+  February: Q1
+  January: Q1
+  July: Q3
+  June: Q2
+  March: Q1
+  May: Q2
+  November: Q4
+  October: Q4
+  Q1: Year
+  Q2: Year
+  Q3: Year
+  Q4: Year
+  September: Q3
+  Year: '!!root!!'
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:name: periods_rpc_test
+cbc7e451-fae7-496f-be45-4e8529925370:50adf7b8-f7a2-4307-879d-3ac6e4917e51:nodes: !!set
+  '!!root!!': 
+  April: 
+  August: 
+  December: 
+  February: 
+  January: 
+  July: 
+  June: 
+  March: 
+  May: 
+  November: 
+  October: 
+  Q1: 
+  Q2: 
+  Q3: 
+  Q4: 
+  September: 
+  Year: 
+duid: 50adf7b8-f7a2-4307-879d-3ac6e4917e51
+name: periods_rpc_test
+puid: cbc7e451-fae7-496f-be45-4e8529925370

@@ -1,0 +1,13 @@
+,hierarchy,parent,child,consolidation,status,code,message
+0,main,!!root!!,,+,False,-2,Child is null
+1,main,!!root!!,,+,False,-2,Child is null
+2,main,Q5,,+,False,-2,Child is null
+3,main,!!root!!,,+,False,-2,Child is null
+4,main,Q5,Q5,+,False,-8,Child is the same as Parent
+5,main,Q5,!!root!!,+,False,-4,Child cannot be Root
+6,main,Q5,Donk-tober,+,True,4,Parent added
+7,main,Q5,Donk-tober,+,True,2,Child added
+8,main,Donk-tober,Janusday,+,True,2,Child added
+9,main,Year,Q5,+,True,8,Child moved to new parent
+10,halves,Q4,Badtober,+,False,-16,Alt hierarchy cannot modify Main nodes
+11,,Q6,Craptober,+,False,-32,Hierarchy is null

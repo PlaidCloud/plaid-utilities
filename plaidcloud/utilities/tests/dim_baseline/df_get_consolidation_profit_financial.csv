@@ -1,0 +1,16 @@
+id,consol,display,generation,leaf,main,parent,value.Profit,value.Profit.consolidated
+!!root!!,,!!root!!,0,False,False,,0.0,-8840.0
+YTD,+,YTD,1,False,False,!!root!!,0.0,1130.0
+January,+,January,2,True,True,YTD,10.0,10.0
+February,+,February,2,True,True,YTD,100.0,100.0
+March,+,March,2,True,True,YTD,1000.0,1000.0
+April,+,April,2,True,True,YTD,20.0,20.0
+YTG,+,YTG,1,False,False,!!root!!,0.0,-9970.0
+May,-,May,2,True,True,YTG,200.0,200.0
+June,-,June,2,True,True,YTG,2000.0,2000.0
+July,-,July,2,True,True,YTG,30.0,30.0
+August,-,August,2,True,True,YTG,300.0,300.0
+September,-,September,2,True,True,YTG,3000.0,3000.0
+October,-,October,2,True,True,YTG,40.0,40.0
+November,-,November,2,True,True,YTG,400.0,400.0
+December,-,December,2,True,True,YTG,4000.0,4000.0

@@ -1,0 +1,15 @@
+hierarchy,parent,child,consolidation
+financial,!!root!!,YTD,+
+financial,YTD,January,+
+financial,YTD,February,+
+financial,YTD,March,+
+financial,YTD,April,+
+financial,!!root!!,YTG,+
+financial,YTG,May,-
+financial,YTG,June,-
+financial,YTG,July,-
+financial,YTG,August,-
+financial,YTG,September,-
+financial,YTG,October,-
+financial,YTG,November,-
+financial,YTG,December,-
