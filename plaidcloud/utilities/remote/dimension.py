@@ -295,6 +295,7 @@ class Dimension:
         self.dim = self.conn.rpc.analyze.dimension
         self.project_id = conn.project_id
         self.name = name
+        self.duid = self.dim.lookup_by_name(project_id=self.project_id, name=self.name)
         if clear is True:
             self.clear()
 
