@@ -93,6 +93,7 @@ class TestDimension(TestCase):
     def test_002_save_hierarchy_main(self):
         # main hierarchy
         df = self.dim.save_hierarchy_to_dataframe(MAIN)
+        df.drop(labels='index', axis=1, inplace=True)
         df.to_csv(f'{FOLDER}df_main_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_main_hierarchy.csv', f'{BASELINE}df_main_hierarchy.csv')
         return
@@ -120,6 +121,7 @@ class TestDimension(TestCase):
     def test_004_save_hierarchy_halves(self):
         # halves hierarchy
         df = self.dim.save_hierarchy_to_dataframe('halves')
+        df.drop(labels='index', axis=1, inplace=True)
         df.to_csv(f'{FOLDER}df_halves_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_halves_hierarchy.csv', f'{BASELINE}df_halves_hierarchy.csv')
         return
@@ -155,6 +157,7 @@ class TestDimension(TestCase):
     def test_006_save_hierarchy_financial(self):
         # financial hierarchy
         df = self.dim.save_hierarchy_to_dataframe('financial')
+        df.drop(labels='index', axis=1, inplace=True)
         df.to_csv(f'{FOLDER}df_financial_hierarchy.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_financial_hierarchy.csv', f'{BASELINE}df_financial_hierarchy.csv')
         return
@@ -264,6 +267,7 @@ class TestDimension(TestCase):
         # Aliases
         self.dim.load_aliases_from_dataframe(df_aliases, 'NodeName', 'AliasName', 'AliasValue')
         df = self.dim.save_aliases_to_dataframe(None)
+        df.drop(labels='index', axis=1, inplace=True)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_aliases.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_aliases.csv', f'{BASELINE}df_aliases.csv')
@@ -296,6 +300,7 @@ class TestDimension(TestCase):
         # Properties
         self.dim.load_properties_from_dataframe(df_properties, 'NodeName', 'PropertyName', 'PropertyValue')
         df = self.dim.save_properties_to_dataframe(None)
+        df.drop(labels='index', axis=1, inplace=True)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_properties.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_properties.csv', f'{BASELINE}df_properties.csv')
@@ -335,6 +340,7 @@ class TestDimension(TestCase):
         # Values
         self.dim.load_values_from_dataframe(df_values, 'NodeName', 'ValueName', 'Value')
         df = self.dim.save_values_to_dataframe(None)
+        df.drop(labels='index', axis=1, inplace=True)
         df.sort_values(by=['name', 'node', 'value'], axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_values.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_values.csv', f'{BASELINE}df_values.csv')
@@ -357,6 +363,7 @@ class TestDimension(TestCase):
 
     def test_013_get_attributes_dataframe(self):
         df = self.dim.get_attributes_dataframe()
+        df.drop(labels='index', axis=1, inplace=True)
         df = df.reindex(columns=sorted(df.columns))
         df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_attributes.csv', index=False)
@@ -371,6 +378,7 @@ class TestDimension(TestCase):
 
     def test_015_get_properties_dataframe(self):
         df = self.dim.get_properties_dataframe()
+        df.drop(labels='index', axis=1, inplace=True)
         df = df.reindex(columns=sorted(df.columns))
         df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_properties.csv', index=False)
