@@ -1,15 +1,15 @@
-,hierarchy,parent,child,consolidation,status,code,message
-0,financial,!!root!!,YTD,+,True,2,Child added
-1,financial,!!root!!,YTG,+,True,2,Child added
-2,financial,YTD,January,+,True,2,Child added
-3,financial,YTD,February,+,True,2,Child added
-4,financial,YTD,March,+,True,2,Child added
-5,financial,YTD,April,+,True,2,Child added
-6,financial,YTG,May,-,True,2,Child added
-7,financial,YTG,June,-,True,2,Child added
-8,financial,YTG,July,-,True,2,Child added
-9,financial,YTG,August,-,True,2,Child added
-10,financial,YTG,September,-,True,2,Child added
-11,financial,YTG,October,-,True,2,Child added
-12,financial,YTG,November,-,True,2,Child added
-13,financial,YTG,December,-,True,2,Child added
+hierarchy,parent,child,consolidation,status,code,message
+financial,!!root!!,YTD,+,True,2,Child added
+financial,!!root!!,YTG,+,True,2,Child added
+financial,YTD,January,+,True,2,Child added
+financial,YTD,February,+,True,2,Child added
+financial,YTD,March,+,True,2,Child added
+financial,YTD,April,+,True,2,Child added
+financial,YTG,May,-,True,2,Child added
+financial,YTG,June,-,True,2,Child added
+financial,YTG,July,-,True,2,Child added
+financial,YTG,August,-,True,2,Child added
+financial,YTG,September,-,True,2,Child added
+financial,YTG,October,-,True,2,Child added
+financial,YTG,November,-,True,2,Child added
+financial,YTG,December,-,True,2,Child added

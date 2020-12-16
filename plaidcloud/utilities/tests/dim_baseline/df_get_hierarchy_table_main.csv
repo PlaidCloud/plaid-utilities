@@ -1,22 +1,22 @@
-id,generation,display,consol,parent,leaf,main,attribute.financial,attribute.financial.inherited,attribute.financial.ancestor,attribute.halves,attribute.halves.inherited,attribute.halves.ancestor,alias.Russian,alias.French,alias.Korean,alias.Welsh,alias.Emoji,property.Season,property.Season.inherited,property.Season.ancestor,property.Colour,property.Colour.inherited,property.Colour.ancestor,value.Costs,value.Profit
-!!root!!,0,!!root!!,,,False,True,,,,,,,,,,,,,False,,Magenta,False,,,
-Year,1,Year,+,!!root!!,False,True,,,,,,,,,,,,,False,,Purple,False,,,
-Q1,2,Q1,+,Year,False,True,,,,H1,False,,,Trimestre 1,,,,Winter,False,,Red,False,,,
-January,3,January,+,Q1,True,True,YTD,False,,H1,True,Q1,Январь,Janvier,일월,Ionawr,☃️,Winter,True,Q1,Red,True,Q1,-10,10
-February,3,February,+,Q1,True,True,YTD,False,,H1,True,Q1,Февраль,Fevier,이월,Chwefror,💘,Winter,True,Q1,Red,True,Q1,-100,100
-March,3,March,+,Q1,True,True,YTD,False,,H1,True,Q1,Март,Mars,삼월,Mawrth,☘️,Winter,True,Q1,Red,True,Q1,-1000,1000
-Q2,2,Q2,+,Year,False,True,,,,H1,False,,,Trimestre 2,,,,Spring,False,,Orange,False,,,
-April,3,April,+,Q2,True,True,YTD,False,,H1,True,Q2,Апрель,Avril,사월,Ebrill,☔,Spring,True,Q2,Green,False,,-20,20
-May,3,May,+,Q2,True,True,YTG,False,,H1,True,Q2,Май,Mai,오월,Mai,🌺,Spring,True,Q2,Green,False,,-200,200
-June,3,June,+,Q2,True,True,YTG,False,,H1,True,Q2,Июнь,Juin,유월,Mehefin,🌞,Spring,True,Q2,Orange,True,Q2,-2000,2000
-Q3,2,Q3,+,Year,False,True,,,,H2,False,,,Trimestre 3,,,,Summer,False,,Purple,True,Year,,
-July,3,July,+,Q3,True,True,YTG,False,,H2,True,Q3,Июль,Julliet,칠월,Gorffennaf,🍦,Summer,True,Q3,Blue,False,,-30,30
-August,3,August,+,Q3,True,True,YTG,False,,H2,True,Q3,Август,Aout,팔월,Awst,🏖️,Summer,True,Q3,Blue,False,,-300,300
-September,3,September,+,Q3,True,True,YTG,False,,H2,True,Q3,Сентябрь,Septembre,구월,Medi,🍎,Summer,True,Q3,Blue,False,,-3000,3000
-Q4,2,Q4,+,Year,False,True,,,,H2,False,,,Trimestre 4,,,,Autumn,False,,White,False,,,
-October,3,October,+,Q4,True,True,YTG,False,,H2,True,Q4,Октябрь,Octobre,시월,Hydref,🎃,Autumn,True,Q4,Red,False,,-40,40
-November,3,November,+,Q4,True,True,YTG,False,,H2,True,Q4,Ноябрь,Novembre,십일월,Tachwedd,🍂,Autumn,True,Q4,Green,False,,-400,400
-December,3,December,+,Q4,True,True,YTG,False,,H2,True,Q4,Декабрь,Decembre,십이월,Rhagfyr,🎅,Autumn,True,Q4,Red,False,,-4000,4000
-Q5,2,Q5,+,Year,False,True,,,,,,,,,,,,,False,,Purple,True,Year,,
-Donk-tober,3,Donk-tober,+,Q5,False,True,,,,,,,,,,,,,False,,Purple,True,Year,,
-Janusday,4,Janusday,+,Donk-tober,True,True,,,,,,,,,,,,,False,,Purple,True,Year,,
+alias.Emoji,alias.French,alias.Korean,alias.Russian,alias.Welsh,attribute.financial,attribute.financial.ancestor,attribute.financial.inherited,attribute.halves,attribute.halves.ancestor,attribute.halves.inherited,consol,display,generation,id,leaf,main,parent,property.Colour,property.Colour.ancestor,property.Colour.inherited,property.Season,property.Season.ancestor,property.Season.inherited,value.Costs,value.Profit
+,,,,,,,,,,,+,Donk-tober,3,Donk-tober,False,True,Q5,Purple,Year,True,,,False,,
+,,,,,,,,,,,+,Janusday,4,Janusday,True,True,Donk-tober,Purple,Year,True,,,False,,
+,,,,,,,,,,,+,Q5,2,Q5,False,True,Year,Purple,Year,True,,,False,,
+,,,,,,,,,,,+,Year,1,Year,False,True,!!root!!,Purple,,False,,,False,,
+,,,,,,,,,,,,!!root!!,0,!!root!!,False,True,,Magenta,,False,,,False,,
+,Trimestre 1,,,,,,,H1,Q1,True,+,Q1,2,Q1,False,True,Year,Red,,False,Winter,,False,,
+,Trimestre 2,,,,,,,H1,Q2,True,+,Q2,2,Q2,False,True,Year,Orange,,False,Spring,,False,,
+,Trimestre 3,,,,,,,H2,Q3,True,+,Q3,2,Q3,False,True,Year,Purple,Year,True,Summer,,False,,
+,Trimestre 4,,,,,,,H2,Q4,True,+,Q4,2,Q4,False,True,Year,White,,False,Autumn,,False,,
+☃️,Janvier,일월,Январь,Ionawr,YTD,,False,,,,+,January,3,January,True,True,Q1,Red,Q1,True,Winter,Q1,True,-10,10
+☔,Avril,사월,Апрель,Ebrill,YTD,,False,,,,+,April,3,April,True,True,Q2,Green,,False,Spring,Q2,True,-20,20
+☘️,Mars,삼월,Март,Mawrth,YTD,,False,,,,+,March,3,March,True,True,Q1,Red,Q1,True,Winter,Q1,True,-1000,1000
+🌞,Juin,유월,Июнь,Mehefin,YTG,,False,,,,+,June,3,June,True,True,Q2,Orange,Q2,True,Spring,Q2,True,-2000,2000
+🌺,Mai,오월,Май,Mai,YTG,,False,,,,+,May,3,May,True,True,Q2,Green,,False,Spring,Q2,True,-200,200
+🍂,Novembre,십일월,Ноябрь,Tachwedd,YTG,,False,,,,+,November,3,November,True,True,Q4,Green,,False,Autumn,Q4,True,-400,400
+🍎,Septembre,구월,Сентябрь,Medi,YTG,,False,,,,+,September,3,September,True,True,Q3,Blue,,False,Summer,Q3,True,-3000,3000
+🍦,Julliet,칠월,Июль,Gorffennaf,YTG,,False,,,,+,July,3,July,True,True,Q3,Blue,,False,Summer,Q3,True,-30,30
+🎃,Octobre,시월,Октябрь,Hydref,YTG,,False,,,,+,October,3,October,True,True,Q4,Red,,False,Autumn,Q4,True,-40,40
+🎅,Decembre,십이월,Декабрь,Rhagfyr,YTG,,False,,,,+,December,3,December,True,True,Q4,Red,,False,Autumn,Q4,True,-4000,4000
+🏖️,Aout,팔월,Август,Awst,YTG,,False,,,,+,August,3,August,True,True,Q3,Blue,,False,Summer,Q3,True,-300,300
+💘,Fevier,이월,Февраль,Chwefror,YTD,,False,,,,+,February,3,February,True,True,Q1,Red,Q1,True,Winter,Q1,True,-100,100
