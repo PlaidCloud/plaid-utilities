@@ -1843,6 +1843,7 @@ class Dimension:
         """
         json_df = self.dim.save_hierarchy_to_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def save_aliases_to_dataframe(self, alias=None):
@@ -1856,6 +1857,7 @@ class Dimension:
         """
         json_df = self.dim.save_aliases_to_dataframe(project_id=self.project_id, name=self.name, alias=alias)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def save_properties_to_dataframe(self, property=None):
@@ -1868,6 +1870,7 @@ class Dimension:
         """
         json_df = self.dim.save_properties_to_dataframe(project_id=self.project_id, name=self.name, property=property)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def save_values_to_dataframe(self, value=None):
@@ -1881,6 +1884,7 @@ class Dimension:
         """
         json_df = self.dim.save_values_to_dataframe(project_id=self.project_id, name=self.name, value=value)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     # --------------------------------------------------------------------------------------------------
@@ -1896,6 +1900,7 @@ class Dimension:
         """
         json_df = self.dim.get_aliases_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def get_attributes_dataframe(self):
@@ -1908,6 +1913,7 @@ class Dimension:
         """
         json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def get_consolidation_dataframe(self, value, hierarchy=MAIN):
@@ -1938,6 +1944,7 @@ class Dimension:
         """
         json_df = self.dim.get_hierarchy_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def get_properties_dataframe(self):
@@ -1950,6 +1957,7 @@ class Dimension:
         """
         json_df = self.dim.get_properties_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     def get_values_dataframe(self):
@@ -1962,6 +1970,7 @@ class Dimension:
         """
         json_df = self.dim.get_values_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
+        df.reset_index(inplace=True)
         return df
 
     # --------------------------------------------------------------------------------------------------

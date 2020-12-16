@@ -80,14 +80,14 @@ class TestDimension(TestCase):
 
         # main hierarchy
         df_results = self.dim.load_hierarchy_from_dataframe(df_main, 'ParentName', 'ChildName')
-        df_results.to_csv(f'{FOLDER}df_main_load.csv')
-        self.assertFileEqual(f'{FOLDER}df_main_load.csv', f'{BASELINE}df_main_load.csv')
+        df_results.to_csv(f'{FOLDER}df_main_load.csv', index=False)
 
         # Create a backup file to allow reloading in tests
         data = self.dims.backup(self.periods)
         with open(f'{FOLDER}periods.yaml', 'w') as file:
             file.write(data)
 
+        self.assertFileEqual(f'{FOLDER}df_main_load.csv', f'{BASELINE}df_main_load.csv')
         return
 
     def test_002_save_hierarchy_main(self):
@@ -113,7 +113,7 @@ class TestDimension(TestCase):
         # halves hierarchy
         df_results = self.dim.load_hierarchy_from_dataframe(df_halves, 'ParentName', 'ChildName',
                                                             'ConsolidationType', hierarchy='Hierarchy')
-        df_results.to_csv(f'{FOLDER}df_halves_load.csv')
+        df_results.to_csv(f'{FOLDER}df_halves_load.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_halves_load.csv', f'{BASELINE}df_halves_load.csv')
         return
 
@@ -148,7 +148,7 @@ class TestDimension(TestCase):
         # financial hierarchy
         df_results = self.dim.load_hierarchy_from_dataframe(df_financial, 'ParentName', 'ChildName',
                                                             'ConsolidationType', hierarchy='Hierarchy')
-        df_results.to_csv(f'{FOLDER}df_financial_load.csv')
+        df_results.to_csv(f'{FOLDER}df_financial_load.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_financial_load.csv', f'{BASELINE}df_financial_load.csv')
         return
 
@@ -183,7 +183,7 @@ class TestDimension(TestCase):
 
         df_results = self.dim.load_hierarchy_from_dataframe(df_test, 'ParentName', 'ChildName',
                                                             'ConsolidationType', hierarchy='Hierarchy')
-        df_results.to_csv(f'{FOLDER}df_complex_load.csv')
+        df_results.to_csv(f'{FOLDER}df_complex_load.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_complex_load.csv', f'{BASELINE}df_complex_load.csv')
 
         return
@@ -342,27 +342,23 @@ class TestDimension(TestCase):
 
     def test_011_get_hierarchy_dataframe(self):
         df = self.dim.get_hierarchy_dataframe(hierarchy=MAIN)
+        df = df.reindex(columns=sorted(df.columns))
         df.to_csv(f'{FOLDER}df_get_hierarchy_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_main.csv', f'{BASELINE}df_get_hierarchy_main.csv')
-
-        df = self.dim.get_hierarchy_dataframe(hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_halves.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_hierarchy_halves.csv', f'{BASELINE}df_get_hierarchy_halves.csv')
-
-        df = self.dim.get_hierarchy_dataframe(hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_financial.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_hierarchy_financial.csv', f'{BASELINE}df_get_hierarchy_financial.csv')
         return
 
     def test_012_get_aliases_dataframe(self):
         df = self.dim.get_aliases_dataframe()
         df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_aliases.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_aliases.csv', f'{BASELINE}df_get_aliases.csv')
         return
 
     def test_013_get_attributes_dataframe(self):
         df = self.dim.get_attributes_dataframe()
+        df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_attributes.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_attributes.csv', f'{BASELINE}df_get_attributes.csv')
         return
@@ -371,53 +367,30 @@ class TestDimension(TestCase):
         df = self.dim.get_consolidation_dataframe('Costs', hierarchy=MAIN)
         df.to_csv(f'{FOLDER}df_get_consolidation_costs_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_main.csv', f'{BASELINE}df_get_consolidation_costs_main.csv')
-
-        df = self.dim.get_consolidation_dataframe('Costs', hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_consolidation_costs_halves.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_halves.csv', f'{BASELINE}df_get_consolidation_costs_halves.csv')
-
-        df = self.dim.get_consolidation_dataframe('Costs', hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_consolidation_costs_financial.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_consolidation_costs_financial.csv', f'{BASELINE}df_get_consolidation_costs_financial.csv')
-
-        df = self.dim.get_consolidation_dataframe('Profit', hierarchy=MAIN)
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_main.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_main.csv', f'{BASELINE}df_get_consolidation_profit_main.csv')
-
-        df = self.dim.get_consolidation_dataframe('Profit', hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_halves.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_halves.csv', f'{BASELINE}df_get_consolidation_profit_halves.csv')
-
-        df = self.dim.get_consolidation_dataframe('Profit', hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_consolidation_profit_financial.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_consolidation_profit_financial.csv', f'{BASELINE}df_get_consolidation_profit_financial.csv')
-
         return
 
     def test_015_get_properties_dataframe(self):
         df = self.dim.get_properties_dataframe()
+        df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_properties.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_properties.csv', f'{BASELINE}df_get_properties.csv')
         return
 
     def test_016_get_values_dataframe(self):
         df = self.dim.get_values_dataframe()
+        df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_values.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_values.csv', f'{BASELINE}df_get_values.csv')
         return
 
     def test_017_get_hierarchy_table(self):
         df = self.dim.hierarchy_table(hierarchy=MAIN)
+        df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
         df.to_csv(f'{FOLDER}df_get_hierarchy_table_main.csv', index=False)
         self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_main.csv', f'{BASELINE}df_get_hierarchy_table_main.csv')
-
-        df = self.dim.hierarchy_table(hierarchy='halves')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_table_halves.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_halves.csv', f'{BASELINE}df_get_hierarchy_table_halves.csv')
-
-        df = self.dim.hierarchy_table(hierarchy='financial')
-        df.to_csv(f'{FOLDER}df_get_hierarchy_table_financial.csv', index=False)
-        self.assertFileEqual(f'{FOLDER}df_get_hierarchy_table_financial.csv', f'{BASELINE}df_get_hierarchy_table_financial.csv')
         return
 
     def test_018_get_all_leaves(self):
@@ -469,44 +442,6 @@ class TestDimension(TestCase):
         nodes = sorted(self.dim.get_all_parents(hierarchy=MAIN))
         return self.assertListEqual(expected, nodes)
 
-    def test_021_get_node_details(self):
-        expected = {'id': 'February',
-                    'consol': None,
-                    'leaf': True,
-                    'main': True,
-                    'hierarchies': ['financial', 'halves', 'main'],
-                    'attributes': [{'node': 'February',
-                                    'attribute': 'YTD',
-                                    'hierarchy': 'financial',
-                                    'inherited': False,
-                                    'ancestor': None},
-                                   {'node': 'February',
-                                    'attribute': 'H1',
-                                    'hierarchy': 'halves',
-                                    'inherited': True,
-                                    'ancestor': 'Q1'}],
-                    'aliases': {'Korean': '이월',
-                                'Russian': 'Февраль',
-                                'Emoji': '💘',
-                                'French': 'Fevier',
-                                'Welsh': 'Chwefror'},
-                    'properties': {'Colour': {'node': 'February',
-                                              'property': 'Colour',
-                                              'value': None,
-                                              'hierarchy': 'main',
-                                              'inherited': False,
-                                              'ancestor': None},
-                                   'Season': {'node': 'February',
-                                              'property': 'Season',
-                                              'value': None,
-                                              'hierarchy': 'main',
-                                              'inherited': False,
-                                              'ancestor': None}},
-                    'values': {'Profit': 100.0, 'Costs': -100.0}}
-
-        node = self.dim.get_node_details('February', hierarchy=MAIN)
-        return self.assertDictEqual(expected, node)
-
     def test_021_get_ancestors(self):
         expected = [[0, 'February'], [1, 'Q1'], [2, 'Year'], [3, '!!root!!']]
         nodes = self.dim.get_ancestors('February', hierarchy=MAIN)
@@ -547,126 +482,22 @@ class TestDimension(TestCase):
         nodes = self.dim.get_children('Q1', hierarchy=MAIN)
         return self.assertListEqual(expected, nodes)
 
-    def test_029_get_children_with_details(self):
-        expected = [{'id': 'January',
-                     'consol': None,
-                     'leaf': True,
-                     'main': True,
-                     'hierarchies': ['financial', 'halves', 'main'],
-                     'attributes': [{'node': 'January',
-                                     'attribute': 'YTD',
-                                     'hierarchy': 'financial',
-                                     'inherited': False,
-                                     'ancestor': None},
-                                    {'node': 'January',
-                                     'attribute': 'H1',
-                                     'hierarchy': 'halves',
-                                     'inherited': True,
-                                     'ancestor': 'Q1'}],
-                     'aliases': {'Korean': '일월',
-                                 'Russian': 'Январь',
-                                 'Emoji': '☃️',
-                                 'French': 'Janvier',
-                                 'Welsh': 'Ionawr'},
-                     'properties': {'Colour': {'node': 'January',
-                                               'property': 'Colour',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None},
-                                    'Season': {'node': 'January',
-                                               'property': 'Season',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None}},
-                     'values': {'Profit': 10.0, 'Costs': -10.0}},
-                    {'id': 'February',
-                     'consol': None,
-                     'leaf': True,
-                     'main': True,
-                     'hierarchies': ['financial', 'halves', 'main'],
-                     'attributes': [{'node': 'February',
-                                     'attribute': 'YTD',
-                                     'hierarchy': 'financial',
-                                     'inherited': False,
-                                     'ancestor': None},
-                                    {'node': 'February',
-                                     'attribute': 'H1',
-                                     'hierarchy': 'halves',
-                                     'inherited': True,
-                                     'ancestor': 'Q1'}],
-                     'aliases': {'Korean': '이월',
-                                 'Russian': 'Февраль',
-                                 'Emoji': '💘',
-                                 'French': 'Fevier',
-                                 'Welsh': 'Chwefror'},
-                     'properties': {'Colour': {'node': 'February',
-                                               'property': 'Colour',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None},
-                                    'Season': {'node': 'February',
-                                               'property': 'Season',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None}},
-                     'values': {'Profit': 100.0, 'Costs': -100.0}},
-                    {'id': 'March',
-                     'consol': None,
-                     'leaf': True,
-                     'main': True,
-                     'hierarchies': ['financial', 'halves', 'main'],
-                     'attributes': [{'node': 'March',
-                                     'attribute': 'YTD',
-                                     'hierarchy': 'financial',
-                                     'inherited': False,
-                                     'ancestor': None},
-                                    {'node': 'March',
-                                     'attribute': 'H1',
-                                     'hierarchy': 'halves',
-                                     'inherited': True,
-                                     'ancestor': 'Q1'}],
-                     'aliases': {'Korean': '삼월',
-                                 'Russian': 'Март',
-                                 'Emoji': '☘️',
-                                 'French': 'Mars',
-                                 'Welsh': 'Mawrth'},
-                     'properties': {'Colour': {'node': 'March',
-                                               'property': 'Colour',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None},
-                                    'Season': {'node': 'March',
-                                               'property': 'Season',
-                                               'value': None,
-                                               'hierarchy': 'main',
-                                               'inherited': False,
-                                               'ancestor': None}},
-                     'values': {'Profit': 1000.0, 'Costs': -1000.0}}]
-
-        nodes = self.dim.get_children_with_details('Q1', hierarchy=MAIN)
-        return self.assertListEqual(expected, nodes)
-
-    def test_030_get_children_count(self):
+    def test_029_get_children_count(self):
         expected = 3
         count = self.dim.get_children_count('Q1', hierarchy=MAIN)
         return self.assertEqual(expected, count)
 
-    def test_031_get_generation(self):
+    def test_030_get_generation(self):
         expected = 2
         count = self.dim.get_generation('Q1', hierarchy=MAIN)
         return self.assertEqual(expected, count)
 
-    def test_032_get_grandparent(self):
+    def test_031_get_grandparent(self):
         expected = 'Year'
         node = self.dim.get_grandparent('February', hierarchy=MAIN)
         return self.assertEqual(expected, node)
 
-    def test_033_get_leaves(self):
+    def test_032_get_leaves(self):
         expected = [[2, 'January'],
                     [2, 'February'],
                     [2, 'March'],
@@ -684,7 +515,7 @@ class TestDimension(TestCase):
         nodes = self.dim.get_leaves('Year', hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
 
-    def test_034_get_leaves_at_generation(self):
+    def test_033_get_leaves_at_generation(self):
         expected = [[2, 'January'],
                     [2, 'February'],
                     [2, 'March'],
@@ -701,7 +532,7 @@ class TestDimension(TestCase):
         nodes = self.dim.get_leaves_at_generation('Year', 2,  hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
 
-    def test_035_get_leaves_at_level(self):
+    def test_034_get_leaves_at_level(self):
         expected = [[3, 'January'],
                     [3, 'February'],
                     [3, 'March'],
@@ -718,33 +549,33 @@ class TestDimension(TestCase):
         nodes = self.dim.get_leaves_at_level('February', 0, hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
 
-    def test_036_get_parent(self):
+    def test_035_get_parent(self):
         expected = 'Q1'
         nodes = self.dim.get_parent('February', hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
 
-    def test_037_get_parents(self):
+    def test_036_get_parents(self):
         expected = [['financial', 'halves', 'main'], ['YTD', 'Q1', 'Q1']]
         nodes = self.dim.get_parents('February')
         return self.assertEqual(expected, nodes)
 
-    def test_038_get_siblings(self):
+    def test_037_get_siblings(self):
         expected = ['January', 'February', 'March']
         nodes = self.dim.get_siblings('February', hierarchy=MAIN)
         return self.assertEqual(expected, nodes)
 
-    def test_039_get_difference(self):
+    def test_038_get_difference(self):
         expected = sorted(['Janusday', 'Year', 'Q5', 'Donk-tober'])
         nodes = sorted(self.dim.get_difference(['halves']))
         return self.assertEqual(expected, nodes)
 
-    def test_040_get_intersection(self):
+    def test_039_get_intersection(self):
         expected = sorted(['!!root!!', 'April', 'August', 'December', 'February', 'January', 'July', 'June', 'March',
                            'May', 'November', 'October', 'Q1', 'Q2', 'Q3', 'Q4', 'September'])
         nodes = sorted(self.dim.get_intersection(['halves']))
         return self.assertEqual(expected, nodes)
 
-    def test_041_get_union(self):
+    def test_040_get_union(self):
         expected = sorted(['!!root!!', 'April', 'August', 'December', 'Donk-tober', 'February', 'H1', 'H2', 'January',
                            'Janusday', 'July', 'June', 'March', 'May', 'November', 'October', 'Q1', 'Q2', 'Q3', 'Q4',
                            'Q5', 'September', 'Year'])
