@@ -613,6 +613,15 @@ class TestDimension(TestCase):
         node = self.dim.node_exists('Q5')
         return self.assertFalse(node)
 
+    def test_045_default_alias_dataframe(self):
+        self.dim.set_default_aliases(primary='Welsh', secondary='French')
+        df = self.dim.get_aliases_dataframe()
+        df = df.reindex(columns=sorted(df.columns))
+        df.sort_values(by=list(df.columns), axis=0, inplace=True)
+        df.to_csv(f'{FOLDER}df_get_default_aliases.csv', index=False)
+        self.assertFileEqual(f'{FOLDER}df_get_default_aliases.csv', f'{BASELINE}df_get_default_aliases.csv')
+        pass
+
     def tearDown(self):
         self.dim = None
         self.dims = None
