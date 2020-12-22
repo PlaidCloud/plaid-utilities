@@ -1080,6 +1080,26 @@ class Dimension:
         """
         return self.dim.is_top(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
 
+    def is_leaf(self, node, hierarchy=MAIN):
+        """is_leaf(node, hierarchy=MAIN)
+        Check if node is a leaf
+
+        Args:
+            node (str): node ID
+            hierarchy (str): Hierarchy unique ID
+        """
+        return self.dim.is_leaf(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+
+    def is_parent(self, node, hierarchy=MAIN):
+        """is_parent(node, hierarchy=MAIN)
+        Check if node is a parent
+
+        Args:
+            node (str): node ID
+            hierarchy (str): Hierarchy unique ID
+        """
+        return self.dim.is_parent(project_id=self.project_id, name=self.name, node=node, hierarchy=hierarchy)
+
     def node_exists(self, node):
         """node_exists(node)
         Returns if the specified node exists else False
