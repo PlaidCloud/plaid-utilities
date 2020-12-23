@@ -942,6 +942,52 @@ class Dimension:
         """
         return self.dim.get_parents(project_id=self.project_id, name=self.name, node=node)
 
+    def get_leaf_position(self, origin_node, target_node, hierarchy=MAIN):
+        """get_leaf_position(origin_node, target_node, hierarchy=MAIN)
+        Gets the leaf position of the target_node relative to the origin_node, as if
+        in an ordered list of all leaves. Will be negative if the target_node is
+        before the origin_node, positive if the target_node is after the origin_node.
+
+        Args:
+            origin_node (str): Unique hierachy node identifier for the node to measure from
+            target_node (str): Unique hierarchy node identifier for the node to measure to
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            int: the leaf position of the target node relative to the origin node
+        """
+        return self.dim.get_leaf_position(
+            project_id=self.project_id,
+            name=self.name,
+            origin_node=origin_node,
+            target_node=target_node,
+            hierarchy=hierarchy,
+        )
+
+    def get_node_by_leaf_position(self, origin_node, leaf_position, hierarchy=MAIN):
+        """get_node_by_leaf_position(origin_node, leaf_position, hierarchy=MAIN)
+        Gets the node's parent within the specified hierarchy
+
+        Args:
+            origin_node (str): Unique hierarchy identifier for the node to measure from
+            leaf_position (str): the relative position from the origin_node to look for a result node
+            hierarchy (str): Hierarchy unique ID
+
+        Returns:
+            str: The leaf node that is N steps away from the origin_node, when
+                 considering all leaf nodes in order, where N is leaf_position. Negative
+                 leaf_position means the result will be earlier in that order than
+                 the origin_node, while positive leaf_position means the result will
+                 be later in that order than the origin_node.
+        """
+        return self.dim.get_node_by_leaf_position(
+            project_id=self.project_id,
+            name=self.name,
+            origin_node=origin_node,
+            leaf_position=leaf_position,
+            hierarchy=hierarchy,
+        )
+
     def get_siblings(self, node, hierarchy=MAIN):
         """get_siblings(node, hierarchy=MAIN)
         Finds the siblings of the node within the specified hierarchy
