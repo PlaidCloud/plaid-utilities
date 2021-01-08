@@ -945,3 +945,32 @@ def safe_divide(numerator, denominator, error_return_value=0):
         return error_return_value
     else:
         return result
+
+def remove_all(string, substrs):
+    """Removes a whole list of substrings from a string, returning the cleaned
+    string.
+
+    Args:
+        string (str): A string to be filtered
+        substrs (:obj:`list` of :obj:`strs`): The substrings to remove from the string
+
+    Returns:
+        str: string with all substrings removed from it.
+
+    Examples:
+        >>> remove_all('Four score and seven years ago', [])
+        'Four score and seven years ago'
+        >>> remove_all('Four !score! an!d s!ev!en yea!rs a!g!o!', ['!'])
+        'Four score and seven years ago'
+        >>> remove_all('Fo?ur !sc?ore! an!d s!ev!en ye?a!rs a!g!o!', ['!', '?'])
+        'Four score and seven years ago'
+        >>> remove_all('Four score and seven years ago', ['score and seven '])
+        'Four years ago'
+        >>> remove_all('Four score and seven years ago', ['score ', 'and ', 'seven '])
+        'Four years ago'
+    """
+
+    def remove1(string, substr):
+        return string.replace(substr, '')
+
+    return reduce(remove1, substrs, string)
