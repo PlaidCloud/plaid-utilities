@@ -973,4 +973,4 @@ def remove_all(string, substrs):
     def remove1(string, substr):
         return string.replace(substr, '')
 
-    return reduce(remove1, substrs, string)
+    return functools.reduce(remove1, substrs, string)
