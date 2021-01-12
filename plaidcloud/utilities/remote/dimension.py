@@ -7,7 +7,8 @@ A highly optimized class for fast dimensional hierarchy operations
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
-import pandas as pd
+import base64
+import pickle
 
 __author__ = 'Dave Parsons'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
@@ -2111,13 +2112,13 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     # ==== DATAFRAME RPC METHODS  ======================================================================
     # --------------------------------------------------------------------------------------------------
-    # noinspection PyMethodMayBeStatic
-    def _decode_dataframe(self, df):
-        return pd.read_json(df, orient='table')
+    @staticmethod
+    def _decode_dataframe(df):
+        return pickle.loads(base64.b64decode(df))
 
-    # noinspection PyMethodMayBeStatic
-    def _encode_dataframe(self, df):
-        return df.to_json(orient='table')
+    @staticmethod
+    def _encode_dataframe(df):
+        return base64.b64encode(pickle.dumps(df)).decode()
 
     # --------------------------------------------------------------------------------------------------
     # ==== RECURSIVE METHODS ===========================================================================
