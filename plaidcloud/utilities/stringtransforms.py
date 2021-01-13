@@ -57,7 +57,7 @@ def apply_variables(message, sub_dict, strict=True, nonstrict_error_handler=None
         message (str): message with variables to be inserted.
         sub_dict (dict): variables to use for replacement
         strict (bool): If true, error on missing keys. If false, replace missing keys with empty string.
-        nonstrict_error_handler (function): function to handle a warning in the case of missing keys. Should take an error_message as an argument.
+        nonstrict_error_handler (function(str)): function to handle a warning in the case of missing keys. Should take an error_message as an argument.
 
     Returns:
         (str): the message with the values of variables inserted.
