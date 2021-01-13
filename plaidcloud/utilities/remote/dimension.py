@@ -2117,7 +2117,7 @@ class Dimension:
 
     @staticmethod
     def _encode_dataframe(df):
-        return df.to_json(orient='table')
+        return df.to_json(orient='table', index=False)
 
     # --------------------------------------------------------------------------------------------------
     # ==== RECURSIVE METHODS ===========================================================================
