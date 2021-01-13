@@ -7,11 +7,10 @@ A highly optimized class for fast dimensional hierarchy operations
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
-import base64
-import pickle
+import pandas as pd
 
 __author__ = 'Dave Parsons'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
 __credits__ = ['Dave Parsons']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Dave Parsons'
@@ -2083,7 +2082,7 @@ class Dimension:
 
         Returns:
             dict: Dict of Datafames with hierarchy data
-                - hierarchially sorted nodes
+                - hierarchically sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
         json_dict_df = self.dim.dimension_table(project_id=self.project_id, name=self.name)
@@ -2101,7 +2100,7 @@ class Dimension:
 
         Returns:
             df (Dataframe): Datafame with hierarchy data
-                - hierarchially sorted nodes
+                - hierarchically sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
         json_df = self.dim.hierarchy_table(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
@@ -2113,12 +2112,12 @@ class Dimension:
     # ==== DATAFRAME RPC METHODS  ======================================================================
     # --------------------------------------------------------------------------------------------------
     @staticmethod
-    def _decode_dataframe(df):
-        return pickle.loads(base64.b64decode(df))
+    def _decode_dataframe(json_df):
+        return pd.read_json(json_df, orient='table')
 
     @staticmethod
     def _encode_dataframe(df):
-        return base64.b64encode(pickle.dumps(df)).decode()
+        return df.to_json(orient='table')
 
     # --------------------------------------------------------------------------------------------------
     # ==== RECURSIVE METHODS ===========================================================================
