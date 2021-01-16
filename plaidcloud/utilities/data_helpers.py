@@ -147,12 +147,14 @@ def cast_as_str(input_val):
         ' '
         >>> cast_as_str({})
         '{}'
+        >>> cast_as_str(pd.NA)
+        ' '
     """
     if input_val is None:
         return ' '
 
     try:
-        if np.isnan(input_val):
+        if pd.isna(input_val) or np.isnan(input_val):
             return ' '
         else:
             try:
@@ -228,12 +230,14 @@ def cast_as_int(input_val):
         0
         >>> cast_as_int(np.nan)
         0
+        >>> cast_as_int(pd.NA)
+        0
     """
     if input_val is None:
         return 0
 
     try:
-        if np.isnan(input_val):
+        if pd.isna(input_val) or np.isnan(input_val):
             return 0
         else:
             try:
@@ -264,12 +268,14 @@ def cast_as_float(input_val):
         0.0
         >>> cast_as_float(np.nan)
         0.0
+        >>> cast_as_float(pd.NA)
+        0.0
     """
 
     if input_val is None:
         return 0.0
     try:
-        if np.isnan(input_val):
+        if pd.isna(input_val) or np.isnan(input_val):
             return 0.0
         else:
             try:
@@ -931,7 +937,10 @@ def safe_divide(numerator, denominator, error_return_value=0):
         False
         >>> safe_divide(None, 1, False)
         False
-
+        >>> safe_divide(1, pd.NA, False)
+        False
+        >>> safe_divide(pd.NA, 1, False)
+        False
     """
     try:
         if isinstance(numerator, six.integer_types) and isinstance(denominator, six.integer_types):
@@ -941,10 +950,11 @@ def safe_divide(numerator, denominator, error_return_value=0):
     except:
         result = error_return_value
 
-    if abs(result) == np.inf or pd.isnull(result):
+    if pd.isna(result) or abs(result) == np.inf or pd.isnull(result):
         return error_return_value
     else:
         return result
+
 
 def remove_all(string, substrs):
     """Removes a whole list of substrings from a string, returning the cleaned
