@@ -64,7 +64,7 @@ def convert(target_encoding, in_path, out_path, include_bom=False):
                         )
 
                     except UnicodeDecodeError as e:
-                        if e.reason == 'truncated data' and max_chunksize > chunksize:
+                        if e.reason in ('truncated data', 'unexpected end of data') and max_chunksize > chunksize:
                             f_in.seek(last_file_position)  # Go back to the beginning of the chunk
                             chunksize += starting_chunksize  # Try a bigger chunk
                             continue  # Try bigger chunk, to overshoot the truncation
