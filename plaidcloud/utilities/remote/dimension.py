@@ -7,6 +7,7 @@ A highly optimized class for fast dimensional hierarchy operations
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
+import uuid
 import pandas as pd
 
 __author__ = 'Dave Parsons'
@@ -22,6 +23,15 @@ MAIN = 'main'
 DEFAULT = '!!default!!'
 VALID_CONSOL = ['~', '+', '-', '|', '&']
 
+
+def validate_uuid4(uuid_string):
+    # Check validity of UUID V4 string
+    try:
+        uuid.UUID(uuid_string, version=4)
+    except ValueError:
+        # is not a valid hex code for a UUID.
+        return False
+    return True
 
 class Dimensions:
     """
@@ -295,8 +305,12 @@ class Dimension:
         self.conn = conn
         self.dim = self.conn.rpc.analyze.dimension
         self.project_id = conn.project_id
-        self.name = name
-        self.duid = self.dim.lookup_by_name(project_id=self.project_id, name=self.name)
+        if validate_uuid4(name):
+            self.id = name
+            self.name = self.dim.dimension(project_id=self.project_id, dimension_id=self.name, keys=['name'])['name']
+        else:
+            self.name = name
+            self.id = self.dim.lookup_by_name(project_id=self.project_id, name=self.name)
         if clear is True:
             self.clear()
 
