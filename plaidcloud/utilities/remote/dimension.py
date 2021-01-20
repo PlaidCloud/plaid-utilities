@@ -221,7 +221,7 @@ class Dimensions:
     # ==== IMPORT/EXPORT METHODS =======================================================================
     # --------------------------------------------------------------------------------------------------
     def backup(self, name):
-        """backup(duid)
+        """backup(name)
         Backup all nodes and hierarchies in dimension
 
         Args:
