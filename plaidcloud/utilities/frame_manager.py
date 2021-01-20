@@ -2092,8 +2092,8 @@ def lookup(source_frame, lookup_frame, left_on, right_on=None, keep_columns=None
                         del df[col_y]
                         df.rename(
                             columns={
-                                col_x : right_on[iter]
-                            }, inplace = True
+                                col_x: right_on[iter]
+                            }, inplace=True
                         )
                     except:
                         pass
