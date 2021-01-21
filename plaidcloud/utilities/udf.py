@@ -31,7 +31,10 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
             local_root,
             project['name'],
             udf['paths'][0].lstrip('/'),
-            udf['file_path'],
+            '{}.{}'.format(
+                udf['name'],
+                udf['extension']
+            ),
         )
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     with open(local_path, 'w') as f:
@@ -78,6 +81,11 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
         udf_path=intuited_udf_path
     if not parent_path:
         parent_path = intuited_parent_path
+    if not name:
+        if udf_path.endswith('.py'):
+            name = udf_path[:-3]
+        else:
+            name = udf_path
     projects = conn.analyze.project.projects()
     for project in projects:
         if project['name'].lower() == project_name.lower():
@@ -87,18 +95,13 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
         raise Exception('Project {} does not exist!'.format(project_name))
     udfs = conn.analyze.udf.udfs(project_id=project_id)
     for udf in udfs:
-        if udf['file_path'].lower() == udf_path.lower():
+        if udf['name'].lower() == name.lower():
             udf_id = udf['id']
             break
     else:
         if create:
             if not parent_path:
                 parent_path = '/'
-            if not name:
-                if udf_path.endswith('.py'):
-                    name = udf_path[:-3]
-                else:
-                    name = udf_path
             udf = conn.analyze.udf.create(
                 project_id=project_id, path=parent_path,
                 name=name, file_path=udf_path, view_manager=view_manager,
