@@ -307,7 +307,7 @@ class Dimension:
         self.project_id = conn.project_id
         if validate_uuid4(name):
             self.id = name
-            self.name = self.dim.dimension(project_id=self.project_id, dimension_id=self.name, keys=['name'])['name']
+            self.name = self.dim.dimension(project_id=self.project_id, dimension_id=self.id, keys=['name'])['name']
         else:
             self.name = name
             self.id = self.dim.lookup_by_name(project_id=self.project_id, name=self.name)
