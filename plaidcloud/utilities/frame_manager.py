@@ -40,7 +40,7 @@ __license__ = 'Apache 2.0'
 CSV_TYPE_DELIMITER = '::'
 
 
-class ContainerLogger():
+class ContainerLogger(object):
 
     def info(self, msg):
         print(msg, file=sys.stderr)
@@ -1106,25 +1106,24 @@ def compare(left_frame, right_frame, left_on, right_on=None):
     return pd.merge(left_frame, right_frame, left_on=left_on, right_on=right_on, how='outer')
 
 
-def apply_rule(df, rules, target_columns=['value'], include_once=True, show_rules=False):
+def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=False):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
     if we needed to set multiple columns.
 
     Args:
-        df ('pandas.DataFrame'): The DataFrame to apply rules on
+        df (pandas.DataFrame): The DataFrame to apply rules on
         rules (list): A list of rules to apply
-        target_columns (:type:`list` of :type:`str`, optional): The target
-            columns to apply rules on.
+        target_columns (list of str, optional): The target columns to apply rules on.
         include_once (bool, optional): Should records that match multiple rules
             be included ONLY once? Defaults to `True`
-        show_rules (bool, optional): Display the rules in the result data? Defaults
-            to `False`
+        show_rules (bool, optional): Display the rules in the result data? Defaults to `False`
 
     Returns:
-        `pandas.DataFrame`: The results of applying rules to the input `df`
+        pandas.DataFrame: The results of applying rules to the input `df`
     """
+    target_columns = target_columns or ['value']
     df_final = pd.DataFrame()
 
     df['temp_index'] = df.index
@@ -1144,10 +1143,7 @@ def apply_rule(df, rules, target_columns=['value'], include_once=True, show_rule
         Exclude if matched, or if previously excluded
         Please do not change the 'if match is True:' line to 'if match:'.  It matters here.
         """
-        if match is True:  # Do not refactor this line.
-            return False
-        else:
-            return include
+        return False if match is True else include
 
     rule_num = 0
 
@@ -1158,8 +1154,8 @@ def apply_rule(df, rules, target_columns=['value'], include_once=True, show_rule
         # Find subset based on condition
         if rule_condition is not None and rule_condition != '' and str(rule_condition) != 'nan':
             try:
-                df_subset = df[df['include'] == True].query(rule_condition, engine='python')
-                print('subset length: {}'.format(len(df[df['include'] == True])))
+                df_subset = df[df['include'] is True].query(rule_condition, engine='python')
+                print('subset length: {}'.format(len(df[df['include'] is True])))
                 if show_rules:
                     df_subset['rule_number'] = str(rule_num)
                     df_subset['rule'] = str(rule_condition)
@@ -1173,7 +1169,7 @@ def apply_rule(df, rules, target_columns=['value'], include_once=True, show_rule
                 error_msg = ' (rule_num {0}) {1} error: {2}'.format(rule_num, rule_condition, e)
                 logger.exception('EXCEPTION {}'.format(error_msg))
         else:
-            df_subset = df[df['include'] == True]
+            df_subset = df[df['include'] is True]
 
         # Populate target columns as specified in split
         for column in target_columns:
@@ -1207,48 +1203,35 @@ def apply_rule(df, rules, target_columns=['value'], include_once=True, show_rule
         df_final = pd.concat([df_final, df_subset])
         print('length:{}'.format(len(df_subset)))
 
-    if len(df_final) > 0: # how the hell was this not here before now?!
-        del df_final['temp_index']
-        del df_final['include']
-    else:
-        # Wrapping in try to exercise extreme caution.  Likely not necessary, but can't risk it.
-        try:
-            del df_final['temp_index']
-        except:
-            pass
-
-        try:
-            del df_final['include']
-        except:
-            pass
+    df_final.drop(columns=['temp_index', 'include'], inplace=True, errors='ignore')
 
     return df_final
 
 
-def apply_rules(df, df_rules, target_columns=['value'], include_once=True, show_rules=False, verbose=True, unmatched_rule='UNMATCHED'):
+def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
+                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition'):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
     if we needed to set multiple columns.
 
     Args:
-        df ('pandas.DataFrame'): The DataFrame to apply rules on
-        rules (list): A list of rules to apply
-        target_columns (:type:`list` of :type:`str`, optional): The target
-            columns to apply rules on.
+        df (pandas.DataFrame): The DataFrame to apply rules on
+        df_rules (pandas.DataFrame): A list of rules to apply
+        target_columns (list of str, optional): The target columns to apply rules on.
         include_once (bool, optional): Should records that match multiple rules
             be included ONLY once? Defaults to `True`
-        show_rules (bool, optional): Display the rules in the result data? Defaults
-            to `False`
+        show_rules (bool, optional): Display the rules in the result data? Defaults to `False`
         verbose (bool, optional): Display the rules in the log messages? Defaults
             to `True`.  This is not overly heavier than leaving it off, so we probably should
             always leave it on unless logging is off altogether.
-        unmatched_rule(string, optional): Default rule to write in cases of records not matching any rule
+        unmatched_rule (str, optional): Default rule to write in cases of records not matching any rule
+        condition_column (str, optional): Column name containing the rule condition, defaults to 'condition'
 
     Returns:
-        `pandas.DataFrame`: The results of applying rules to the input `df`
+        list of pandas.DataFrame: The results of applying rules to the input `df`
     """
-    df_final = pd.DataFrame()
+    target_columns = target_columns or ['value']
 
     df_rules = df_rules.reset_index(drop=True)
 
@@ -1266,43 +1249,38 @@ def apply_rules(df, df_rules, target_columns=['value'], include_once=True, show_
 
     def exclude_matched(include, match):
         """exclude if matched, or if previously excluded"""
-        if match == True:
-            return False
-        else:
-            return include
+        return False if match is True else include
 
     # rule_num = 0
     matched_chunks = []
     summary = []
 
     for index, rule in df_rules.iterrows():
-
-
-    #for rule in rules:
-        # rule_num = rule_num + 1
-        #rule_condition = rule.get('condition')
-        print('')
-        print('{}.'.format(index))
+        if verbose:
+            print('')
+            print('{}.'.format(index))
 
         # Find subset based on condition
-        input_length = len(df[df['include'] == True])
-        if rule['condition'] is not None and rule['condition'] != '' and str(rule['condition']) != 'nan':
+        input_length = len(df[df['include'] is True])
+        if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
             try:
-                df_subset = df[df['include'] == True].query(rule['condition'], engine='python')
-                print('{} - input length'.format(input_length))
-                if show_rules == True:
+                df_subset = df[df['include'] is True].query(rule[condition_column], engine='python')
+                if verbose:
+                    print('{} - input length'.format(input_length))
+                if show_rules is True:
                     df_subset['rule_number'] = str(index)
-                    df_subset['rule'] = str(rule['condition'])
+                    df_subset['rule'] = str(rule[condition_column])
             except Exception as e:
                 df_subset = pd.DataFrame()
+
                 def add_message(log):
-                    return '<{} ::: {}>'.format(e, log)  # removed redundant rule['condition'] param from format string
-                if show_rules == True:
+                    return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
+                if show_rules is True:
                     df['log'] = list(map(add_message, df['log']))
-                error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule['condition'], e)
+                error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
                 logger.exception('EXCEPTION {}'.format(error_msg))
         else:
-            df_subset = df[df['include'] == True]
+            df_subset = df[df['include'] is True]
 
         # Populate target columns as specified in split
         for column in target_columns:
@@ -1334,11 +1312,12 @@ def apply_rules(df, df_rules, target_columns=['value'], include_once=True, show_
         # if include_once is false.
         # Future: MAY be a reason to allow first-in wins or last-in wins, or ALL win.
         # MIKE look here.
-        #df_final = pd.concat([df_final, df_subset])
+        # df_final = pd.concat([df_final, df_subset])
 
         matched_chunks.append(df_subset)
         matched_length = len(df_subset)
-        print('{} - matched length, {}'.format(matched_length, rule['condition']))
+        if verbose:
+            print('{} - matched length, {}'.format(matched_length, rule[condition_column]))
 
         summary_record = {
             'row_num': index,
@@ -1353,24 +1332,9 @@ def apply_rules(df, df_rules, target_columns=['value'], include_once=True, show_
         )
 
     df_final = pd.concat(matched_chunks)
+    df_final.drop(columns=['temp_index', 'include'], inplace=True, errors='ignore')
 
-    if len(df_final) > 0:  # how the hell was this not here before now?!
-        del df_final['temp_index']
-        del df_final['include']
-    else:
-        # Wrapping in try to exercise extreme caution.  Likely not necessary, but can't risk it.
-        try:
-            del df_final['temp_index']
-        except:
-            pass
-
-        try:
-            del df_final['include']
-        except:
-            pass
-
-
-    df_unmatched = df[df['include'] == True]
+    df_unmatched = df[df['include'] is True]
     del df_unmatched['temp_index']
     df_unmatched['match'] = False
     unmatched_length = len(df_unmatched)
@@ -1383,7 +1347,7 @@ def apply_rules(df, df_rules, target_columns=['value'], include_once=True, show_
             'row_num': -1,
             'input_records': unmatched_length,
             'matched_records': unmatched_length,
-            'rule': 'UNMATCHED'
+            'rule': unmatched_rule
         }
     )
 
