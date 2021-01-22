@@ -1255,6 +1255,23 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
     matched_chunks = []
     summary = []
 
+    iterations = list(set(df_rules['iteration']))
+    iterations.sort()
+
+    def write_rule_numbers(rule_num):
+        """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
+        if rule_num == '':
+            return str(index)
+        else:
+            return '{}, {}'.format(rule_num, str(index))
+
+    def write_rule_conditions(condition):
+        """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
+        if condition == '':
+            return str(rule[condition_column])
+        else:
+            return '{}, {}'.format(condition, str(rule[condition_column]))
+
     for index, rule in df_rules.iterrows():
         if verbose:
             print('')
@@ -1268,8 +1285,8 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                 if verbose:
                     print('{} - input length'.format(input_length))
                 if show_rules is True:
-                    df_subset['rule_number'] = str(index)
-                    df_subset['rule'] = str(rule[condition_column])
+                    df_subset['rule_number'] = list(map(write_rule_numbers, df_subset['rule_number']))  # str(index)
+                    df_subset['rule'] = list(map(write_rule_conditions, df_subset['rule']))  # str(rule[condition_column])
             except Exception as e:
                 df_subset = pd.DataFrame()
 
@@ -1330,6 +1347,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         summary.append(
             summary_record
         )
+        a = 2
 
     df_final = pd.concat(matched_chunks)
     df_final.drop(columns=['temp_index', 'include'], inplace=True, errors='ignore')
