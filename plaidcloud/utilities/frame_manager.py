@@ -1154,8 +1154,8 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
         # Find subset based on condition
         if rule_condition is not None and rule_condition != '' and str(rule_condition) != 'nan':
             try:
-                df_subset = df[df['include'] is True].query(rule_condition, engine='python')
-                print('subset length: {}'.format(len(df[df['include'] is True])))
+                df_subset = df[df['include'] == True].query(rule_condition, engine='python')
+                print('subset length: {}'.format(len(df[df['include'] == True])))
                 if show_rules:
                     df_subset['rule_number'] = str(rule_num)
                     df_subset['rule'] = str(rule_condition)
@@ -1169,7 +1169,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
                 error_msg = ' (rule_num {0}) {1} error: {2}'.format(rule_num, rule_condition, e)
                 logger.exception('EXCEPTION {}'.format(error_msg))
         else:
-            df_subset = df[df['include'] is True]
+            df_subset = df[df['include'] == True]
 
         # Populate target columns as specified in split
         for column in target_columns:
@@ -1261,10 +1261,10 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             print('{}.'.format(index))
 
         # Find subset based on condition
-        input_length = len(df[df['include'] is True])
+        input_length = len(df[df['include'] == True])
         if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
             try:
-                df_subset = df[df['include'] is True].query(rule[condition_column], engine='python')
+                df_subset = df[df['include'] == True].query(rule[condition_column], engine='python')
                 if verbose:
                     print('{} - input length'.format(input_length))
                 if show_rules is True:
@@ -1280,7 +1280,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                 error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
                 logger.exception('EXCEPTION {}'.format(error_msg))
         else:
-            df_subset = df[df['include'] is True]
+            df_subset = df[df['include'] == True]
 
         # Populate target columns as specified in split
         for column in target_columns:
@@ -1334,7 +1334,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
     df_final = pd.concat(matched_chunks)
     df_final.drop(columns=['temp_index', 'include'], inplace=True, errors='ignore')
 
-    df_unmatched = df[df['include'] is True]
+    df_unmatched = df[df['include'] == True]
     del df_unmatched['temp_index']
     df_unmatched['match'] = False
     unmatched_length = len(df_unmatched)
@@ -1351,10 +1351,9 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         }
     )
 
-    df_summary = pd.DataFrame.from_dict(summary)
+    df_summary = pd.DataFrame.from_records(summary)
 
     return [df_final, df_summary]
-
 
 def memoize(fn):
     cache = fn.cache = {}
