@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
@@ -7,9 +7,9 @@ __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
-DEFAULT_LOCAL_ROOT = 'downloaded_udfs'
+ROOT_MARKER = '.plaid'
 
-def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_path=None):
+def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
     """
     Downloads a udf from plaid and puts it into a local file, the location of
     which reflects the plaid udf hierarchy
@@ -23,21 +23,26 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
         None
     """
     code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
-    if not local_path:
+    if local_path:
+        path = Path(local_path).resolve()
+    else:
+        if local_root:
+            root = Path(local_root).resolve()
+        else:
+            root = Path.cwd()
+
         project = conn.analyze.project.project(project_id=project_id)
         udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
 
-        local_path = os.path.join(
-            local_root,
+        path = root.joinpath(
             project['name'],
             udf['paths'][0].lstrip('/'),
-            '{}.{}'.format(
-                udf['name'],
-                udf['extension']
-            ),
-        )
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    with open(local_path, 'w') as f:
+            udf['name']
+        ).with_suffix(udf['extension'])
+
+    path.mkdir(parents=True, exist_ok=True)
+
+    with open(path, 'w') as f:
         f.write(code)
 
 def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
@@ -48,7 +53,6 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
 
     To use it to upload the current file, but only if that file is on a local Windows or mac dev:
 
-        import os
         import platform
         from plaidcloud.utilities.connect import PlaidConnection
         from plaidcloud.utilities.udf import upload_udf
@@ -56,7 +60,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
         conn = PlaidConnection()
 
         if platform.system() == "Windows" or platform.system() == "Darwin":
-            upload_udf(os.path.abspath(__file__), conn)
+            upload_udf(__file__, conn)
 
     Args:
         local_path: the path to the file to be uploaded
@@ -65,13 +69,24 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
     Returns:
         None
     """
-    def parts_from_downloaded_udfs(path):
-        head, tail = os.path.split(path)
-        if tail == DEFAULT_LOCAL_ROOT:
-            return []
-        else:
-            return parts_from_downloaded_udfs(head) + [tail]
-    parts = parts_from_downloaded_udfs(local_path)
+    path = Path(local_path).resolve()
+    if local_root:
+        root = Path(local_root).resolve()
+    else:
+        def find_root(path):
+            if path.joinpath(ROOT_MARKER).exists()
+                return path
+            elif path == path.parent:
+                # We've hit the filesystem root
+                raise Exception('Could not figure out local root directory - no ancestor of f{local_path} contains f{ROOT_MARKER}')
+            else:
+                return find_root(path.parent)
+        root = find_root(path)
+
+    if not path.is_relative_to(root):
+        raise Exception(f'{str(path)} is not under {str(root)}')
+
+    parts = path.relative_to(root).parts
     intuited_project_name = parts[0]
     intuited_parent_path = '/'.join(parts[1:-1])
     intuited_udf_path = parts[-1]
@@ -86,6 +101,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
             name = udf_path[:-3]
         else:
             name = udf_path
+
     projects = conn.analyze.project.projects()
     for project in projects:
         if project['name'].lower() == project_name.lower():
