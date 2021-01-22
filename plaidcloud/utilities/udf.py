@@ -1,4 +1,5 @@
 from pathlib import Path
+from plaidcloud.rpc.config import find_workspace_root
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
@@ -29,7 +30,7 @@ def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
         if local_root:
             root = Path(local_root).resolve()
         else:
-            root = Path.cwd()
+            root = find_workspace_root()
 
         project = conn.analyze.project.project(project_id=project_id)
         udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
@@ -38,14 +39,14 @@ def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
             project['name'],
             udf['paths'][0].lstrip('/'),
             udf['name']
-        ).with_suffix(udf['extension'])
+        ).with_suffix(f".{udf['extension']}")
 
-    path.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, 'w') as f:
         f.write(code)
 
-def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
+def upload_udf(local_path, conn, create=True, local_root=None, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
     """
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
@@ -73,15 +74,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
     if local_root:
         root = Path(local_root).resolve()
     else:
-        def find_root(path):
-            if path.joinpath(ROOT_MARKER).exists()
-                return path
-            elif path == path.parent:
-                # We've hit the filesystem root
-                raise Exception('Could not figure out local root directory - no ancestor of f{local_path} contains f{ROOT_MARKER}')
-            else:
-                return find_root(path.parent)
-        root = find_root(path)
+        root = find_workspace_root(path)
 
     if not path.is_relative_to(root):
         raise Exception(f'{str(path)} is not under {str(root)}')
