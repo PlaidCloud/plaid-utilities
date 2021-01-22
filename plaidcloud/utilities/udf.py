@@ -120,4 +120,5 @@ def upload_udf(local_path, conn, create=True, local_root=None, project_name=None
 
     with open(local_path, 'r') as f:
         code = f.read()
+
     conn.analyze.udf.set_code(project_id=project_id, udf_id=udf_id, code=code)
