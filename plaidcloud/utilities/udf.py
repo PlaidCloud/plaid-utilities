@@ -8,8 +8,6 @@ __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
-ROOT_MARKER = '.plaid'
-
 def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
     """
     Downloads a udf from plaid and puts it into a local file, the location of
