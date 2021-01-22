@@ -1,12 +1,12 @@
 from pathlib import Path
 from plaidcloud.rpc.config import find_workspace_root
 
-__author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
-__credits__ = ['Paul Morel']
+__author__ = 'Adams Tower'
+__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
+__credits__ = ['Adams Tower']
 __license__ = 'Apache 2.0'
-__maintainer__ = 'Paul Morel'
-__email__ = 'paul.morel@tartansolutions.com'
+__maintainer__ = 'Adams Tower'
+__email__ = 'adams.tower@tartansolutions.com'
 
 def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
     """
