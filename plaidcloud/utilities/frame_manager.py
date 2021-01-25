@@ -1209,7 +1209,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
 
 
 def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
-                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition'):
+                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', logger=ContainerLogger):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
@@ -1227,6 +1227,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             always leave it on unless logging is off altogether.
         unmatched_rule (str, optional): Default rule to write in cases of records not matching any rule
         condition_column (str, optional): Column name containing the rule condition, defaults to 'condition'
+        logger (object, optional): Logger to record any output
 
     Returns:
         list of pandas.DataFrame: The results of applying rules to the input `df`
@@ -1274,8 +1275,8 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
 
     for index, rule in df_rules.iterrows():
         if verbose:
-            print('')
-            print('{}.'.format(index))
+            logger.info('')
+            logger.info('{}.'.format(index))
 
         # Find subset based on condition
         input_length = len(df[df['include'] == True])
@@ -1283,7 +1284,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             try:
                 df_subset = df[df['include'] == True].query(rule[condition_column], engine='python')
                 if verbose:
-                    print('{} - input length'.format(input_length))
+                    logger.info('{} - input length'.format(input_length))
                 if show_rules is True:
                     df_subset['rule_number'] = list(map(write_rule_numbers, df_subset['rule_number']))  # str(index)
                     df_subset['rule'] = list(map(write_rule_conditions, df_subset['rule']))  # str(rule[condition_column])
@@ -1334,7 +1335,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         matched_chunks.append(df_subset)
         matched_length = len(df_subset)
         if verbose:
-            print('{} - matched length, {}'.format(matched_length, rule[condition_column]))
+            logger.info('{} - matched length, {}'.format(matched_length, rule[condition_column]))
 
         summary_record = {
             'row_num': index,
