@@ -524,7 +524,11 @@ def get_select_query(
         count = config.get('count', False)
 
     # Build SELECT x FROM y section of our select query
-    if not count:
+    if count:
+        # Much simpler for one table.
+        # TODO: figure out how to do this for more than one table
+        select_query = sqlalchemy.select([sqlalchemy.func.count()]).select_from(tables[0])
+    else:
         column_select = [
             get_from_clause(
                 tables,
@@ -538,11 +542,6 @@ def get_select_query(
         ]
 
         select_query = sqlalchemy.select(column_select)
-
-    elif count:
-        # Much simpler for one table.
-        # TODO: figure out how to do this for more than one table
-        select_query = sqlalchemy.select([sqlalchemy.func.count()]).select_from(tables[0])
 
     # Build WHERE section of our select query
     if wheres:
