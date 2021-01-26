@@ -1,15 +1,14 @@
-import os
+from pathlib import Path
+from plaidcloud.rpc.config import find_workspace_root
 
-__author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
-__credits__ = ['Paul Morel']
+__author__ = 'Adams Tower'
+__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
+__credits__ = ['Adams Tower']
 __license__ = 'Apache 2.0'
-__maintainer__ = 'Paul Morel'
-__email__ = 'paul.morel@tartansolutions.com'
+__maintainer__ = 'Adams Tower'
+__email__ = 'adams.tower@tartansolutions.com'
 
-DEFAULT_LOCAL_ROOT = 'downloaded_udfs'
-
-def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_path=None):
+def download_udf(conn, project_id, udf_id, local_root=None, local_path=None):
     """
     Downloads a udf from plaid and puts it into a local file, the location of
     which reflects the plaid udf hierarchy
@@ -23,24 +22,29 @@ def download_udf(conn, project_id, udf_id, local_root=DEFAULT_LOCAL_ROOT, local_
         None
     """
     code = conn.analyze.udf.get_code(project_id=project_id, udf_id=udf_id)
-    if not local_path:
+    if local_path:
+        path = Path(local_path).resolve()
+    else:
+        if local_root:
+            root = Path(local_root).resolve()
+        else:
+            root = find_workspace_root()
+
         project = conn.analyze.project.project(project_id=project_id)
         udf = conn.analyze.udf.udf(project_id=project_id, udf_id=udf_id)
 
-        local_path = os.path.join(
-            local_root,
+        path = root.joinpath(
             project['name'],
             udf['paths'][0].lstrip('/'),
-            '{}.{}'.format(
-                udf['name'],
-                udf['extension']
-            ),
-        )
-    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    with open(local_path, 'w') as f:
+            udf['name']
+        ).with_suffix(f".{udf['extension']}")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(path, 'w') as f:
         f.write(code)
 
-def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
+def upload_udf(local_path, conn, create=True, local_root=None, project_name=None, udf_path=None, parent_path=None, name=None, view_manager=False, view_explorer=False, memo=None):
     """
     Uploads a local file as a udf. Determines which project to upload to based
     on the name of the directory containing the file. Determines which udf to upload
@@ -48,7 +52,6 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
 
     To use it to upload the current file, but only if that file is on a local Windows or mac dev:
 
-        import os
         import platform
         from plaidcloud.utilities.connect import PlaidConnection
         from plaidcloud.utilities.udf import upload_udf
@@ -56,7 +59,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
         conn = PlaidConnection()
 
         if platform.system() == "Windows" or platform.system() == "Darwin":
-            upload_udf(os.path.abspath(__file__), conn)
+            upload_udf(__file__, conn)
 
     Args:
         local_path: the path to the file to be uploaded
@@ -65,13 +68,16 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
     Returns:
         None
     """
-    def parts_from_downloaded_udfs(path):
-        head, tail = os.path.split(path)
-        if tail == DEFAULT_LOCAL_ROOT:
-            return []
-        else:
-            return parts_from_downloaded_udfs(head) + [tail]
-    parts = parts_from_downloaded_udfs(local_path)
+    path = Path(local_path).resolve()
+    if local_root:
+        root = Path(local_root).resolve()
+    else:
+        root = find_workspace_root(path)
+
+    if not path.is_relative_to(root):
+        raise Exception(f'{str(path)} is not under {str(root)}')
+
+    parts = path.relative_to(root).parts
     intuited_project_name = parts[0]
     intuited_parent_path = '/'.join(parts[1:-1])
     intuited_udf_path = parts[-1]
@@ -86,6 +92,7 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
             name = udf_path[:-3]
         else:
             name = udf_path
+
     projects = conn.analyze.project.projects()
     for project in projects:
         if project['name'].lower() == project_name.lower():
@@ -113,4 +120,5 @@ def upload_udf(local_path, conn, create=True, local_root=DEFAULT_LOCAL_ROOT, pro
 
     with open(local_path, 'r') as f:
         code = f.read()
+
     conn.analyze.udf.set_code(project_id=project_id, udf_id=udf_id, code=code)
