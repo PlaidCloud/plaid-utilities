@@ -74,10 +74,11 @@ def upload_udf(local_path, conn, create=True, local_root=None, project_name=None
     else:
         root = find_workspace_root(path)
 
-    if not path.is_relative_to(root):
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
         raise Exception(f'{str(path)} is not under {str(root)}')
 
-    parts = path.relative_to(root).parts
     intuited_project_name = parts[0]
     intuited_parent_path = '/'.join(parts[1:-1])
     intuited_udf_path = parts[-1]
