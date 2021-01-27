@@ -1259,7 +1259,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
 
     summary = []
 
-    iterations = list(set(df_rules['iteration']))
+    iterations = list(set(df_rules[iteration_column]))
     iterations.sort()
 
     for iteration in iterations:
@@ -1314,7 +1314,8 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             for column in target_columns:
                 if column == 'VT':
                     a = 1
-                if rule[column] != 'nan' and rule[column] != '':
+                if rule[column] not in ['nan', '', 'None', None]:
+                # if rule[column] != 'nan' and rule[column] != '' and rule:
                     df_subset[column] = rule[column]
 
             # need to find a way to flip the flag once data has been selected
@@ -1389,6 +1390,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
     df_summary = pd.DataFrame.from_records(summary)
 
     return [df, df_summary]
+
 
 def memoize(fn):
     cache = fn.cache = {}
@@ -2445,11 +2447,15 @@ def allocate(
         df_driver (pandas.Dataframe): Driver data frame
         input_data (str or list): column(s) of input data that should be allocated
         input_keys (str or list): column(s) in input data to be joined with driver data
-        driver_data (str or list): column containing driver values
+        driver_data (str): column containing driver values
         driver_numerator_keys (str or list): Driver data numerator join columns
         driver_denominator_keys (str or list): Driver data denominator join columns
 
     """
+    # Remove any unused columns from the driver data
+    df_driver.drop(columns=[
+        col for col in df_driver.columns if col not in driver_numerator_keys + driver_denominator_keys + [driver_data]
+    ], inplace=True)
 
     #20180422 Make this more user-friendly.  #allocable needs to be added in if it's not already there.  It's *not* required in order to call the function.
     if 'allocable' not in df_input.columns:
@@ -2488,7 +2494,7 @@ def allocate(
             if math.isnan(numerator) or numerator == 0:
                 return 0
             if math.isnan(denominator) or denominator == 0:
-                return coeff # This is for passing stranded costs through to result set.
+                return coeff  # This is for passing stranded costs through to result set.
             else:
                 try:
                     return coeff * numerator / denominator
@@ -2498,11 +2504,32 @@ def allocate(
             # Not Allocable.  Pass input through to output.
             return coeff
 
+    def _clean_names(frame):
+        """
+        Delete input columns "foo__in" from frame.
+        Clean output columns "foo__out" -> "foo"
+        """
+        col_list = list(frame.columns)
+
+        for col in col_list:
+            if col.endswith('__value'):
+                del frame[col]
+            elif col.endswith('__split'):
+                frame.rename(columns={col: col[:-7]}, inplace=True)
+
+        return frame
+
     #OUTPUT_PATH_EXCEL = 'C:/UBS/Dev/models/debug/allocate.xlsx'
     #xlsx = pd.ExcelWriter(OUTPUT_PATH_EXCEL)
 
     #0.) Set nan driver values to zero
     #df_driver[driver_data].fillna(0, inplace=True) #Not this
+
+    original_driver_col = driver_data
+    driver_data = '__DRIVER_VALUE__'
+    df_driver.rename(columns={
+        original_driver_col: driver_data
+    }, inplace=True)
     df_driver = df_driver[(np.isfinite(df_driver[driver_data])) & (df_driver[driver_data] != 0)]
 
     if not isinstance(input_keys, list):
@@ -2645,7 +2672,7 @@ def allocate(
         driver_denominator_keys
         ).agg(
             {
-                driver_split:'sum'
+                driver_split: 'sum'
             }
         ).reset_index()
 
@@ -2664,7 +2691,7 @@ def allocate(
     #df_temp_delete = df_input(math.isnan(df_input[driver_split]))
 
     df_input[driver_split] = list(map(dh.cast_as_float, df_input[driver_split]))
-    df_input_allocable     = df_input[(df_input['allocable'] == True)  & (df_input[driver_split] != 0)]
+    df_input_allocable = df_input[(df_input['allocable'] == True) & (df_input[driver_split] != 0)]
     df_input_not_allocable = df_input[(df_input['allocable'] == False) | (df_input[driver_split] == 0)]
 
     df_input_not_allocable['allocable'] = False
@@ -2694,7 +2721,7 @@ def allocate(
 
     #21051118 New Goodness Starts here.  We're going to shred ONE thing, (all ones) and multiply this new shred coefficient X all of
     # the cols we wish to shred.
-    df_result['shred']=1
+    df_result['shred'] = 1
     df_result['shred'] = list(map(
         shred,
         df_result['shred'],
@@ -2714,7 +2741,7 @@ def allocate(
 
     df_result = df_result.sort_values(by=['alloc_status'], ascending=[False])
 
-    df_result = dh.clean_names(df_result)
+    df_result = _clean_names(df_result)
 
     return df_result
 
