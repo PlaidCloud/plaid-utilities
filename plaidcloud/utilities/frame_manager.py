@@ -1160,6 +1160,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
                     df_subset['rule_number'] = str(rule_num)
                     df_subset['rule'] = str(rule_condition)
             except Exception as e:
+                # TODO update this. We should capture all exceptions in an exception table.
                 df_subset = pd.DataFrame()
 
                 def add_message(log):
@@ -1209,7 +1210,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
 
 
 def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
-                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', logger=ContainerLogger):
+                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration', logger=logger):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
@@ -1236,6 +1237,9 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
 
     df_rules = df_rules.reset_index(drop=True)
 
+    if iteration_column not in df_rules.columns:
+        df_rules[iteration_column] = 1
+
     df['temp_index'] = df.index
     df['include'] = True
     df['log'] = ''
@@ -1244,135 +1248,147 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         df['rule_number'] = ''
         df['rule'] = ''
 
-    # Establish new column(s) as blank columns.
+    # Establish new column(s) as blank columns <i>if they do not already exist.</i>
     for column in target_columns:
-        df[column] = ''
+        if column not in df.columns:
+            df[column] = ''
 
     def exclude_matched(include, match):
         """exclude if matched, or if previously excluded"""
         return False if match is True else include
 
-    # rule_num = 0
-    matched_chunks = []
     summary = []
 
     iterations = list(set(df_rules['iteration']))
     iterations.sort()
 
-    def write_rule_numbers(rule_num):
-        """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
-        if rule_num == '':
-            return str(index)
-        else:
-            return '{}, {}'.format(rule_num, str(index))
+    for iteration in iterations:
+        matched_chunks = []
+        df['include'] = True
 
-    def write_rule_conditions(condition):
-        """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
-        if condition == '':
-            return str(rule[condition_column])
-        else:
-            return '{}, {}'.format(condition, str(rule[condition_column]))
+        if iteration == '2' or iteration == '3':
+            a = 1
 
-    for index, rule in df_rules.iterrows():
-        if verbose:
-            logger.info('')
-            logger.info('{}.'.format(index))
+        def write_rule_numbers(rule_num):
+            """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
+            if rule_num == '':
+                return str(index)
+            else:
+                return '{}, {}'.format(rule_num, str(index))
 
-        # Find subset based on condition
-        input_length = len(df[df['include'] == True])
-        if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
-            try:
-                df_subset = df[df['include'] == True].query(rule[condition_column], engine='python')
-                if verbose:
-                    logger.info('{} - input length'.format(input_length))
-                if show_rules is True:
-                    df_subset['rule_number'] = list(map(write_rule_numbers, df_subset['rule_number']))  # str(index)
-                    df_subset['rule'] = list(map(write_rule_conditions, df_subset['rule']))  # str(rule[condition_column])
-            except Exception as e:
-                df_subset = pd.DataFrame()
+        def write_rule_conditions(condition):
+            """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
+            if condition == '':
+                return str(rule[condition_column])
+            else:
+                return '{}, {}'.format(condition, str(rule[condition_column]))
 
-                def add_message(log):
-                    return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
-                if show_rules is True:
-                    df['log'] = list(map(add_message, df['log']))
-                error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
-                logger.exception('EXCEPTION {}'.format(error_msg))
-        else:
-            df_subset = df[df['include'] == True]
+        for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
+            if verbose:
+                logger.info('')
+                logger.info('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
 
-        # Populate target columns as specified in split
-        for column in target_columns:
-            df_subset[column] = rule[column]
+            # Find subset based on condition
+            input_length = len(df[df['include'] == True])
+            if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
+                try:
+                    df_subset = df[df['include'] == True].query(rule[condition_column], engine='python')
+                    if verbose:
+                        logger.info('{} - input length'.format(input_length))
+                    if show_rules is True:
+                        df_subset['rule_number'] = list(map(write_rule_numbers, df_subset['rule_number']))  # str(index)
+                        df_subset['rule'] = list(map(write_rule_conditions, df_subset['rule']))  # str(rule[condition_column])
+                except Exception as e:
+                    df_subset = pd.DataFrame()
 
-        # need to find a way to flip the flag once data has been selected
+                    def add_message(log):
+                        return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
+                    if show_rules is True:
+                        df['log'] = list(map(add_message, df['log']))
+                    error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
+                    logger.exception('EXCEPTION {}'.format(error_msg))
+            else:
+                df_subset = df[df['include'] == True]
 
-        if include_once:
-            # Exclude the records of the current split from exposure to
-            # subsequent filters.
+            # Populate target columns as specified in split
+            for column in target_columns:
+                if column == 'VT':
+                    a = 1
+                if rule[column] != 'nan' and rule[column] != '':
+                    df_subset[column] = rule[column]
 
-            # if statement handles edge case where df is empty and has no columns.
-            if 'temp_index' in df_subset.columns:
-                # refactor to be m*1 not m*n.
-                df_subset['match'] = True
-                df = lookup(
-                    df,
-                    df_subset,
-                    left_on=['temp_index'],
-                    right_on=['temp_index'],
-                    keep_columns=['match']
-                )
+            # need to find a way to flip the flag once data has been selected
 
-                df['include'] = list(map(exclude_matched, df['include'], df['match']))
+            if include_once:
+                # Exclude the records of the current split from exposure to
+                # subsequent filters.
 
-                del df['match']
+                # if statement handles edge case where df is empty and has no columns.
+                # 20210126 TODO MWR This can likely be done more succinctly with .iloc.  Look at Lexmark UDFs.
+                if 'temp_index' in df_subset.columns:
+                    # refactor to be m*1 not m*n.
+                    df_subset['match'] = True
+                    df = lookup(
+                        df,
+                        df_subset,
+                        left_on=['temp_index'],
+                        right_on=['temp_index'],
+                        keep_columns=['match']
+                    )
 
-        # The way we're doing this allows multiple matches
-        # if include_once is false.
-        # Future: MAY be a reason to allow first-in wins or last-in wins, or ALL win.
-        # MIKE look here.
-        # df_final = pd.concat([df_final, df_subset])
+                    df['include'] = list(map(exclude_matched, df['include'], df['match']))
 
-        matched_chunks.append(df_subset)
-        matched_length = len(df_subset)
-        if verbose:
-            logger.info('{} - matched length, {}'.format(matched_length, rule[condition_column]))
+                    del df['match']
 
-        summary_record = {
-            'row_num': index,
-            'input_records': input_length,
-            'matched_records': matched_length,
-        }
+            # The way we're doing this allows multiple matches
+            # if include_once is false.
+            # Future: MAY be a reason to allow first-in wins or last-in wins, or ALL win.
+            # MIKE look here.
+            # df_final = pd.concat([df_final, df_subset])
 
-        summary_record.update(rule)
+            matched_chunks.append(df_subset)
+            matched_length = len(df_subset)
+            if verbose:
+                logger.info('{} - matched length'.format(matched_length))
 
+            summary_record = {
+                'row_num': index,
+                'iteration': iteration,
+                'input_records': input_length,
+                'matched_records': matched_length,
+            }
+
+            summary_record.update(rule)
+
+            summary.append(
+                summary_record
+            )
+
+        df_unmatched = df[df['include'] == True]
+        df_matched = pd.concat(matched_chunks)
+        df_unmatched['match'] = False
+        unmatched_length = len(df_unmatched)
+
+        df = pd.concat([df_matched, df_unmatched])
+        df.drop(columns=['include', 'match'], inplace=True, errors='ignore')
+
+        # unmatched record:
         summary.append(
-            summary_record
+            {
+                'row_num': -1,
+                'iteration': iteration,
+                'input_records': unmatched_length,
+                'matched_records': unmatched_length,
+                'rule': unmatched_rule
+            }
         )
-        a = 2
 
-    df_final = pd.concat(matched_chunks)
-    df_final.drop(columns=['temp_index', 'include'], inplace=True, errors='ignore')
-
-    df_unmatched = df[df['include'] == True]
-    del df_unmatched['temp_index']
-    df_unmatched['match'] = False
-    unmatched_length = len(df_unmatched)
-
-    df_final = pd.concat([df_final, df_unmatched])
-
-    # unmatched record:
-    summary.append(
-        {
-            'row_num': -1,
-            'input_records': unmatched_length,
-            'matched_records': unmatched_length,
-            'rule': unmatched_rule
-        }
-    )
+        #df_final = pd.concat([df_final, df])
+    df.drop(columns=['temp_index'], inplace=True, errors='ignore')
 
     df_summary = pd.DataFrame.from_records(summary)
 
-    return [df_final, df_summary]
+    return [df, df_summary]
 
 def memoize(fn):
     cache = fn.cache = {}
