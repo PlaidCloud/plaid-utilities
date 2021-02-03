@@ -1593,13 +1593,14 @@ class Dimension:
         """
         self.dim.delete_node_property(project_id=self.project_id, name=self.name, node=node, property=property)
 
-    def get_all_properties(self, inherit=False, hierarchy=None):
+    def get_all_properties(self, inherit=False, hierarchy=None, only_properties=None):
         """get_all_properties(inherit=False, hierarchy=None)
         Returns all properties including inherited properties in dimension
 
         Args:
             inherit (bool): Find inherited property
-            hierarchy (str): Hierarchy unique ID or None returns all hierarchies
+            hierarchy (str, optional): Hierarchy unique ID or None returns all hierarchies
+            only_properties (list, optional): Restrict the properties returned
 
         Returns:
             dict : Dict of dicts
@@ -1611,7 +1612,8 @@ class Dimension:
                 - ancestor (str): Node holding inherited value
 
         """
-        return self.dim.get_all_properties(project_id=self.project_id, name=self.name, inherit=inherit, hierarchy=hierarchy)
+        return self.dim.get_all_properties(project_id=self.project_id, name=self.name, inherit=inherit,
+                                           hierarchy=hierarchy, only_properties=only_properties)
 
     # noinspection PyShadowingBuiltins
     def get_node_property(self, node, property, inherit=False, hierarchy=MAIN):
