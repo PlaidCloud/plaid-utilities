@@ -1553,7 +1553,6 @@ class Dimension:
         self.dim.set_property_config(project_id=self.project_id, name=self.name, property=property,
                                      type=type, display=display, role=role, config=config)
 
-    # noinspection PyShadowingBuiltins
     def is_property(self, property):
         """is_property(property)
         Checks property exists
@@ -1579,7 +1578,6 @@ class Dimension:
         """
         self.dim.rename_property(project_id=self.project_id, name=self.name, old=old, new=new)
 
-    # noinspection PyShadowingBuiltins
     def delete_node_property(self, node, property):
         """delete_node_property(node, property)
         Delete a property
@@ -1615,7 +1613,6 @@ class Dimension:
         return self.dim.get_all_properties(project_id=self.project_id, name=self.name, inherit=inherit,
                                            hierarchy=hierarchy, only_properties=only_properties)
 
-    # noinspection PyShadowingBuiltins
     def get_node_property(self, node, property, inherit=False, hierarchy=MAIN):
         """get_node_property(node, property, inherit=False, hierarchy=MAIN)
         Gets a property for the specified node
@@ -1638,7 +1635,6 @@ class Dimension:
         return self.dim.get_node_property(project_id=self.project_id, name=self.name, node=node,
                                           property=property, inherit=inherit, hierarchy=hierarchy)
 
-    # noinspection PyShadowingBuiltins
     def get_nodes_from_property(self, property, value):
         """get_nodes_from_property(property, value)
         Finds the node objects using the property
@@ -1653,7 +1649,6 @@ class Dimension:
         return self.dim.get_nodes_from_property(project_id=self.project_id, name=self.name,
                                                 property=property, value=value)
 
-    # noinspection PyShadowingBuiltins
     def set_node_property(self, node, property, value):
         """set_node_property(node, property, value)
         Sets a propoerty for the specified node
@@ -1667,6 +1662,20 @@ class Dimension:
             None
         """
         self.dim.set_node_property(project_id=self.project_id, name=self.name, node=node, property=property, value=value)
+
+    def set_node_properties(self, node_property_values):
+        """Sets multiple node properties at once
+
+        Args:
+            node_property_values (list): List of dicts containing node properties to set
+                node (str): Unique hierarchy node identifier
+                property (str): Property type
+                value (str): Property value
+
+        Returns:
+            None
+        """
+        self.dim.set_node_properties(project_id=self.project_id, name=self.name, node_property_values=node_property_values)
 
     def which_properties(self, node):
         """which_properties(node)
