@@ -808,3 +808,108 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
 
     # Figure out the insert query, based on the select query
     return get_insert_query(new_table, target_columns, select_query)
+
+
+def allocate(source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column, unique_cte_index=1):
+    """Performs an allocation based on the provided sqlalchemy source and driver data queries
+
+    Args:
+        source_query (sqlalchemy.Selectable): Sqlalchemy query for source data
+        driver_query (sqlalchemy.Selectable): Sqlalchemy query for driver data
+        allocate_columns (list): List of columns to apply a shred to
+        numerator_columns (list): List of columns to use as numerator
+        denominator_columns (list): List of columns to use as denominator
+        driver_value_column (str): Column name for the driver value
+        unique_cte_index (int, optional): Unique index to use in the common table expressions if more than one
+            allocation will be done within the same query
+
+    Returns:
+        sqlalchemy.Selectable: A Sqlalchemy query representing the allocation
+    """
+    all_target_columns = [col.name for col in source_query.columns]
+    reassignment_columns = [col.name for col in source_query.columns if col in numerator_columns]
+
+    all_driver_columns = [col.name for col in driver_query.columns if col in numerator_columns + denominator_columns + [driver_value_column]]
+
+    driver_value_columns = [driver_value_column]  # set up for the *possibility* of multiple driver value columns, not sure it makes sense though
+
+    # Denominator table is SUM of split values with GROUP BY denominator columns
+    # Join the Denominator values to the numerator values to get a % split (add an alloc indicator of 1 in a fake column)
+    # Outer join the source table to the split % info with a alloc column that is coalesce(driver alloc column, 0).  This produces a 1 if it allocated.
+    allocable_col = 'allocable'
+    shred_col = 'shred_{}'
+    if allocable_col not in all_target_columns:
+        source_query.append_column(sqlalchemy.literal(1).label(allocable_col))
+
+    cte_source = source_query.cte(f'alloc_source_{unique_cte_index}')
+    cte_driver = driver_query.cte(f'alloc_driver_{unique_cte_index}')
+
+    cte_denominator = sqlalchemy.select(
+        [cte_driver.columns[d] for d in denominator_columns] +
+        [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
+    ).group_by(
+        *[cte_driver.columns[d] for d in denominator_columns]
+    ).cte('denominator')
+
+    cte_ratios = sqlalchemy.select(
+        [cte_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns] +
+        # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
+        [
+            sqlalchemy.func.cast(
+                sqlalchemy.func.nullif(
+                    sqlalchemy.func.cast(cte_driver.columns[d], sqlalchemy.NUMERIC) / sqlalchemy.func.nullif(
+                        cte_denominator.columns[d], 0),
+                    0
+                ),
+                sqlalchemy.NUMERIC
+            ).label(shred_col.format(d))
+            for d in driver_value_columns
+        ]
+    ).select_from(
+        sqlalchemy.join(
+            cte_driver, cte_denominator,
+            sqlalchemy.and_(
+                *[cte_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
+            )
+        )
+    ).cte('ratios')
+
+    allocation_select = sqlalchemy.select(
+        [cte_source.columns[st] for st in all_target_columns if st not in reassignment_columns] +
+        [
+            sqlalchemy.case(
+                [(cte_ratios.columns[driver_value_columns[0]].isnot(sqlalchemy.null()), cte_ratios.columns[rc])],
+                else_=cte_source.columns[rc]
+            ).label(rc)
+            for rc in reassignment_columns
+        ] +
+        [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
+        [
+            sqlalchemy.case(
+                [(cte_ratios.columns[driver_value_columns[0]].isnot(sqlalchemy.null()), 1)],
+                else_=0
+            ).label('alloc_status')
+        ] +
+        [
+            cte_ratios.columns[shred_col.format(d)]
+            for d in driver_value_columns
+        ] +
+        [
+            sqlalchemy.case(
+                # pass through source value if driver value is null (not found, not allocable, divide by zero)
+                [(cte_ratios.columns[shred_col.format(d)].is_(sqlalchemy.null()), cte_source.columns[rc])],
+                else_=cte_ratios.columns[shred_col.format(d)] * cte_source.columns[rc]
+            ).label('{}_allocated'.format(rc))
+            for rc in allocate_columns
+            for d in driver_value_columns
+        ]
+    ).select_from(
+        sqlalchemy.outerjoin(
+            cte_source, cte_ratios,
+            sqlalchemy.and_(
+                *[cte_source.columns[dn] == cte_ratios.columns[dn] for dn in denominator_columns] + [cte_source.columns[allocable_col] == 1]
+            )
+        )
+    )
+
+    return allocation_select
