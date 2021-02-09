@@ -2517,7 +2517,7 @@ def allocate(
             else:
                 lookup_passthrough.append(item)
 
-        if item in driver_numerator_and_denominator_keys and is_string_dtype(df_driver[item]):
+        if len(df_driver) > 0 and item in driver_numerator_and_denominator_keys and is_string_dtype(df_driver[item]):
             # cast null string values to string so that subsequent groupby statement doesn't drop records
             df_driver[item] = list(map(dh.cast_as_str, df_driver[item]))
 
