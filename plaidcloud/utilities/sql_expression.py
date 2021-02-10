@@ -48,9 +48,12 @@ class SQLExpressionError(Exception):
     # UserError
     pass
 
-def eval_expression(expression, variables, tables, extra_keys=None):
+def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False):
     safe_dict = get_safe_dict(tables, extra_keys)
-    expression_with_variables = apply_variables(expression, variables)
+    if disable_variables:
+        expression_with_variables = expression
+    else:
+        expression_with_variables = apply_variables(expression, variables)
     compiled_expression = compile(
         expression_with_variables,
         '<string>',
@@ -155,8 +158,9 @@ def get_column_table(source_tables, target_column_config, source_column_configs)
 
 
 def get_from_clause(
-        tables, target_column_config, source_column_configs,
-        aggregate=False, sort=False, variables=None, cast=True):
+        tables, target_column_config, source_column_configs, aggregate=False,
+        sort=False, variables=None, cast=True, disable_variables=False,
+    ):
     """Given info from a config, returns a sqlalchemy from clause."""
 
     expression = target_column_config.get('expression')
@@ -193,10 +197,14 @@ def get_from_clause(
     if constant:
         # Agg_fn is ignored, and we wrap in sqlalchemy.literal
         # So is cast
+        if disable_variables:
+            av = lambda x, _: x
+        else:
+            av = apply_variables
         return sort_fn(
             sqlalchemy.cast(
                 sqlalchemy.literal(
-                    apply_variables(constant, variables),
+                    av(constant, variables),
                     type_=type_,
                 ),
                 type_=type_,
@@ -207,7 +215,7 @@ def get_from_clause(
         return sort_fn(
             sqlalchemy.cast(
                 agg_fn(
-                    eval_expression(expression.strip(), variables, tables)
+                    eval_expression(expression.strip(), variables, tables, disable_variables=disable_variables)
                 ),
                 type_=type_,
             )
@@ -478,7 +486,9 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
 def get_select_query(
         tables, source_columns, target_columns, wheres, config=None,
         variables=None, aggregate=None, having=None, use_target_slicer=None,
-        limit_target_start=None, limit_target_end=None, distinct=None, count=None):
+        limit_target_start=None, limit_target_end=None, distinct=None,
+        count=None, disable_variables=None,
+    ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
     source_columns, and wheres should be lists, so that multiple tables can be
@@ -522,6 +532,8 @@ def get_select_query(
         distinct = config.get('distinct', False)
     if count is None:
         count = config.get('count', False)
+    if disable_variables is None:
+        disable_variables = config.get('disable_variables', False)
 
     # Build SELECT x FROM y section of our select query
     if count:
@@ -536,6 +548,7 @@ def get_select_query(
                 source_columns,
                 aggregate,
                 variables=variables,
+                disable_variables=disable_variables,
             )
             for tc in target_columns
             if tc['dtype'] not in ('serial', 'bigserial')
@@ -545,7 +558,7 @@ def get_select_query(
 
     # Build WHERE section of our select query
     if wheres:
-        combined_wheres = get_combined_wheres(wheres, tables, variables)
+        combined_wheres = get_combined_wheres(wheres, tables, variables, disable_variables)
         select_query = select_query.where(sqlalchemy.and_(*combined_wheres))
 
     # Find any columns for sorting
@@ -568,6 +581,7 @@ def get_select_query(
                 aggregate,
                 sort=True,
                 variables=variables,
+                disable_variables=disable_variables,
             )
             for tc in sorted(columns_to_sort_on, key=lambda stc: stc['sort']['order'])
         ]
@@ -585,6 +599,7 @@ def get_select_query(
                     False,
                     variables=variables,
                     cast=False,
+                    disable_variables=disable_variables,
                 )
                 for tc in target_columns
                 if (
@@ -605,6 +620,7 @@ def get_select_query(
                     source_columns,
                     aggregate,
                     variables=variables,
+                    disable_variables=disable_variables,
                 )
                 for tc in target_columns
                 if not tc.get('constant') and
@@ -702,9 +718,9 @@ def get_delete_query(table, wheres, variables=None):
 def clean_where(w):
     return w.strip().replace('\n', '').replace('\r', '')
 
-def get_combined_wheres(wheres, tables, variables):
+def get_combined_wheres(wheres, tables, variables, disable_variables=False):
     return [
-        eval_expression(clean_where(w), variables, tables)
+        eval_expression(clean_where(w), variables, tables, disable_variables=disable_variables)
         for w in wheres if w
     ]
 
