@@ -920,6 +920,18 @@ class Dimension:
         """
         return self.dim.get_leaves_at_level(project_id=self.project_id, name=self.name, node=node, level=level, hierarchy=hierarchy)
 
+    def get_leaves_for_nodes(self, nodes, hierarchy=MAIN):
+        """Gets the leaves associated with each of the nodes
+
+        Args:
+            nodes (list): List of nodes for which to get leaves
+            hierarchy (str): The hierarchy in which to look
+
+        Returns:
+            dict with nodes as keys, values as list of leaves
+        """
+        return self.dim.get_leaves_for_nodes(project_id=self.project_id, name=self.name, nodes=nodes, hierarchy=hierarchy)
+
     def get_node_count(self, hierarchy=MAIN):
         """get_node_count(hierarchy=MAIN)
         Provides number of hierarchy nodes
