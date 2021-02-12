@@ -1210,7 +1210,8 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
 
 
 def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
-                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration', logger=logger):
+                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration',
+                rule_id_column=None, logger=logger):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
@@ -1228,6 +1229,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             always leave it on unless logging is off altogether.
         unmatched_rule (str, optional): Default rule to write in cases of records not matching any rule
         condition_column (str, optional): Column name containing the rule condition, defaults to 'condition'
+        rule_id_column (str, optional): Column name containing the rule id, just set to index if not provided
         logger (object, optional): Logger to record any output
 
     Returns:
@@ -1247,6 +1249,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
     if show_rules is True:
         df['rule_number'] = ''
         df['rule'] = ''
+        df['rule_id'] = '' if rule_id_column else df.index
 
     # Establish new column(s) as blank columns <i>if they do not already exist.</i>
     for column in target_columns:
@@ -1275,6 +1278,13 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             else:
                 return '{}, {}'.format(condition, str(rule[condition_column]))
 
+        def write_rule_id(rule_id):
+            """Need to allow for fact that there will be > 1 sometimes if we have > iteration."""
+            if rule_id == '':
+                return str(rule[rule_id_column])
+            else:
+                return '{}, {}'.format(rule_id, str(rule[rule_id_column]))
+
         for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
             if verbose:
                 logger.info('')
@@ -1291,6 +1301,9 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                     if show_rules is True:
                         df.loc[list(df_subset.index), 'rule_number'] = list(map(write_rule_numbers, df.loc[list(df_subset.index), 'rule_number']))
                         df.loc[list(df_subset.index), 'rule'] = list(map(write_rule_conditions, df.loc[list(df_subset.index), 'rule']))
+                        if rule_id_column:
+                            df.loc[list(df_subset.index), 'rule_id'] = list(map(write_rule_id, df.loc[list(df_subset.index), 'rule_id']))
+
                 except Exception as e:
                     df_subset = pd.DataFrame()
 
