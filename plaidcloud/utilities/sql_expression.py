@@ -844,9 +844,9 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         sqlalchemy.Selectable: A Sqlalchemy query representing the allocation
     """
     all_target_columns = [col.name for col in source_query.columns]
-    reassignment_columns = [col.name for col in source_query.columns if col in numerator_columns]
+    reassignment_columns = [col.name for col in source_query.columns if col.name in numerator_columns]
 
-    all_driver_columns = [col.name for col in driver_query.columns if col in numerator_columns + denominator_columns + [driver_value_column]]
+    all_driver_columns = [col.name for col in driver_query.columns if col.name in numerator_columns + denominator_columns + [driver_value_column]]
 
     driver_value_columns = [driver_value_column]  # set up for the *possibility* of multiple driver value columns, not sure it makes sense though
     driver_count = len(driver_value_columns)
