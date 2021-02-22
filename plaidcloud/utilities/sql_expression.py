@@ -827,7 +827,7 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
 
 
 def allocate(source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
-             unique_cte_index=1):
+             overwrite_cols_for_allocated=True, unique_cte_index=1):
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
     Args:
@@ -837,6 +837,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         numerator_columns (list): List of columns to use as numerator
         denominator_columns (list): List of columns to use as denominator
         driver_value_column (str): Column name for the driver value
+        overwrite_cols_for_allocated (bool): Whether to overwrite the source columns with the allocated value, if False, cols suffixed with _allocated are created
         unique_cte_index (int, optional): Unique index to use in the common table expressions if more than one
             allocation will be done within the same query
 
@@ -860,6 +861,9 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
 
     def _get_shred_col_name(col):
         return f'shred_{col}' if driver_count > 1 else 'shred'
+
+    def _get_allocated_col_name(col):
+        return col if overwrite_cols_for_allocated else f'{col}_allocated'
 
     cte_source = source_query.cte(f'alloc_source_{unique_cte_index}')
     cte_driver = driver_query.cte(f'alloc_driver_{unique_cte_index}')
@@ -904,7 +908,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     ).cte(f'ratios_{unique_cte_index}')
 
     allocation_select = sqlalchemy.select(
-        [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + allocate_columns)] +
+        [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))] +
         [
             sqlalchemy.case(
                 [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), cte_ratios.columns[rc])],
@@ -928,7 +932,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
                 # pass through source value if driver value is null (not found, not allocable, divide by zero)
                 [(cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac])],
                 else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac]
-            ).label(ac)
+            ).label(_get_allocated_col_name(ac))
             for ac in allocate_columns
             for d in driver_value_columns
         ]
@@ -943,12 +947,12 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         )
     ).union(
         sqlalchemy.select(
-            [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + allocate_columns)] +
+            [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))] +
             [cte_source.columns[rc] for rc in reassignment_columns] +
             [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
             [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')] +
             [sqlalchemy.func.cast(sqlalchemy.literal(None), sqlalchemy.Numeric).label(_get_shred_col_name(d)) for d in driver_value_columns] +
-            [cte_source.columns[ac] for ac in allocate_columns]
+            [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
         ).where(
             cte_source.columns[allocable_col] == 0
         ).distinct()
