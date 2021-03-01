@@ -1285,6 +1285,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             else:
                 return '{}, {}'.format(rule_id, str(rule[rule_id_column]))
 
+        index = 0
         for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
             if verbose:
                 logger.info('')
@@ -1349,7 +1350,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         # unmatched record:
         unmatched_length = len(df[df['include'] == True])
         summary.append({
-            'row_num': -1,
+            'row_num': index+1,
             iteration_column: iteration,
             'input_records': unmatched_length,
             'matched_records': unmatched_length,
