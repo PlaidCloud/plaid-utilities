@@ -1339,11 +1339,10 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
 
             summary_record = {
                 'row_num': index,
-                'iteration': iteration,
+                iteration_column: iteration,
                 'input_records': input_length,
                 'matched_records': matched_length,
             }
-
             summary_record.update(rule)
             summary.append(summary_record)
 
@@ -1351,7 +1350,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         unmatched_length = len(df[df['include'] == True])
         summary.append({
             'row_num': -1,
-            'iteration': iteration,
+            iteration_column: iteration,
             'input_records': unmatched_length,
             'matched_records': unmatched_length,
             'rule': unmatched_rule
