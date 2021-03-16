@@ -32,6 +32,7 @@ podTemplate(label: 'plaid-utilities',
       stage("Run Checks") {
         if (!params.skip_lint) {
           sh """
+            export PYTHONPATH=\$PYTHONPATH:\$(pwd)
             lint --target-dir=$params.target_lint_dir --branch=$branch --full-lint=$params.full_lint
             pytest
           """
