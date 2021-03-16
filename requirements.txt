@@ -19,7 +19,7 @@ sqlalchemy-greenplum
 sqlalchemy-hana
 tables
 texttable
-toolz==0.10.0
+toolz
 unicodecsv
 xlrd
 xlwings;platform_system=="Windows"
