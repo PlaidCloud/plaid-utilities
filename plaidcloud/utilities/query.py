@@ -14,7 +14,6 @@ from six.moves import cStringIO
 
 import pandas as pd
 import numpy as np
-from toolz.itertoolz import first, iteritems
 import six
 from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy.types import TypeDecorator, DateTime, Unicode, CHAR, TEXT, NVARCHAR, UnicodeText, Numeric
@@ -184,7 +183,7 @@ class Connection(object):
         with open(file_name, 'rb') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                for k, v in iteritems(row):
+                for k, v in six.iteritems(row):
                     # Keep the value as None if we want to preserve nulls.
                     if preserve_nulls and v is None:
                         pass

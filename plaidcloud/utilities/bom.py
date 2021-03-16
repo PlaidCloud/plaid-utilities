@@ -6,7 +6,7 @@ A highly optimized class for bill of materials consolidation and costing
 from __future__ import absolute_import
 
 from pandas import DataFrame
-from toolz.dicttoolz import iteritems
+from six import iteritems
 import os
 import sys
 
