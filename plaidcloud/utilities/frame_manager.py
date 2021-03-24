@@ -16,13 +16,15 @@ from functools import wraps
 import traceback
 import xlrd
 import unicodecsv as csv
-import json
 
 from pandas.api.types import is_string_dtype
 import pandas as pd
 import numpy as np
 import six
 import six.moves
+import orjson as json
+import aiocsv
+import aiofiles
 
 from plaidcloud.rpc import utc
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
@@ -33,7 +35,7 @@ from plaidcloud.utilities import data_helpers as dh
 
 __author__ = 'Paul Morel'
 __maintainer__ = 'Paul Morel <paul.morel@tartansolutions.com>'
-__copyright__ = '© Copyright 2013-2019, Tartan Solutions, Inc'
+__copyright__ = '© Copyright 2013-2021, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
 
@@ -2210,7 +2212,7 @@ def summarize(df, group_by_columns, summarize_columns):
     return df.groupby(group_by_columns).agg(agg_map).reset_index()
 
 
-def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
+async def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
     """Converts a JSON file to a CSV file
 
     Args:
@@ -2219,13 +2221,13 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
         columns (list, optional): A list of columns to keep in the CSV file
         writeheader (bool, optional): Whether or not to write the header
     """
-    with open(json_file_name, 'r') as json_file:
-        j = json.load(json_file)
+    async with aiofiles.open(json_file_name, 'r') as json_file:
+        j = json.loads(await json_file.read())
         if columns is None:
             columns = list(get_json_columns(j))
 
-        with open(csv_file_name, 'wb') as csv_file:
-            wr = csv.DictWriter(
+        async with aiofiles.open(csv_file_name, 'w') as csv_file:
+            wr = aiocsv.AsyncDictWriter(
                 csv_file,
                 columns,
                 extrasaction='ignore',
@@ -2234,10 +2236,10 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
                 escapechar='"'
             )
             if writeheader:
-                wr.writeheader()
+                await wr.writeheader()
 
             for record in j:
-                wr.writerow(record)
+                await wr.writerow(record)
 
 
 def get_json_columns(json_file_or_dict, check_row_count=1):
@@ -2252,9 +2254,9 @@ def get_json_columns(json_file_or_dict, check_row_count=1):
     """
     # Likely to be pretty slow. Hopefully only runs on guess?
     columns = set()
-    if isinstance(json_file_or_dict, six.string_types):
+    if isinstance(json_file_or_dict, str):
         with open(json_file_or_dict, 'r') as json_file:
-            j = json.load(json_file)
+            j = json.loads(json_file.read())
     else:
         j = json_file_or_dict
 

@@ -1,3 +1,5 @@
+aiocsv
+aiofiles
 argparse
 chardet
 ipython;python_version>"2.7"
