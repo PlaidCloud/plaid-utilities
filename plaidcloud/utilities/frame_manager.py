@@ -23,8 +23,7 @@ import numpy as np
 import six
 import six.moves
 import orjson as json
-import aiocsv
-import aiofiles
+
 
 from plaidcloud.rpc import utc
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
@@ -2212,7 +2211,7 @@ def summarize(df, group_by_columns, summarize_columns):
     return df.groupby(group_by_columns).agg(agg_map).reset_index()
 
 
-async def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
+def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
     """Converts a JSON file to a CSV file
 
     Args:
@@ -2221,13 +2220,12 @@ async def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=T
         columns (list, optional): A list of columns to keep in the CSV file
         writeheader (bool, optional): Whether or not to write the header
     """
-    async with aiofiles.open(json_file_name, 'r') as json_file:
-        j = json.loads(await json_file.read())
+    with open(json_file_name, 'rb') as json_file:
+        j = json.loads(json_file.read())
         if columns is None:
             columns = list(get_json_columns(j))
-
-        async with aiofiles.open(csv_file_name, 'w') as csv_file:
-            wr = aiocsv.AsyncDictWriter(
+        with open(csv_file_name, 'wb') as csv_file:
+            wr = csv.DictWriter(
                 csv_file,
                 columns,
                 extrasaction='ignore',
@@ -2236,10 +2234,8 @@ async def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=T
                 escapechar='"'
             )
             if writeheader:
-                await wr.writeheader()
-
-            for record in j:
-                await wr.writerow(record)
+                wr.writeheader()
+            wr.writerows(j)
 
 
 def get_json_columns(json_file_or_dict, check_row_count=1):
