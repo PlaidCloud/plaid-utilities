@@ -59,6 +59,7 @@ class RedisURLConfig(NamedTuple):
     identity_cache: str = "redis://redis-master/8"
     ipython_registry: str = "redis://redis-master/3"
     oauth_cache: str = "redis://redis-master/9"
+    redis_scheduler: str = "redis://redis-master/13"
     scopes_cache: str = "redis://redis-master/12"
     session: str = "redis://redis-master/0"
     transform_container_registry: str = "redis://redis-master/5"
@@ -119,7 +120,7 @@ class PlaidConfig:
 
     def redis_client(self) -> RedisConfig:
         """Settings for Redis client connections."""
-        redis_config = = self.cfg.get('redisClient', {})
+        redis_config = self.cfg.get('redisClient', {})
         return RedisConfig(**redis_config)
 
     @property
