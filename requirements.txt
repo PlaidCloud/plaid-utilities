@@ -16,7 +16,7 @@ requests
 setuptools
 orjson
 six
-sqlalchemy
+sqlalchemy==1.4
 sqlalchemy-greenplum
 sqlalchemy-hana
 tables
