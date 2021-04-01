@@ -117,6 +117,7 @@ class PlaidConfig:
         rmq_config = self.cfg.get('rabbitmq', {})
         return RMQConfig(**rmq_config)
 
+    @property
     def redis_client(self) -> RedisConfig:
         """Settings for Redis client connections."""
         redis_config = self.cfg.get('redisClient', {})
