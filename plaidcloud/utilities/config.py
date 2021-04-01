@@ -1,7 +1,6 @@
 3#!/usr/bin/env python
 # coding=utf-8
-"""Loads the configuration file used by workflow monitor.
-"""
+"""Loads the configuration file used by plaid apps in kubernetes."""
 import os
 import yaml
 from typing import NamedTuple
