@@ -6,7 +6,7 @@ import os
 import yaml
 from typing import NamedTuple
 
-CONFIG_PATH = os.env.get('PLAID_CONFIG_PATH', '/etc/plaid/config.yaml')
+CONFIG_PATH = os.env.get('PLAID_CONFIG_PATH', '/etc/plaidcloud/config.yaml')
 
 
 class DatabaseConfig(NamedTuple):
