@@ -945,7 +945,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
                  [cte_source.columns[allocable_col] == 1]
             )
         )
-    ).union(
+    ).union_all(
         sqlalchemy.select(
             [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))] +
             [cte_source.columns[rc] for rc in reassignment_columns] +
