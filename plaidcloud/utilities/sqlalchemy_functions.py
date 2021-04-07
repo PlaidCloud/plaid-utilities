@@ -222,37 +222,6 @@ def compile_import_cast_hana(element, compiler, **kw):
         return compiler.process(func.to_decimal(func.to_nvarchar(col), 34, 10))
 
 
-class sql_concat(GenericFunction):
-    name = 'concat'
-
-
-@compiles(sql_concat)
-def compile_sql_concat(element, compiler, **kw):
-    """
-    Takes arguments that can be treated as sqlalchemy.Text, and concats them
-    together, using sqlalchemy, in a cross-platform way (specifically a way
-    that works in greenplum).
-
-    """
-    # This is just casting all of the args to sqlalchemy.Text
-    text_args = [sqlalchemy.cast(arg, sqlalchemy.Text) for arg in list(element.clauses)]
-
-    # Need an empty sqlalchemy.Text object as a default/starting value
-    empty_text = sqlalchemy.cast('', sqlalchemy.Text)
-
-    def concat_two(x, y):
-        # Sqlalchemy consistently translates "+" as concat, when applied to Text objects.
-        return x + y
-
-    # So we intersperse "+" between all of the Text objects.
-    # If you're not familiar with reduce, fn is to reduce(fn) as add is to sum,
-    # as concat_two is to concat_more_than_two
-    return compiler.process(
-        reduce(concat_two, text_args, empty_text),
-        **kw
-    )
-
-
 def _squash_to_numeric(text):
     return func.cast(
         func.nullif(
