@@ -99,7 +99,7 @@ class Connection(object):
         """Returns SQL query for greenplum, in the form of a string, given a
         sqlalchemy query. Also returns a params dict."""
         #  TODO: add support for other dialects
-        compiled_query = sa_query.compile(dialect=self.dialect)
+        compiled_query = sa_query.compile(dialect=self.dialect, compile_kwargs={"render_postcompile": True})
         return str(compiled_query).replace('\n', ''), compiled_query.params
         #return compiled(sa_query, dialect=self.dialect)
 
