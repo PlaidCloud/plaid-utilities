@@ -48,8 +48,8 @@ class SQLExpressionError(Exception):
     # UserError
     pass
 
-def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False):
-    safe_dict = get_safe_dict(tables, extra_keys)
+def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False, table_numbering_start=1):
+    safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
     if disable_variables:
         expression_with_variables = expression
     else:
@@ -122,7 +122,7 @@ def on_clause(table_a, table_b, join_map, special_null_handling=False):
     ])
 
 
-def get_column_table(source_tables, target_column_config, source_column_configs):
+def get_column_table(source_tables, target_column_config, source_column_configs, table_numbering_start=1):
     """Find the source table associated with a column."""
 
     if len(source_tables) == 1:  # Shortcut for most simple cases
@@ -140,7 +140,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs)
 
     if match:  # They gave us a table number. Subtract 1 to find it's index
         table_number = int(match.groups()[0])
-        return source_tables[table_number - 1]
+        return source_tables[table_number - table_numbering_start]
 
     elif source_name.startswith('table.'):  # special case for just 'table'
         return source_tables[0]
@@ -159,7 +159,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs)
 
 def get_from_clause(
         tables, target_column_config, source_column_configs, aggregate=False,
-        sort=False, variables=None, cast=True, disable_variables=False,
+        sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
     ):
     """Given info from a config, returns a sqlalchemy from clause."""
 
@@ -215,14 +215,14 @@ def get_from_clause(
         return sort_fn(
             sqlalchemy.cast(
                 agg_fn(
-                    eval_expression(expression.strip(), variables, tables, disable_variables=disable_variables)
+                    eval_expression(expression.strip(), variables, tables, disable_variables=disable_variables, table_numbering_start=table_numbering_start)
                 ),
                 type_=type_,
             )
         ).label(name)
 
     elif source:
-        table = get_column_table(tables, target_column_config, source_column_configs)
+        table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
         col = (
             None if target_column_config.get('agg') == 'count_null'
             else next((
@@ -277,18 +277,18 @@ class Result(object):
 
     def __init__(
             self, tables, target_columns, source_column_configs,
-            aggregate=False, sort=False, variables=None):
+            aggregate=False, sort=False, variables=None, table_numbering_start=1):
 
         self.__dict__ = {
             tc['target']: get_from_clause(
                 tables, tc, source_column_configs, aggregate, sort,
-                variables=variables or {},
+                variables=variables or {}, table_numbering_start=table_numbering_start,
             )
             for tc in target_columns
             if tc['dtype'] not in ('serial', 'bigserial')
         }
 
-def get_safe_dict(tables, extra_keys=None):
+def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
     if extra_keys is None:
@@ -361,10 +361,10 @@ def get_safe_dict(tables, extra_keys=None):
         'TIME': sqlalchemy.Time,
     }
 
-    # Generate table0, table1, table2, ...
+    # Generate table1, table2, ...
     table_keys = {
         'table{}'.format(i): table.columns
-        for i, table in enumerate(tables, start=1)
+        for i, table in enumerate(tables, start=table_numbering_start)
     }
 
     return merge(default_keys, table_keys, extra_keys)
@@ -487,7 +487,7 @@ def get_select_query(
         tables, source_columns, target_columns, wheres, config=None,
         variables=None, aggregate=None, having=None, use_target_slicer=None,
         limit_target_start=None, limit_target_end=None, distinct=None,
-        count=None, disable_variables=None,
+        count=None, disable_variables=None, table_numbering_start=1,
     ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -549,6 +549,7 @@ def get_select_query(
                 aggregate,
                 variables=variables,
                 disable_variables=disable_variables,
+                table_numbering_start=table_numbering_start,
             )
             for tc in target_columns
             if tc['dtype'] not in ('serial', 'bigserial')
@@ -558,7 +559,7 @@ def get_select_query(
 
     # Build WHERE section of our select query
     if wheres:
-        combined_wheres = get_combined_wheres(wheres, tables, variables, disable_variables)
+        combined_wheres = get_combined_wheres(wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start)
         select_query = select_query.where(sqlalchemy.and_(*combined_wheres))
 
     # Find any columns for sorting
@@ -582,6 +583,7 @@ def get_select_query(
                 sort=True,
                 variables=variables,
                 disable_variables=disable_variables,
+                table_numbering_start=table_numbering_start,
             )
             for tc in sorted(columns_to_sort_on, key=lambda stc: stc['sort']['order'])
         ]
@@ -600,6 +602,7 @@ def get_select_query(
                     variables=variables,
                     cast=False,
                     disable_variables=disable_variables,
+                    table_numbering_start=table_numbering_start,
                 )
                 for tc in target_columns
                 if (
@@ -621,6 +624,7 @@ def get_select_query(
                     aggregate,
                     variables=variables,
                     disable_variables=disable_variables,
+                    table_numbering_start=table_numbering_start,
                 )
                 for tc in target_columns
                 if not tc.get('constant') and
@@ -718,9 +722,9 @@ def get_delete_query(table, wheres, variables=None):
 def clean_where(w):
     return w.strip().replace('\n', '').replace('\r', '')
 
-def get_combined_wheres(wheres, tables, variables, disable_variables=False):
+def get_combined_wheres(wheres, tables, variables, disable_variables=False, table_numbering_start=1):
     return [
-        eval_expression(clean_where(w), variables, tables, disable_variables=disable_variables)
+        eval_expression(clean_where(w), variables, tables, disable_variables=disable_variables, table_numbering_start=table_numbering_start)
         for w in wheres if w
     ]
 
