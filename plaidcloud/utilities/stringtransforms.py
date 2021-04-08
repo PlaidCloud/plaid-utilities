@@ -72,11 +72,14 @@ def apply_variables(message, sub_dict, strict=True, nonstrict_error_handler=None
         return message
 
     if message:
-        text_keys = set([
-            col[1]
-            for col in string.Formatter().parse(message)
-            if col[1] is not None
-        ])
+        try:
+            text_keys = set([
+                col[1]
+                for col in string.Formatter().parse(message)
+                if col[1] is not None
+            ])
+        except Exception as e:
+            raise Exception(f'Error trying to apply variables to string {message}: {str(e)}')
 
         bad_keys = [k for k in text_keys if k not in sub_dict]
         if bad_keys:
