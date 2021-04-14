@@ -862,7 +862,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     # Outer join the source table to the split % info with a alloc column that is coalesce(driver alloc column, 0).  This produces a 1 if it allocated.
     allocable_col = 'allocable'
     if allocable_col not in all_target_columns:
-        source_query.append_column(sqlalchemy.literal(1).label(allocable_col))
+        source_query = source_query.add_columns(*[sqlalchemy.literal(1).label(allocable_col)])
 
     def _get_shred_col_name(col):
         return f'shred_{col}' if driver_count > 1 else 'shred'
