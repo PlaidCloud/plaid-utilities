@@ -558,6 +558,7 @@ def get_select_query(
         select_query = sqlalchemy.select(column_select)
 
     # Build WHERE section of our select query
+    wheres = [w for w in wheres if w] if wheres else []
     if wheres:
         combined_wheres = get_combined_wheres(wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start)
         select_query = select_query.where(sqlalchemy.and_(*combined_wheres))
