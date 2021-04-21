@@ -14,7 +14,7 @@ import math
 import datetime
 from functools import wraps
 import traceback
-import xlrd
+import xlrd3 as xlrd
 import unicodecsv as csv
 
 from pandas.api.types import is_string_dtype
