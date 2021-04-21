@@ -48,7 +48,7 @@ setup(
         'numpy;python_version>="3.5"',
         'numpy<=1.16.5;python_version<"3.5"',
         'pandas',
-        'plaidcloud-rpc',
+        'git+git://github.com/PlaidCloud/plaid-rpc.git@master#egg=plaidcloud-rpc',
         'requests',
         'orjson',
         'six',
@@ -59,16 +59,13 @@ setup(
         'texttable',
         'toolz',
         'unicodecsv',
-        'xlrd3',
+        'git+git://github.com/PlaidCloud/xlrd3.git@master#egg=xlrd3',
         'xlwings;platform_system=="Windows"',
         'pyyaml',
     ],
     tests_require=test_deps,
     setup_requires=['pytest-runner'],
     extras_require=extras,
-    dependency_links=[
-        'git+git://github.com/PlaidCloud/plaid-rpc.git@master#egg=plaidcloud-rpc'
-    ],
     long_description=long_description,
     long_description_content_type='text/markdown',
 )
