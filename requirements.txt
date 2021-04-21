@@ -23,5 +23,5 @@ tables
 texttable
 toolz
 unicodecsv
-xlrd
+xlrd3
 xlwings;platform_system=="Windows"
