@@ -2315,6 +2315,7 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
     """
     logger.debug('opening workbook for conversion')
     wb = xlrd.open_workbook(excel_file_name)
+    datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
     with open(csv_file_name, 'wb') as csv_file:
         wr = csv.writer(
@@ -2363,11 +2364,11 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
                         else get_formatted_number(c.value)
                         if c.ctype == xlrd.XL_CELL_NUMBER
                         else datetime.datetime(
-                            *xlrd.xldate_as_tuple(c.value, wb.datemode)
+                            *xlrd.xldate_as_tuple(c.value, datemode)
                         ).isoformat()
-                        if xlrd.xldate_as_tuple(c.value, wb.datemode)[0] != 0
+                        if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0
                         else datetime.time(
-                            *xlrd.xldate_as_tuple(c.value, wb.datemode)[:3]
+                            *xlrd.xldate_as_tuple(c.value, datemode)[:3]
                         ).isoformat()
                     )
                     for c in sh.row(rownum)
