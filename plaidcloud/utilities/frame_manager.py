@@ -15,6 +15,7 @@ import datetime
 from functools import wraps
 import traceback
 import xlrd3 as xlrd
+import openpyxl
 import unicodecsv as csv
 
 from pandas.api.types import is_string_dtype
@@ -2312,6 +2313,27 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
         sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
         clean (bool, optional): Remove blank rows
         has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
+    """
+    return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    try:
+        openpyxl.load_workbook(excel_file_name, read_only=True)
+    except:
+        logger.exception(f'Unable to open workbook with openpyxl: {excel_file_name}')
+        return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    return excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+
+
+def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
+    """Converts an excel file to a CSV file
+
+    Args:
+        excel_file_name (str): The name of the input Excel file
+        csv_file_name (str): The name of the output CSV file
+        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
+        clean (bool, optional): Remove blank rows
+        has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     logger.debug('opening workbook for conversion')
     wb = xlrd.open_workbook(excel_file_name)
@@ -2372,6 +2394,103 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
                         ).isoformat()
                     )
                     for c in sh.row(rownum)
+                ])
+
+        if skipped_rows:
+            logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
+    logger.debug('Finished converting')
+
+
+def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
+    """Converts an excel file to a CSV file
+
+    Args:
+        excel_file_name (str): The name of the input Excel file
+        csv_file_name (str): The name of the output CSV file
+        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
+        clean (bool, optional): Remove blank rows
+        has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
+    """
+    logger.debug('opening workbook for conversion')
+    wb = openpyxl.load_workbook(excel_file_name, read_only=False, data_only=True)
+    logger.debug('Workbook Open')
+    from openpyxl.cell import cell
+    sh = wb.get_sheet_by_name(sheet_name)
+    with open(csv_file_name, 'wb') as csv_file:
+        wr = csv.writer(
+            csv_file,
+            delimiter='\t',
+            quotechar='"',
+            escapechar='"',
+        )
+
+        skipped_rows = 0
+        # Do some cleaning to account for common human errors
+        for row in sh.iter_rows(min_row=skip_rows, values_only=True):
+        # for row in islice(sh.rows, skip_rows, None):
+            # if irow % 100 == 0:
+            #     logger.debug(f'Reading Row {irow}')
+            # Just write each cell value to csv.
+            # Unless it's a DATE cell, in which case, convert it to ISO 8601
+            # The check on the first element of the tuple is to account for times.
+
+            # if skip_rows > 0 and skip_rows > rownum:
+            #     continue
+            if False: #irow == 0 and has_header:
+                # This is the header row. Force to clean header values
+                # Remove whitespace on either side
+                # Remove newlines
+                # Remove carriage returns
+                # Force to string
+                wr.writerow([
+                    (
+                        six.text_type(c.value).strip().replace('\n', '').replace('\r', '')
+                    )
+                    for c in row
+                ])
+            else:
+                if clean:
+                    if all([c.value is None for c in row]):
+                        # Skip rows that have no data.
+                        skipped_rows += 1
+
+                def _get_value(c):
+                    if c.data_type == cell.TYPE_STRING:
+                        return c.value
+                    elif c.data_type == cell.TYPE_ERROR or c.value is None:
+                        return '<NULL>'
+                    elif isinstance(c.value, datetime.datetime):
+                        return c.value.isoformat()
+                    elif c.data_type == cell.TYPE_NUMERIC and c.value == int(c.value):
+                        return int(c.value)
+                    elif c.data_type == cell.TYPE_NUMERIC:
+                        return get_formatted_number(c.value)
+                    else:
+                        raise Exception(f'Unknown cell {repr(c)}')
+
+                wr.writerow([
+                    (
+                        #_get_value(cell)
+                        #str(cell.value) if cell.value is not None else ''
+                        str(cell) if cell is not None else ''
+
+                        # if c.data_type not in [xlrd.XL_CELL_DATE, xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR, xlrd.XL_CELL_NUMBER]
+                        # # else xlrd.error_text_from_code[c.value]  # if you wanted the error text instead of NULL
+                        # # if c.ctype == xlrd.XL_CELL_ERROR
+                        # else '<NULL>'
+                        # if c.data_type in [cell.TYPE_NULL, cell.TYPE_ERROR] or c.value is None
+                        # else int(c.value)
+                        # if c.data_type == cell.TYPE_NUMERIC and c.value == int(c.value)
+                        # else get_formatted_number(c.value)
+                        # if c.data_type == cell.TYPE_NUMERIC
+                        # else c.value.isoformat()
+                        # if isinstance(c.value, datetime)
+                        # else datetime.time(
+                        #     *xlrd.xldate_as_tuple(c.value, wb.datemode)[:3]
+                        # ).isoformat()
+                    )
+                    for cell in row
                 ])
 
         if skipped_rows:
