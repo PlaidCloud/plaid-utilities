@@ -276,8 +276,6 @@ def main(model_period=None, columns=None, email_file=None):
 
 
 if __name__ == '__main__':
-    from plaidcloud.rpc.utilities.utility import do_timed_run
-
     ap = argparse.ArgumentParser()
     ap.add_argument('--period', '-p',
                     help='Period to run, YYYY_QQ. \
@@ -292,5 +290,5 @@ if __name__ == '__main__':
                     metavar='COLNAME[,COLNAME_2,COLNAME_3,...]',
                     help='Comma-separated list of column names to clean')
     args = ap.parse_args()
-    do_timed_run(main, func_args=(args.period, args.columns, args.email_file))
+    utility.do_timed_run(main, func_args=(args.period, args.columns, args.email_file))
 
