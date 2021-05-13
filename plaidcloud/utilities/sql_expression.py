@@ -370,22 +370,23 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     return merge(default_keys, table_keys, extra_keys)
 
 
-def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='source', alias=None):
+def get_table_rep(table_id, columns, schema, metadata=None, column_key='source', alias=None):
     """
     Returns:
         sqlalchemy.Table: object representing an analyze table
     Args:
-        table_id (str): the id of the analyze table
+        table_id (str): the name of the table in the database
         columns: a list of dicts (in transform config style) columns in the analyze table
-        project_id (str): the project id of the project containing the analyze table
+        schema (str): the schema of the table
         metadata (sqlalchemy.MetaData): a sqlalchemy metadata object, to keep this table representation connected to others
         column_key (str): the key in each column dict under which to look for the column name
         alias (str, optional): If supplied, the SQL query will use the alias to make more human readable
     """
     if not table_id:
-        raise SQLExpressionError('Cannot create sqlalchemy representation of a table without a table_id.')
+        raise SQLExpressionError('Cannot create sqlalchemy representation of a table without a table name.')
 
-    schema = get_project_schema(project_id)
+    if not metadata:
+        metadata = sqlalchemy.MetaData()
 
     table = sqlalchemy.Table(
         table_id,
@@ -408,6 +409,24 @@ def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='
         return sqlalchemy.orm.aliased(table, name=alias)
 
     return table
+
+
+def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='source', alias=None):
+    """
+    Returns:
+        sqlalchemy.Table: object representing an analyze table
+    Args:
+        table_id (str): the id of the analyze table
+        columns: a list of dicts (in transform config style) columns in the analyze table
+        project_id (str): the project id of the project containing the analyze table
+        metadata (sqlalchemy.MetaData): a sqlalchemy metadata object, to keep this table representation connected to others
+        column_key (str): the key in each column dict under which to look for the column name
+        alias (str, optional): If supplied, the SQL query will use the alias to make more human readable
+    """
+
+    schema = get_project_schema(project_id)
+
+    return get_table_rep(table_id, columns, schema, metadata, column_key, alias)
 
 
 def simple_select_query(config, project, metadata, variables):
