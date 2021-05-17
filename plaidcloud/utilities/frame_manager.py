@@ -15,6 +15,7 @@ import datetime
 from functools import wraps
 import traceback
 import xlrd3 as xlrd
+import openpyxl
 import unicodecsv as csv
 
 from pandas.api.types import is_string_dtype
@@ -2315,9 +2316,30 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
         sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
         clean (bool, optional): Remove blank rows
         has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
+    """
+    return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    # try:
+    #     openpyxl.load_workbook(excel_file_name, read_only=True)
+    # except:
+    #     logger.exception(f'Unable to open workbook with openpyxl: {excel_file_name}')
+    #     return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    # return excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+
+
+def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
+    """Converts an excel file to a CSV file
+
+    Args:
+        excel_file_name (str): The name of the input Excel file
+        csv_file_name (str): The name of the output CSV file
+        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
+        clean (bool, optional): Remove blank rows
+        has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     logger.debug('opening workbook for conversion')
-    wb = xlrd.open_workbook(excel_file_name)
+    wb = xlrd.open_workbook(excel_file_name, on_demand=True)
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
     with open(csv_file_name, 'wb') as csv_file:
@@ -2375,6 +2397,84 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
                         ).isoformat()
                     )
                     for c in sh.row(rownum)
+                ])
+
+        if skipped_rows:
+            logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
+    logger.debug('Finished converting')
+
+
+def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
+    """Converts an excel file to a CSV file using openpyxl
+
+    Notes:
+        For files that I have tried, xlrd3 seems to outperform openpyxl by some measure.
+        This code is left here in case we decide to use just one supported library going forwards.
+
+    Args:
+        excel_file_name (str): The name of the input Excel file
+        csv_file_name (str): The name of the output CSV file
+        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
+        clean (bool, optional): Remove blank rows
+        has_header (bool, optional): The file has a header row
+        skip_rows (int, optional): The number of rows to skip at the top of the file
+    """
+    logger.debug('opening workbook for conversion')
+    wb = openpyxl.load_workbook(excel_file_name, read_only=True, data_only=True, keep_links=False, keep_vba=False)
+    logger.debug('Workbook Open')
+    sh = wb[sheet_name]
+    with open(csv_file_name, 'wb') as csv_file:
+        wr = csv.writer(
+            csv_file,
+            delimiter='\t',
+            quotechar='"',
+            escapechar='"',
+        )
+
+        skipped_rows = 0
+        header_done = False
+        # Do some cleaning to account for common human errors
+        for row in sh.iter_rows(min_row=skip_rows, values_only=True):
+            # Just write each cell value to csv.
+            # Unless it's a DATE cell, in which case, convert it to ISO 8601
+            # The check on the first element of the tuple is to account for times.
+            if has_header and not header_done:
+                # This is the header row. Force to clean header values
+                #   Remove whitespace on either side
+                #   Remove newlines
+                #   Remove carriage returns
+                #   Force to string
+                wr.writerow([
+                    six.text_type(cell).strip().replace('\n', '').replace('\r', '')
+                    for cell in row
+                ])
+                header_done = True
+            else:
+                if clean and all([cell is None for cell in row]):
+                    # Skip rows that have no data.
+                    skipped_rows += 1
+                    continue
+
+                # def _get_value(c):
+                #     """OpenPyXL basically does something like this anyway"""
+                #     from openpyxl.cell import cell
+                #     if c.data_type == cell.TYPE_STRING:
+                #         return c.value
+                #     elif c.data_type == cell.TYPE_ERROR or c.value is None:
+                #         return '<NULL>'
+                #     elif isinstance(c.value, datetime.datetime):
+                #         return c.value.isoformat()
+                #     elif c.data_type == cell.TYPE_NUMERIC and c.value == int(c.value):
+                #         return int(c.value)
+                #     elif c.data_type == cell.TYPE_NUMERIC:
+                #         return get_formatted_number(c.value)
+                #     else:
+                #         raise Exception(f'Unknown cell {repr(c)}')
+
+                wr.writerow([
+                    # _get_value(cell)  # if values_only=False
+                    six.text_type(cell) if cell is not None else ''
+                    for cell in row
                 ])
 
         if skipped_rows:

@@ -42,11 +42,13 @@ CSV_TYPE_DELIMITER = '::'
 SCHEMA_PREFIX = 'anlz'
 table_dot_column_regex = re.compile(r'^table(\d*)\..*')
 
+
 class SQLExpressionError(Exception):
     # Will typically be caught by
     # workflow_runner.function.utility.transform_handler and converted into a
     # UserError
     pass
+
 
 def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False, table_numbering_start=1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
@@ -69,6 +71,7 @@ def eval_expression(expression, variables, tables, extra_keys=None, disable_vari
             + '    {}\n'.format(expression)
             + message
         )
+
 
 def on_clause(table_a, table_b, join_map, special_null_handling=False):
     """ Given two analyze tables, and a map of join keys with the structure:
@@ -858,7 +861,9 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
 
 
 def allocate(source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
-             overwrite_cols_for_allocated=True, unique_cte_index=1):
+             overwrite_cols_for_allocated=True,
+             include_source_columns=None,
+             unique_cte_index=1):
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
     Args:
@@ -869,6 +874,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         denominator_columns (list): List of columns to use as denominator
         driver_value_column (str): Column name for the driver value
         overwrite_cols_for_allocated (bool): Whether to overwrite the source columns with the allocated value, if False, cols suffixed with _allocated are created
+        include_source_columns (list, optional): Columns for which we should include a *_source column (for reassignments with multiple allocation steps)
         unique_cte_index (int, optional): Unique index to use in the common table expressions if more than one
             allocation will be done within the same query
 
@@ -882,6 +888,8 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
 
     driver_value_columns = [driver_value_column]  # set up for the *possibility* of multiple driver value columns, not sure it makes sense though
     driver_count = len(driver_value_columns)
+
+    include_source_columns = include_source_columns or []
 
     # Denominator table is SUM of split values with GROUP BY denominator columns
     # Join the Denominator values to the numerator values to get a % split (add an alloc indicator of 1 in a fake column)
@@ -938,8 +946,15 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         )
     ).cte(f'ratios_{unique_cte_index}')
 
+    def _is_source_col(col):
+        return col not in set(
+            reassignment_columns +
+            (allocate_columns if overwrite_cols_for_allocated else [])
+        )
+
     allocation_select = sqlalchemy.select(
-        [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))] +
+        [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
+        [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
         [
             sqlalchemy.case(
                 [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), cte_ratios.columns[rc])],
@@ -978,7 +993,8 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         )
     ).union_all(
         sqlalchemy.select(
-            [cte_source.columns[st] for st in all_target_columns if st not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))] +
+            [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
+            [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
             [cte_source.columns[rc] for rc in reassignment_columns] +
             [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
             [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')] +
