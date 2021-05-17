@@ -2316,12 +2316,12 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
-    try:
-        openpyxl.load_workbook(excel_file_name, read_only=True)
-    except:
-        logger.exception(f'Unable to open workbook with openpyxl: {excel_file_name}')
-        return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
-    return excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    # try:
+    #     openpyxl.load_workbook(excel_file_name, read_only=True)
+    # except:
+    #     logger.exception(f'Unable to open workbook with openpyxl: {excel_file_name}')
+    #     return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
+    # return excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
 
 
 def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
@@ -2336,7 +2336,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     logger.debug('opening workbook for conversion')
-    wb = xlrd.open_workbook(excel_file_name)
+    wb = xlrd.open_workbook(excel_file_name, on_demand=True)
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
     with open(csv_file_name, 'wb') as csv_file:
