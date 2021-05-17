@@ -362,6 +362,13 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
         'time': sqlalchemy.Time,
         'Time': sqlalchemy.Time,
         'TIME': sqlalchemy.Time,
+        'binary': sqlalchemy.LargeBinary,
+        'Binary': sqlalchemy.LargeBinary,
+        'BINARY': sqlalchemy.LargeBinary,
+        'largebinary': sqlalchemy.LargeBinary,
+        'Largebinary': sqlalchemy.LargeBinary,
+        'LargeBinary': sqlalchemy.LargeBinary,
+        'LARGEBINARY': sqlalchemy.LargeBinary,
     }
 
     # Generate table1, table2, ...

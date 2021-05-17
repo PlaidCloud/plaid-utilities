@@ -111,7 +111,10 @@ def sql_from_dtype(dtype):
         'timedelta64[ns]': 'interval',
         'interval': 'interval',
         'date': 'date',
-        'time': 'time'
+        'time': 'time',
+        'binary': 'largebinary',
+        'bytea': 'largebinary',
+        'largebinary': 'largebinary',
     }
 
     if str(dtype).lower().startswith('numeric'):
