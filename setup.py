@@ -51,6 +51,7 @@ setup(
         'plaidcloud-rpc@git+git://github.com/PlaidCloud/plaid-rpc.git@master#egg=plaidcloud-rpc',
         'requests',
         'orjson',
+        'openpyxl',
         'six',
         'sqlalchemy',
         'sqlalchemy-hana',
