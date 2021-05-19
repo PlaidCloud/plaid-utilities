@@ -95,6 +95,7 @@ def sql_from_dtype(dtype):
         'integer': 'integer',
         'int64': 'bigint',  # 8 bytes
         'bigint': 'bigint',
+        'float8': 'numeric',
         'float16': 'numeric',  # variable but ensures precision
         'float32': 'numeric',  # variable but ensures precision
         'float64': 'numeric',  # variable but ensures precision
@@ -115,12 +116,25 @@ def sql_from_dtype(dtype):
         'binary': 'largebinary',
         'bytea': 'largebinary',
         'largebinary': 'largebinary',
+        'xml': 'text',
+        'uuid': 'text',
+        'money': 'numeric',
+        'real': 'numeric',
+        'json': 'text',
+        'bigserial': 'bigint',
+        'serial': 'integer',
+        'cidr': 'text',
+        'inet': 'text',
+        'macaddr': 'text',
     }
 
-    if str(dtype).lower().startswith('numeric'):
+    dtype = str(dtype).lower()
+    if dtype.startswith('num'):
         dtype = 'numeric'
+    elif 'char' in dtype:
+        dtype = 'text'
 
-    return mapping[str(dtype).lower()]
+    return mapping[dtype]
 
 
 def save_typed_psv(df, outfile, sep='|', **kwargs):
