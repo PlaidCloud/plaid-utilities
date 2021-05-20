@@ -73,6 +73,16 @@ def sql_from_dtype(dtype):
         'boolean'
         >>> sql_from_dtype('float64')
         'numeric'
+        >>> sql_from_dtype('number')
+        'numeric'
+        >>> sql_from_dtype('varchar(123)')
+        'text'
+        >>> sql_from_dtype('char(3)')
+        'text'
+        >>> sql_from_dtype('xml')
+        'text'
+        >>> sql_from_dtype('bytea')
+        'largebinary'
     """
     mapping = {
         'bool': 'boolean',
@@ -121,8 +131,6 @@ def sql_from_dtype(dtype):
         'money': 'numeric',
         'real': 'numeric',
         'json': 'text',
-        'bigserial': 'bigint',
-        'serial': 'integer',
         'cidr': 'text',
         'inet': 'text',
         'macaddr': 'text',
