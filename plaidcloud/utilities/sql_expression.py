@@ -232,7 +232,7 @@ def get_from_clause(
                 c for c in table.columns
                 if c.name == source
             # ), getattr(table.columns, source))
-            ), table.columns['source'])
+            ), table.columns[source])
         )
         return sort_fn(
             cast_fn(
