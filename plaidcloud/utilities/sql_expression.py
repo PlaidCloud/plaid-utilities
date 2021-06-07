@@ -295,6 +295,7 @@ class Result(object):
             if tc['dtype'] not in ('serial', 'bigserial')
         }
 
+        
 def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
@@ -497,7 +498,8 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
                                      " fmt or a mapping_fn!")
         else:
             # A function that formats a string with the provided fmt.
-            def mapping_fn(s): fmt.format(s)
+            def format_with_fmt(s): fmt.format(s)
+            mapping_fn = format_with_fmt
 
     if variables is None:
         variables = {}
