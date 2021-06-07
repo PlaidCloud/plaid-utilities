@@ -177,9 +177,9 @@ def get_from_clause(
     else:
         cast_fn = lambda col, type_: col
 
-    if source is not None:
-        source = source.split('.')[-1]  # If there's a ., the part after the .
-        # otherwise, the whole thing.
+    # if source is not None:
+    #     source = source.split('.')[-1]  # If there's a ., the part after the .
+    #     # otherwise, the whole thing.
 
     if aggregate:
         agg_fn = get_agg_fn(target_column_config.get('agg'))
