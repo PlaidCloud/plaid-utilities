@@ -12,7 +12,6 @@ import uuid
 from toolz.functoolz import juxt, compose
 from toolz.functoolz import identity as ident
 from toolz.dicttoolz import merge
-from functools import reduce
 
 import sqlalchemy
 import sqlalchemy.orm
@@ -175,11 +174,7 @@ def get_from_clause(
         # This is only used for standard source->target columns, because expressions depend on them
         cast_fn = sqlalchemy.cast
     else:
-        cast_fn = lambda col, type_: col
-
-    if source is not None:
-        source = source.split('.')[-1]  # If there's a ., the part after the .
-        # otherwise, the whole thing.
+        def cast_fn(col, type_): return col
 
     if aggregate:
         agg_fn = get_agg_fn(target_column_config.get('agg'))
@@ -201,7 +196,7 @@ def get_from_clause(
         # Agg_fn is ignored, and we wrap in sqlalchemy.literal
         # So is cast
         if disable_variables:
-            av = lambda x, _: x
+            def av(x, _): return x
         else:
             av = apply_variables
         return sort_fn(
@@ -218,7 +213,10 @@ def get_from_clause(
         return sort_fn(
             sqlalchemy.cast(
                 agg_fn(
-                    eval_expression(expression.strip(), variables, tables, disable_variables=disable_variables, table_numbering_start=table_numbering_start)
+                    eval_expression(
+                        expression.strip(), variables, tables, disable_variables=disable_variables,
+                        table_numbering_start=table_numbering_start,
+                    )
                 ),
                 type_=type_,
             )
@@ -226,13 +224,19 @@ def get_from_clause(
 
     elif source:
         table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
-        col = (
-            None if target_column_config.get('agg') == 'count_null'
-            else next((
-                c for c in table.columns
-                if c.name == source
-            ), getattr(table.columns, source))
-        )
+        if '.' in source:
+            source_without_table = source.split('.', 1)[1]
+        else:
+            source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
+        if target_column_config.get('agg') == 'count_null':
+            col = None
+        elif source in table.columns:
+            col = table.columns[source]
+        elif source_without_table in table.columns:
+            col = table.columns[source_without_table]
+        else:
+            raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
+
         return sort_fn(
             cast_fn(
                 agg_fn(col),
@@ -269,7 +273,7 @@ def get_agg_fn(agg_str):
     else:
         try:
             return getattr(sqlalchemy.func, agg_str)
-        except:
+        except Exception:
             return ident
 
 
@@ -291,6 +295,7 @@ class Result(object):
             if tc['dtype'] not in ('serial', 'bigserial')
         }
 
+        
 def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
@@ -490,10 +495,11 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
     if mapping_fn is None:
         if fmt is None:
             raise SQLExpressionError("modified_select_query must be called with either a"
-                            " fmt or a mapping_fn!")
+                                     " fmt or a mapping_fn!")
         else:
             # A function that formats a string with the provided fmt.
-            mapping_fn = lambda s: fmt.format(s)
+            def format_with_fmt(s): fmt.format(s)
+            mapping_fn = format_with_fmt
 
     if variables is None:
         variables = {}
@@ -589,7 +595,9 @@ def get_select_query(
     # Build WHERE section of our select query
     wheres = [w for w in wheres if w] if wheres else []
     if wheres:
-        combined_wheres = get_combined_wheres(wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start)
+        combined_wheres = get_combined_wheres(
+            wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
+        )
         select_query = select_query.where(sqlalchemy.and_(*combined_wheres))
 
     # Find any columns for sorting
@@ -749,8 +757,10 @@ def get_delete_query(table, wheres, variables=None):
 
     return delete_query
 
+
 def clean_where(w):
     return w.strip().replace('\n', '').replace('\r', '')
+
 
 def get_combined_wheres(wheres, tables, variables, disable_variables=False, table_numbering_start=1):
     return [
@@ -986,9 +996,10 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         sqlalchemy.outerjoin(
             cte_source, cte_ratios,
             sqlalchemy.and_(
-                *[cte_source.columns[dn] == cte_ratios.columns[dn]
-                  for dn in denominator_columns] +
-                 [cte_source.columns[allocable_col] == 1]
+                *[
+                    cte_source.columns[dn] == cte_ratios.columns[dn]
+                    for dn in denominator_columns
+                ] + [cte_source.columns[allocable_col] == 1]
             )
         )
     ).union_all(
