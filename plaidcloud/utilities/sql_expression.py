@@ -498,7 +498,7 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
                                      " fmt or a mapping_fn!")
         else:
             # A function that formats a string with the provided fmt.
-            def format_with_fmt(s): fmt.format(s)
+            def format_with_fmt(s): return fmt.format(s)
             mapping_fn = format_with_fmt
 
     if variables is None:
