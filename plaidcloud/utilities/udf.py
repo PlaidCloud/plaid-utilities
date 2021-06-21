@@ -96,10 +96,6 @@ def upload_udf(local_path, conn, create=True, local_root=None, project_name=None
 
     projects = conn.analyze.project.projects()
     for project in projects:
-        # debug
-        if project['name'] == 'BCBSNC_IT - Costing model':
-            a = 1
-
         if project['name'].lower() == project_name.lower():
             project_id = project['id']
             break
