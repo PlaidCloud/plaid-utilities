@@ -293,7 +293,7 @@ def num(num):
     """Make numbers pretty with comma separators."""
     if math.isnan(num):
         num = 0
-    return locale.format("%d", num, grouping=True)
+    return locale.format_string("%d", num, grouping=True)
 
 
 def cols(input_frame, title='table', print_out=True, show_dtype=True, double_quotes=False):
