@@ -2130,18 +2130,24 @@ class Dimension:
             table[hierarchy].reset_index(inplace=True)
         return table
 
-    def hierarchy_table(self, hierarchy=MAIN):
+    def hierarchy_table(self, hierarchy=MAIN, include_inherited_columns=True):
         """hierarchy_table(hierarchy=MAIN)
         Hierarchy data flattened into a dataframe
         Args:
             hierarchy (str): Hierarchy unique ID
+            include_inherited_columns (bool): If inherited property columns should be included
 
         Returns:
             df (Dataframe): Datafame with hierarchy data
                 - hierarchically sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
-        json_df = self.dim.hierarchy_table(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
+        json_df = self.dim.hierarchy_table(
+            project_id=self.project_id,
+            name=self.name,
+            hierarchy=hierarchy,
+            include_inherited_columns=include_inherited_columns
+        )
         df = self._decode_dataframe(json_df)
         df.reset_index(inplace=True)
         return df
