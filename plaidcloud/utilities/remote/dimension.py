@@ -2130,7 +2130,7 @@ class Dimension:
             table[hierarchy].reset_index(inplace=True)
         return table
 
-    def hierarchy_table(self, hierarchy=MAIN, include_inherited_columns=True):
+    def hierarchy_table(self, hierarchy=MAIN, include_inherited_columns=False):
         """hierarchy_table(hierarchy=MAIN)
         Hierarchy data flattened into a dataframe
         Args:
@@ -2138,7 +2138,7 @@ class Dimension:
             include_inherited_columns (bool): If inherited property columns should be included
 
         Returns:
-            df (Dataframe): Datafame with hierarchy data
+            df (Dataframe): Dataframe with hierarchy data
                 - hierarchically sorted nodes
                 - attributes/aliases/properties/values appended as columns
         """
