@@ -2025,6 +2025,12 @@ def lookup(source_frame, lookup_frame, left_on, right_on=None, keep_columns=None
     if right_on is None:
         right_on = left_on
 
+    if not isinstance(left_on, list):
+        left_on = [left_on]
+        
+    if not isinstance(right_on, list):
+        right_on = [right_on]
+
     drop_columns = []
 
     # optional arg to remove duplicate columns from lookup table
