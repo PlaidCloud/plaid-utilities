@@ -43,7 +43,7 @@ setup(
     install_requires=[
         'argparse',
         'chardet',
-        'ipython;python_version>"2.7"',
+        'ipython',
         'minimock',
         'numpy;python_version>="3.5"',
         'numpy<=1.16.5;python_version<"3.5"',
@@ -56,7 +56,6 @@ setup(
         'sqlalchemy',
         'sqlalchemy-hana',
         'sqlalchemy-greenplum',
-        'tables',
         'texttable',
         'toolz',
         'unicodecsv',
