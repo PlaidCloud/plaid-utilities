@@ -298,20 +298,6 @@ class TestDimension(unittest.TestCase):
         self.assertEqual(self.periods.get_properties()[0], 'test_property_name')
         self.periods.clear_property()
 
-    def testSavePreprocessed(self):
-        """ Tests the save method
-
-        Tested Methods:
-            save_preprocessed
-        """
-        temp_folder = tempfile.mkdtemp()
-        temp_file = temp_folder+'test_preprocessed.hd5'
-        self.periods.save_preprocessed(temp_file)
-        fp = open(temp_file, 'rb')
-        self.assertIsNotNone(fp)
-        fp.close()
-        os.remove(temp_file)
-
     def testSavePrettyHierarchy(self):
         """ Tests saving a pretty version of the file
 
