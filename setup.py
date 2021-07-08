@@ -56,7 +56,6 @@ setup(
         'sqlalchemy',
         'sqlalchemy-hana',
         'sqlalchemy-greenplum',
-        'tables',
         'texttable',
         'toolz',
         'unicodecsv',
