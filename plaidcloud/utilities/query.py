@@ -250,7 +250,7 @@ class Connection(object):
         query, params = self._compiled(sa_query)
         file_path = self.get_csv_by_query(query, params)
         try:
-            return self._get_df_from_csv(file_path, sa_query.columns, encoding)
+            return self._get_df_from_csv(file_path, sa_query.selected_columns, encoding)
         finally:
             try:
                 os.remove(file_path)
