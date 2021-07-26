@@ -1236,7 +1236,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
     return df_final
 
 
-def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_matches=False, show_rules=False,
+def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
                 verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration',
                 rule_id_column=None, logger=logger):
     """
@@ -1249,10 +1249,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_m
         df_rules (pandas.DataFrame): A list of rules to apply
         target_columns (list of str, optional): The target columns to apply rules on.
         include_once (bool, optional): Should records that match multiple rules
-            be included ONLY once? Defaults to `True`.
-        discrete_matches(bool, optional): results should include one record per matching rule.  If a record
-            matches multiple rules, multiple records are returned, rather than one record indicating multiple
-            matched rules.  Defaults to `False`.
+            be included ONLY once? Defaults to `True`
         show_rules (bool, optional): Display the rules in the result data? Defaults to `False`
         verbose (bool, optional): Display the rules in the log messages? Defaults
             to `True`.  This is not overly heavier than leaving it off, so we probably should
@@ -1266,16 +1263,12 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_m
         list of pandas.DataFrame: The results of applying rules to the input `df`
     """
     target_columns = target_columns or ['value']
-
     df_rules = df_rules.reset_index(drop=True)
-
     if iteration_column not in df_rules.columns:
         df_rules[iteration_column] = 1
 
-    # df['temp_index'] = df.index
     df['include'] = True
     df['log'] = ''
-
     if show_rules is True:
         df['rule_number'] = ''
         df['rule'] = ''
@@ -1287,10 +1280,8 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_m
             df[column] = ''
 
     summary = []
-
     iterations = list(set(df_rules[iteration_column]))
     iterations.sort()
-
     for iteration in iterations:
         df['include'] = True
 
@@ -1315,118 +1306,81 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_m
             else:
                 return '{}, {}'.format(rule_id, str(rule[rule_id_column]))
 
+        matches = []  # for use when include_once is False
         index = 0
-        if include_once is True or (include_once is False and discrete_matches is False):
-            for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
-                if verbose:
-                    logger.info('')
-                    logger.info('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
+        for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
+            if verbose:
+                logger.info('')
+                logger.info('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
 
-                # Find subset based on condition
-                df_subset = df[df['include'] == True]
-                input_length = len(df_subset)
-                if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
-                    try:
-                        df_subset = df_subset.query(rule[condition_column], engine='python')
-                        if verbose:
-                            logger.info('{} - input length'.format(input_length))
-                        if show_rules is True:
+            # Find subset based on condition
+            df_subset = df[df['include'] == True]
+            input_length = len(df_subset)
+            if include_once is True and input_length == 0:
+                break
+            if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
+                try:
+                    df_subset = df_subset.query(rule[condition_column], engine='python')
+                    if verbose:
+                        logger.info('{} - input length'.format(input_length))
+                    if show_rules is True:
+                        if include_once is True:
                             df.loc[list(df_subset.index), 'rule_number'] = list(map(write_rule_numbers, df.loc[list(df_subset.index), 'rule_number']))
                             df.loc[list(df_subset.index), 'rule'] = list(map(write_rule_conditions, df.loc[list(df_subset.index), 'rule']))
                             if rule_id_column:
                                 df.loc[list(df_subset.index), 'rule_id'] = list(map(write_rule_id, df.loc[list(df_subset.index), 'rule_id']))
+                        else:
+                            df_subset['rule_number'] = df_subset.index
+                            df_subset['rule'] = rule[condition_column]
+                            if rule_id_column:
+                                df_subset['rule_id'] = rule[rule_id_column]
+                except Exception as e:
+                    df_subset = pd.DataFrame()
 
-                    except Exception as e:
-                        df_subset = pd.DataFrame()
+                    def add_message(log):
+                        return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
 
-                        def add_message(log):
-                            return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
-                        if show_rules is True:
-                            df['log'] = list(map(add_message, df['log']))
-                        error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
-                        logger.exception('EXCEPTION {}'.format(error_msg))
+                    if show_rules is True:
+                        df['log'] = list(map(add_message, df['log']))
+                    error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
+                    logger.exception('EXCEPTION {}'.format(error_msg))
 
-                # Populate target columns as specified in split
-                df_subset['rule'] = rule[condition_column]
-                for column in target_columns:
-                    if rule[column] not in ['nan', '', 'None', None]:
-                    # if rule[column] != 'nan' and rule[column] != '' and rule:
-                        # df_subset[column] = rule[column]
+            # Populate target columns as specified in split
+            for column in target_columns:
+                if rule[column] not in ['nan', '', 'None', None]:
+                    if include_once is True:
                         df.loc[list(df_subset.index), column] = rule[column]
-
-                if include_once:
-                    # Exclude the records of the current split from exposure to subsequent filters.
-                    df.loc[list(df_subset.index), 'include'] = False
-
-                matched_length = len(df_subset)
-                if verbose:
-                    logger.info('{} - matched length'.format(matched_length))
-
-                summary_record = {
-                    'row_num': index,
-                    iteration_column: iteration,
-                    'input_records': input_length,
-                    'matched_records': matched_length,
-                }
-                summary_record.update(rule)
-                summary.append(summary_record)
-
-        else:
-            # Seeking discrete matches. This means that if a given record matches 3 rules, then we should return
-            # multiple resultant records.  This is a different approach.  It's the way we used to do it.
-            matches = []
-
-            for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
-                if verbose:
-                    logger.info('')
-                    logger.info('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
-
-                # Find subset based on condition
-                df_subset = df[df['include'] == True]
-                input_length = len(df_subset)
-                if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
-                    try:
-                        df_subset = df_subset.query(rule[condition_column], engine='python')
-                        if verbose:
-                            logger.info('{} - input length'.format(input_length))
-
-                    except Exception as e:
-                        df_subset = pd.DataFrame()
-
-                        def add_message(log):
-                            return '<{} ::: {}>'.format(e, log)  # removed redundant rule[condition_column] param from format string
-                        if show_rules is True:
-                            df['log'] = list(map(add_message, df['log']))
-                        error_msg = ' (rule_num {0}) {1} error: {2}'.format(index, rule[condition_column], e)
-                        logger.exception('EXCEPTION {}'.format(error_msg))
-
-                # Populate target columns as specified in split
-                df_subset['rule'] = rule[condition_column]
-                for column in target_columns:
-                    if rule[column] not in ['nan', '', 'None', None]:
+                    else:
                         df_subset[column] = rule[column]
+            # The way we're doing this allows multiple matches if include_once is False.
+            # Future: MAY be a reason to allow first-in wins or last-in wins, or ALL win.
+            # MIKE look here.
+            # df_final = pd.concat([df_final, df_subset])
+            matched_length = len(df_subset)
+            if verbose:
+                logger.info('{} - matched length'.format(matched_length))
 
-                matched_length = len(df_subset)
-                if verbose:
-                    logger.info('{} - matched length'.format(matched_length))
-
+            if include_once:
+                # Exclude the records of the current split from exposure to subsequent filters.
+                df.loc[list(df_subset.index), 'include'] = False
+            else:
                 if matched_length > 0:
                     matches.append(df_subset)
 
-                summary_record = {
-                    'row_num': index,
-                    iteration_column: iteration,
-                    'input_records': input_length,
-                    'matched_records': matched_length,
-                }
-                summary_record.update(rule)
-                summary.append(summary_record)
+            summary_record = {
+                'row_num': index,
+                iteration_column: iteration,
+                'input_records': input_length,
+                'matched_records': matched_length,
+            }
+            summary_record.update(rule)
+            summary.append(summary_record)
 
+        if include_once is False:
             if len(matches) > 0:
                 df = pd.concat(matches)
             else:
                 df = pd.DataFrame()
-
         # unmatched record:
         unmatched_length = len(df[df['include'] == True])
         summary.append({
@@ -1439,10 +1393,9 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, discrete_m
 
     df_summary = pd.DataFrame.from_records(summary)
     if show_rules is True:
-        drop_cols = ['include']
+        df.drop(columns=['include'], inplace=True, errors='ignore')
     else:
-        drop_cols = ['include', 'rule_number', 'rule', 'rule_id']
-    df.drop(columns=drop_cols, inplace=True, errors='ignore')
+        df.drop(columns=['include', 'rule_number', 'rule', 'rule_id'], inplace=True, errors='ignore')
     return [df, df_summary]
 
 
