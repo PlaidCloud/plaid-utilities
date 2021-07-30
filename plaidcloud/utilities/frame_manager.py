@@ -1380,7 +1380,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             if len(matches) > 0:
                 df = pd.concat(matches)
             else:
-                df = pd.DataFrame()
+                df = pd.DataFrame().reindex(columns=df.columns)
         # unmatched record:
         unmatched_length = len(df[df['include'] == True])
         summary.append({
