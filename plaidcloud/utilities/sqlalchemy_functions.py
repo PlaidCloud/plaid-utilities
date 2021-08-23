@@ -153,7 +153,7 @@ def compile_import_col(element, compiler, **kw):
     return compiler.process(
         import_cast(col, dtype, date_format, trailing_negs) if dtype == 'text' else
         case(
-            [(func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None)],
+            (func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None),
             else_=import_cast(col, dtype, date_format, trailing_negs)
         ),
         **kw
@@ -208,7 +208,8 @@ def compile_import_cast_hana(element, compiler, **kw):
     elif dtype == 'boolean':
         return compiler.process(
             func.case(
-                [(func.to_nvarchar(col) == 'True', 1), (func.to_nvarchar(col) == 'False', 0)],
+                (func.to_nvarchar(col) == 'True', 1),
+                (func.to_nvarchar(col) == 'False', 0),
                 else_=None
             )
         )
@@ -267,7 +268,7 @@ def compile_sql_metric_multiply(element, compiler, **kw):
             sqlalchemy.UnicodeText
         )
 
-    exp = sqlalchemy.case([
+    exp = sqlalchemy.case(*[
         (exp.endswith(abrev), apply_multiplier(exp, number_abbreviations[abrev]))
         for abrev in number_abbreviations
     ], else_=exp)

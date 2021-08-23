@@ -9,13 +9,12 @@ from __future__ import division
 import re
 import uuid
 
-from toolz.functoolz import juxt, compose
+from toolz.functoolz import juxt, compose, curry
 from toolz.functoolz import identity as ident
-from toolz.dicttoolz import merge
+from toolz.dicttoolz import merge, valfilter
 
 import sqlalchemy
 import sqlalchemy.orm
-
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
@@ -24,7 +23,7 @@ from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import
 
 __author__ = 'Adams Tower'
 __maintainer__ = 'Adams Tower <adams.tower@tartansolutions.com>'
-__copyright__ = '© Copyright 2017-2020, Tartan Solutions, Inc'
+__copyright__ = '© Copyright 2017-2021, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
 # TODO: move transform functions here, document them, and refactor their api
@@ -49,12 +48,17 @@ class SQLExpressionError(Exception):
     pass
 
 
+filter_nulls = curry(valfilter, lambda v: v is not None)
+
+
 def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False, table_numbering_start=1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
+
     if disable_variables:
         expression_with_variables = expression
     else:
         expression_with_variables = apply_variables(expression, variables)
+
     compiled_expression = compile(
         expression_with_variables,
         '<string>',
@@ -139,30 +143,28 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     source_name = target_column_config['source']
 
     match = table_dot_column_regex.match(source_name)
-
     if match:  # They gave us a table number. Subtract 1 to find it's index
         table_number = int(match.groups()[0])
         return source_tables[table_number - table_numbering_start]
 
-    elif source_name.startswith('table.'):  # special case for just 'table'
+    if source_name.startswith('table.'):  # special case for just 'table'
         return source_tables[0]
 
-    else:
-        # None of our shortcuts worked, so look for the first table to have a
-        # column of that name.
-        for table, columns in zip(source_tables, source_column_configs):
-            columnset = set([c['source'] for c in columns])
-            if source_name in columnset:
-                return table
+    # None of our shortcuts worked, so look for the first table to have a
+    # column of that name.
+    for table, columns in zip(source_tables, source_column_configs):
+        columnset = {c['source'] for c in columns}
+        if source_name in columnset:
+            return table
 
-        # If nothing found at all:
-        raise SQLExpressionError("Mapped source column {} is not in any source tables.".format(source_name))
+    # If nothing found at all:
+    raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
 def get_from_clause(
-        tables, target_column_config, source_column_configs, aggregate=False,
-        sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
-    ):
+    tables, target_column_config, source_column_configs, aggregate=False,
+    sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
+):
     """Given info from a config, returns a sqlalchemy from clause."""
 
     expression = target_column_config.get('expression')
@@ -170,64 +172,59 @@ def get_from_clause(
     source = target_column_config.get('source')
     name = target_column_config.get('target')
     type_ = sqlalchemy_from_dtype(target_column_config.get('dtype'))
-    if cast:
-        # This is only used for standard source->target columns, because expressions depend on them
-        cast_fn = sqlalchemy.cast
-    else:
-        def cast_fn(col, type_): return col
 
-    if aggregate:
+    # always cast expressions, pay attention to cast param for source mappings
+    if expression or (source and cast):
+        cast_fn = curry(sqlalchemy.cast, type_=type_)
+    else:
+        cast_fn = ident
+
+    # aggregate applies to expressions and source mappings but not constants
+    if aggregate and not constant:
         agg_fn = get_agg_fn(target_column_config.get('agg'))
     else:
         agg_fn = ident
 
-    if sort and 'sort' in target_column_config:
-        if target_column_config['sort']['ascending']:
-            sort_fn = sqlalchemy.asc
-        else:
-            sort_fn = sqlalchemy.desc
-    else:
+    # sort everything
+    if not sort or 'sort' not in target_column_config:
         sort_fn = ident
+    elif target_column_config['sort']['ascending']:
+        sort_fn = sqlalchemy.asc
+    else:
+        sort_fn = sqlalchemy.desc
 
-    if variables is None:
-        variables = {}
+    def label_fn(expr):
+        return expr.label(name)
+
+    process = compose(label_fn, sort_fn, agg_fn, cast_fn)
 
     if constant:
         # Agg_fn is ignored, and we wrap in sqlalchemy.literal
         # So is cast
         if disable_variables:
-            def av(x, _): return x
+            var_fn = ident
         else:
-            av = apply_variables
-        return sort_fn(
-            sqlalchemy.cast(
-                sqlalchemy.literal(
-                    av(constant, variables),
-                    type_=type_,
-                ),
-                type_=type_,
-            )
-        ).label(name)
+            var_fn = curry(apply_variables, variables=variables)
+        const = sqlalchemy.literal(var_fn(constant), type_=type_)
+        return process(const)
 
-    elif expression:
-        return sort_fn(
-            sqlalchemy.cast(
-                agg_fn(
-                    eval_expression(
-                        expression.strip(), variables, tables, disable_variables=disable_variables,
-                        table_numbering_start=table_numbering_start,
-                    )
-                ),
-                type_=type_,
-            )
-        ).label(name)
+    if expression:
+        expr = eval_expression(
+            expression.strip(),
+            variables,
+            tables,
+            disable_variables=disable_variables,
+            table_numbering_start=table_numbering_start,
+        )
+        return process(expr)
 
-    elif source:
+    if source:
         table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
         if '.' in source:
             source_without_table = source.split('.', 1)[1]
         else:
             source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
+
         if target_column_config.get('agg') == 'count_null':
             col = None
         elif source in table.columns:
@@ -237,59 +234,56 @@ def get_from_clause(
         else:
             raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
 
-        return sort_fn(
-            cast_fn(
-                agg_fn(col),
-                type_=type_,
-            )
-        ).label(name)
+        return process(col)
 
-    elif target_column_config.get('dtype') in ('serial', 'bigserial'):
+    if target_column_config.get('dtype') in ('serial', 'bigserial'):
         return None
 
-    else:
-        raise SQLExpressionError('Target Column {} needs either a Constant, an Expression or a Source Column!'.format(
-            target_column_config.get('target')
-        ))
+    # If we get here...
+    raise SQLExpressionError('Target Column {} needs either a Constant, an Expression or a Source Column!'.format(
+        target_column_config.get('target')
+    ))
 
 
-def get_project_schema(project_id=None):
-    schema = project_id
-    if not schema.startswith(SCHEMA_PREFIX):
-        schema = '{}{}'.format(SCHEMA_PREFIX, schema)
-    return schema
+def get_project_schema(project_id):
+    if project_id.startswith(SCHEMA_PREFIX):
+        return project_id
+    
+    return f'{SCHEMA_PREFIX}{project_id}'
 
 
 def get_agg_fn(agg_str):
     """Mapping of aggregation strings to aggregation functions.
        Aggregation strings ending in '_null' will include nulls, but will resolve to the same aggregation name.
     """
-    if agg_str is None:
+    if not agg_str or agg_str in ['group', 'dont_group']:
         return ident
-    elif agg_str.endswith('_null'):
+
+    if agg_str.endswith('_null'):
         return get_agg_fn(agg_str[:-5])
-    elif agg_str in ['group', 'dont_group']:
-        return ident
-    else:
-        try:
-            return getattr(sqlalchemy.func, agg_str)
-        except Exception:
-            return ident
+
+    if hasattr(sqlalchemy.func, agg_str):
+        return getattr(sqlalchemy.func, agg_str)
+
+    return ident
 
 
 class Result(object):
-    # TODO: figure out what this is for. It looks like it's similar to a
-    #  sqlalchemy result object, and it's being made available to the user when
-    #  they're writing a HAVING clause.
+    "This lets a user refer to the columns of the result of the initial query from within a HAVING clause"
 
     def __init__(
-            self, tables, target_columns, source_column_configs,
-            aggregate=False, sort=False, variables=None, table_numbering_start=1):
-
+        self, tables, target_columns, source_column_configs,
+        aggregate=False, sort=False, variables=None, table_numbering_start=1
+    ):
         self.__dict__ = {
             tc['target']: get_from_clause(
-                tables, tc, source_column_configs, aggregate, sort,
-                variables=variables or {}, table_numbering_start=table_numbering_start,
+                tables,
+                tc,
+                source_column_configs,
+                aggregate,
+                sort,
+                variables=variables,
+                table_numbering_start=table_numbering_start,
             )
             for tc in target_columns
             if tc['dtype'] not in ('serial', 'bigserial')
@@ -299,20 +293,15 @@ class Result(object):
 def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
-    if extra_keys is None:
-        extra_keys = {}
+    extra_keys = extra_keys or {}
 
     def get_column(table, col):
         if col in table:
             return table[col]
-        else:
-            # Obtaining the table here would be really ugly. table refers to a
-            # table.columns object. We could maybe change it to some extension of whatever the table.columns object is
-            raise SQLExpressionError(
-                'Could not run get_column: column {col} does not exist.'.format(
-                    col=repr(col),
-                )
-            )
+
+        # Obtaining the table here would be really ugly. table refers to a
+        # table.columns object. We could maybe change it to some extension of whatever the table.columns object is
+        raise SQLExpressionError(f'Could not run get_column: column {repr(col)} does not exist.')
 
     default_keys = {
         'sqlalchemy': sqlalchemy,
@@ -377,10 +366,7 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     }
 
     # Generate table1, table2, ...
-    table_keys = {
-        'table{}'.format(i): table.columns
-        for i, table in enumerate(tables, start=table_numbering_start)
-    }
+    table_keys = {f'table{n}': table.columns for n, table in enumerate(tables, start=table_numbering_start)}
 
     return merge(default_keys, table_keys, extra_keys)
 
@@ -414,10 +400,10 @@ def get_table_rep(table_id, columns, schema, metadata=None, column_key='source',
             for sc in columns
         ],
         schema=schema,
-        extend_existing=True  # If this is the second object representing this
-                              # table, update.
-                              # If you made it with this function, it should
-                              # be no different.
+        extend_existing=True,  # If this is the second object representing this
+                               # table, update.
+                               # If you made it with this function, it should
+                               # be no different.
     )
 
     if alias:
@@ -447,25 +433,21 @@ def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='
 def simple_select_query(config, project, metadata, variables):
     """Returns a select query from a single extract config, with a single
     source table, and standard key names."""
-    if variables is None:
-        variables = {}
 
     # Make a sqlalchemy representation of the source table
     from_table = get_table_rep_using_id(
         config['source'], config['source_columns'],
-        project, metadata, alias=config.get('source_alias')
+        project, metadata, alias=config.get('source_alias'),
     )
 
     # Figure out select query
-    select_query = get_select_query(
+    return get_select_query(
         tables=[from_table],
         source_columns=[config['source_columns']],
         target_columns=config['target_columns'],
         wheres=[config.get('source_where')],
         config=config, variables=variables,
     )
-
-    return select_query
 
 
 def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, variables=None):
@@ -488,7 +470,7 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
     required_args = (
         'source', 'source_columns', 'target_columns', 'source_where',
         'aggregate', 'having', 'use_target_slicer', 'limit_target_start',
-        'limit_target_end', 'distinct', 'source_alias'
+        'limit_target_end', 'distinct', 'source_alias',
     )
 
     # If there's no mapping_fn, turn fmt into a mapping_fn.
@@ -501,29 +483,23 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
             def format_with_fmt(s): return fmt.format(s)
             mapping_fn = format_with_fmt
 
-    if variables is None:
-        variables = {}
-
     # Generate a fake config, taking the value of the modified keys from the
     # original config, or if those don't exist the value of the regular keys
     # from the original config.
-    cleaned_config = {
+    cleaned_config = filter_nulls({
         arg: config.get(mapping_fn(arg), config.get(arg))
         for arg in required_args
-    }
-    # Remove missing values, so they'll use defaults or error correctly deeper
-    # in.
-    cleaned_config = {k: v for k, v in cleaned_config.items() if v is not None}
+    })
 
     return simple_select_query(cleaned_config, project, metadata, variables)
 
 
 def get_select_query(
-        tables, source_columns, target_columns, wheres, config=None,
-        variables=None, aggregate=None, having=None, use_target_slicer=None,
-        limit_target_start=None, limit_target_end=None, distinct=None,
-        count=None, disable_variables=None, table_numbering_start=1,
-    ):
+    tables, source_columns, target_columns, wheres, config=None,
+    variables=None, aggregate=None, having=None, use_target_slicer=None,
+    limit_target_start=None, limit_target_end=None, distinct=None,
+    count=None, disable_variables=None, table_numbering_start=1,
+):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
     source_columns, and wheres should be lists, so that multiple tables can be
@@ -548,27 +524,20 @@ def get_select_query(
 
     """
 
-    if config is None:
-        config = {}
-    if variables is None:
-        variables = {}
-    # Ugh, there's really no way to write a macro to do this, except exec
-    if aggregate is None:
-        aggregate = config.get('aggregate', False)
-    if having is None:
-        having = config.get('having', None)
-    if use_target_slicer is None:
-        use_target_slicer = config.get('use_target_slicer', False)
-    if limit_target_start is None:
-        limit_target_start = config.get('limit_target_start', 0)
-    if limit_target_end is None:
-        limit_target_end = config.get('limit_target_end', 0)
-    if distinct is None:
-        distinct = config.get('distinct', False)
-    if count is None:
-        count = config.get('count', False)
-    if disable_variables is None:
-        disable_variables = config.get('disable_variables', False)
+    config = config or {}
+    vars_to_defaults = {
+        'aggregate': False,
+        'having': None,
+        'use_target_slicer': False,
+        'limit_target_start': 0,
+        'limit_target_end': 0,
+        'distinct': False,
+        'count': False,
+        'disable_variables': False,
+    }
+    for var in vars_to_defaults:
+        if locals().get(var) is None:
+            locals()[var] = config.get(var, vars_to_defaults.get(var))
 
     # Build SELECT x FROM y section of our select query
     if count:
@@ -598,7 +567,7 @@ def get_select_query(
         combined_wheres = get_combined_wheres(
             wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
         )
-        select_query = select_query.where(sqlalchemy.and_(*combined_wheres))
+        select_query = select_query.where(*combined_wheres)
 
     # Find any columns for sorting
     columns_to_sort_on = [
@@ -606,7 +575,8 @@ def get_select_query(
         for stc in target_columns
         if (
             stc.get('dtype') not in ('serial', 'bigserial')
-            and stc.get('sort') and stc['sort'].get('ascending') is not None
+            and stc.get('sort')
+            and stc['sort'].get('ascending') is not None
         )
     ]
 
@@ -695,65 +665,41 @@ def get_insert_query(target_table, target_columns, select_query):
 
 
 def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
-    variables = variables or {}
     update_query = sqlalchemy.update(table)
 
     combined_wheres = get_combined_wheres(wheres, [table], variables)
-    if len(combined_wheres) > 0:
-        update_query = update_query.where(sqlalchemy.and_(*combined_wheres))
+    if combined_wheres:
+        update_query = update_query.where(*combined_wheres)
 
     # Build values dict
-    values = {}
-    for tc in target_columns:
-        col_name = tc['source']
-        dtype = dtype_map.get(col_name, 'text')
-        type_ = sqlalchemy_from_dtype(dtype)
-        col_val = None
-        add_ok = False
+    def get_val(tc):
+        if tc.get('nullify'):
+            return None
+        if tc.get('expression'):
+            return eval_expression(tc['expression'].strip(), variables, [table])
 
-        const_val = tc.get('constant')
-        expr_val = tc.get('expression')
-        null_val = tc.get('nullify', False)
-
-        if null_val:
-            col_val = None
-            add_ok = True
-        else:
-            if const_val is not None and len(const_val) > 0:
-                col_val = sqlalchemy.literal(
-                    apply_variables(const_val, variables),
-                    type_=type_,
-                )
-                add_ok = True
-
-            if expr_val is not None and len(expr_val) > 0:
-                col_val = eval_expression(expr_val.strip(), variables, [table])
-                add_ok = True
-
-            # Special condition for empty string
-            if col_val is None and dtype == 'text':
-                # This only applies for text if nullify isn't set to true
-                col_val = u''
-                add_ok = True
-
-        if add_ok:
-            # Don't add any columns that don't have a specified target value
-            # This protects users from having additional columns in the list but with no value specified
-            values[col_name] = col_val
-
-    update_query = update_query.values(values)
-
-    return update_query
+        dtype = dtype_map.get(tc['source'], 'text')
+        if tc.get('constant'):
+            return sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))
+        if dtype == 'text':
+            return u''
+        
+        return None
+        
+    values = filter_nulls({
+        tc['source']: get_val(tc)
+        for tc in target_columns
+    })
+    
+    return update_query.values(values)
 
 
 def get_delete_query(table, wheres, variables=None):
-    variables = variables or {}
-
     delete_query = sqlalchemy.delete(table)
 
     combined_wheres = get_combined_wheres(wheres, [table], variables)
-    if len(combined_wheres) > 0:
-        delete_query = delete_query.where(sqlalchemy.and_(*combined_wheres))
+    if combined_wheres:
+        delete_query = delete_query.where(*combined_wheres)
 
     return delete_query
 
@@ -764,28 +710,28 @@ def clean_where(w):
 
 def get_combined_wheres(wheres, tables, variables, disable_variables=False, table_numbering_start=1):
     return [
-        eval_expression(clean_where(w), variables, tables, disable_variables=disable_variables, table_numbering_start=table_numbering_start)
-        for w in wheres if w
+        eval_expression(
+            clean_where(where),
+            variables,
+            tables,
+            disable_variables=disable_variables,
+            table_numbering_start=table_numbering_start,
+        )
+        for where in wheres
+        if where
     ]
 
 
 def apply_output_filter(original_query, filter, variables=None):
-    original_query = original_query.alias('result')
-    where_clause = eval_expression(
-        clean_where(filter), variables, [],
-        extra_keys={
-            'result': original_query.columns
-        }
-    )
-    return sqlalchemy.select(
-        original_query.columns
-    ).where(
-        where_clause
-    )
+    original_query = original_query.subquery('result')
+    where_clause = eval_expression(clean_where(filter), variables, [], extra_keys={'result': original_query.columns})
+    return sqlalchemy.select(original_query.columns).where(where_clause)
 
 
-def import_data_query(project_id, target_table_id, source_columns, target_columns, date_format='',
-                      trailing_negatives=False, config=None, variables=None):
+def import_data_query(
+    project_id, target_table_id, source_columns, target_columns, date_format='',
+    trailing_negatives=False, config=None, variables=None,
+):
     """Provides a SQLAlchemy insert query to transfer data from a text import temporary table into the target table.
 
     Notes:
@@ -818,21 +764,13 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
         }
         for s in source_columns
     ]
-    temp_table_columns.extend([{
-        'source': MAGIC_COLUMN_MAPPING[k],
-        'dtype': k
-    } for k in MAGIC_COLUMN_MAPPING])
+    temp_table_columns.extend([{'source': MAGIC_COLUMN_MAPPING[k], 'dtype': k} for k in MAGIC_COLUMN_MAPPING])
 
     for t in target_columns:
         if t['dtype'] in MAGIC_COLUMN_MAPPING:
             t['source'] = MAGIC_COLUMN_MAPPING[t['dtype']]
 
-    target_meta = [
-        {
-            'id': t['target'],
-            'dtype': t['dtype'],
-        } for t in target_columns
-    ]
+    target_meta = [{'id': t['target'], 'dtype': t['dtype']} for t in target_columns]
 
     # Add default expression to target columns
     for tc in target_columns:
@@ -870,10 +808,10 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
     return get_insert_query(new_table, target_columns, select_query)
 
 
-def allocate(source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
-             overwrite_cols_for_allocated=True,
-             include_source_columns=None,
-             unique_cte_index=1):
+def allocate(
+    source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
+    overwrite_cols_for_allocated=True, include_source_columns=None, unique_cte_index=1,
+):
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
     Args:
@@ -906,7 +844,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     # Outer join the source table to the split % info with a alloc column that is coalesce(driver alloc column, 0).  This produces a 1 if it allocated.
     allocable_col = 'allocable'
     if allocable_col not in all_target_columns:
-        source_query = source_query.add_columns(*[sqlalchemy.literal(1).label(allocable_col)])
+        source_query = source_query.add_columns(sqlalchemy.literal(1).label(allocable_col))
 
     def _get_shred_col_name(col):
         return f'shred_{col}' if driver_count > 1 else 'shred'
@@ -917,106 +855,124 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     cte_source = source_query.cte(f'alloc_source_{unique_cte_index}')
     cte_driver = driver_query.cte(f'alloc_driver_{unique_cte_index}')
 
-    cte_consol_driver = sqlalchemy.select(
-        [cte_driver.columns[d] for d in numerator_columns + denominator_columns] +
-        [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
-    ).where(
-        cte_driver.columns[driver_value_column] != 0
-    ).group_by(
-        *[cte_driver.columns[d] for d in numerator_columns + denominator_columns]
-    ).cte(f'consol_driver_{unique_cte_index}')
-
-    cte_denominator = sqlalchemy.select(
-        [cte_consol_driver.columns[d] for d in denominator_columns] +
-        [sqlalchemy.func.sum(cte_consol_driver.columns[d]).label(d) for d in driver_value_columns]
-    ).group_by(
-        *[cte_consol_driver.columns[d] for d in denominator_columns]
-    ).cte(f'denominator_{unique_cte_index}')
-
-    cte_ratios = sqlalchemy.select(
-        [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns] +
-        # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
-        [
-            sqlalchemy.func.cast(
-                sqlalchemy.func.nullif(
-                    sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC) / sqlalchemy.func.nullif(
-                        cte_denominator.columns[d], 0),
-                    0
-                ),
-                sqlalchemy.NUMERIC
-            ).label(_get_shred_col_name(d))
-            for d in driver_value_columns
-        ]
-    ).select_from(
-        sqlalchemy.join(
-            cte_consol_driver, cte_denominator,
-            sqlalchemy.and_(
-                *[cte_consol_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
-            )
-        )
-    ).cte(f'ratios_{unique_cte_index}')
-
-    def _is_source_col(col):
-        return col not in set(
-            reassignment_columns +
-            (allocate_columns if overwrite_cols_for_allocated else [])
-        )
-
-    allocation_select = sqlalchemy.select(
-        [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
-        [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
-        [
-            sqlalchemy.case(
-                [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), cte_ratios.columns[rc])],
-                else_=cte_source.columns[rc]
-            ).label(rc)
-            for rc in reassignment_columns
-        ] +
-        [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
-        [
-            sqlalchemy.case(
-                [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1)],
-                else_=0
-            ).label('alloc_status')
-        ] +
-        [
-            cte_ratios.columns[_get_shred_col_name(d)]
-            for d in driver_value_columns
-        ] +
-        [
-            sqlalchemy.case(
-                # pass through source value if driver value is null (not found, not allocable, divide by zero)
-                [(cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac])],
-                else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac]
-            ).label(_get_allocated_col_name(ac))
-            for ac in allocate_columns
-            for d in driver_value_columns
-        ]
-    ).select_from(
-        sqlalchemy.outerjoin(
-            cte_source, cte_ratios,
-            sqlalchemy.and_(
-                *[
-                    cte_source.columns[dn] == cte_ratios.columns[dn]
-                    for dn in denominator_columns
-                ] + [cte_source.columns[allocable_col] == 1]
-            )
-        )
-    ).union_all(
+    cte_consol_driver = (
         sqlalchemy.select(
-            [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
-            [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
-            [cte_source.columns[rc] for rc in reassignment_columns] +
-            [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
-            [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')] +
-            [sqlalchemy.func.cast(sqlalchemy.literal(None), sqlalchemy.Numeric).label(_get_shred_col_name(d)) for d in driver_value_columns] +
-            [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
-        ).where(
-            cte_source.columns[allocable_col] == 0
-        ).distinct()
+            [cte_driver.columns[d] for d in numerator_columns + denominator_columns]
+            + [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
+        )
+        .where(cte_driver.columns[driver_value_column] != 0)
+        .group_by(*[cte_driver.columns[d] for d in numerator_columns + denominator_columns])
+        .cte(f'consol_driver_{unique_cte_index}')
     )
 
-    return allocation_select
+    cte_denominator = (
+        sqlalchemy.select(
+            [cte_consol_driver.columns[d] for d in denominator_columns]
+            + [sqlalchemy.func.sum(cte_consol_driver.columns[d]).label(d) for d in driver_value_columns]
+        )
+        .group_by(*[cte_consol_driver.columns[d] for d in denominator_columns])
+        .cte(f'denominator_{unique_cte_index}')
+    )
+
+    cte_ratios = (
+        sqlalchemy.select(
+            [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns]
+            + [
+                # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
+                sqlalchemy.func.cast(
+                    sqlalchemy.func.nullif(
+                        sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC)
+                        / sqlalchemy.func.nullif(cte_denominator.columns[d], 0),
+                        0,
+                    ),
+                    sqlalchemy.NUMERIC,
+                ).label(_get_shred_col_name(d))
+                for d in driver_value_columns
+            ]
+        )
+        .select_from(
+            sqlalchemy.join(
+                cte_consol_driver,
+                cte_denominator,
+                sqlalchemy.and_(
+                    *[cte_consol_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
+                ),
+            )
+        )
+        .cte(f'ratios_{unique_cte_index}')
+    )
+
+    def _is_source_col(col):
+        return col not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))
+
+    return (
+        sqlalchemy.select(
+            [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+            + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
+            + [
+                sqlalchemy.case(
+                    [
+                        (
+                            cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()),
+                            cte_ratios.columns[rc],
+                        )
+                    ],
+                    else_=cte_source.columns[rc],
+                ).label(rc)
+                for rc in reassignment_columns
+            ]
+            + [
+                cte_ratios.columns[dt]
+                for dt in all_driver_columns
+                if dt not in set(all_target_columns + reassignment_columns)
+            ]
+            + [
+                sqlalchemy.case(
+                    [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1)], else_=0
+                ).label('alloc_status')
+            ]
+            + [cte_ratios.columns[_get_shred_col_name(d)] for d in driver_value_columns]
+            + [
+                sqlalchemy.case(
+                    # pass through source value if driver value is null (not found, not allocable, divide by zero)
+                    [(cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac])],
+                    else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac],
+                ).label(_get_allocated_col_name(ac))
+                for ac in allocate_columns
+                for d in driver_value_columns
+            ]
+        )
+        .select_from(
+            sqlalchemy.outerjoin(
+                cte_source,
+                cte_ratios,
+                sqlalchemy.and_(
+                    *[cte_source.columns[dn] == cte_ratios.columns[dn] for dn in denominator_columns]
+                    + [cte_source.columns[allocable_col] == 1]
+                ),
+            )
+        )
+        .union_all(
+            sqlalchemy.select(
+                [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+                + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
+                + [cte_source.columns[rc] for rc in reassignment_columns]
+                + [
+                    cte_ratios.columns[dt]
+                    for dt in all_driver_columns
+                    if dt not in set(all_target_columns + reassignment_columns)
+                ]
+                + [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')]
+                + [
+                    sqlalchemy.func.cast(sqlalchemy.literal(None), sqlalchemy.Numeric).label(_get_shred_col_name(d))
+                    for d in driver_value_columns
+                ]
+                + [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
+            )
+            .where(cte_source.columns[allocable_col] == 0)
+            .distinct()
+        )
+    )
 
 
 def apply_rules():
