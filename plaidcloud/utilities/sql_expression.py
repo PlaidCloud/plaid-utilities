@@ -137,7 +137,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     if target_column_config.get('source_table'):
         if target_column_config['source_table'].lower() in ('table a', 'table1'):
             return source_tables[0]
-        elif target_column_config['source_table'].lower() in ('table b', 'table2'):
+        if target_column_config['source_table'].lower() in ('table b', 'table2'):
             return source_tables[1]
 
     source_name = target_column_config['source']
@@ -478,10 +478,10 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
         if fmt is None:
             raise SQLExpressionError("modified_select_query must be called with either a"
                                      " fmt or a mapping_fn!")
-        else:
-            # A function that formats a string with the provided fmt.
-            def format_with_fmt(s): return fmt.format(s)
-            mapping_fn = format_with_fmt
+
+        # A function that formats a string with the provided fmt.
+        def format_with_fmt(s): return fmt.format(s)
+        mapping_fn = format_with_fmt
 
     # Generate a fake config, taking the value of the modified keys from the
     # original config, or if those don't exist the value of the regular keys
@@ -543,7 +543,7 @@ def get_select_query(
     if count:
         # Much simpler for one table.
         # TODO: figure out how to do this for more than one table
-        select_query = sqlalchemy.select([sqlalchemy.func.count()]).select_from(tables[0])
+        select_query = sqlalchemy.select(sqlalchemy.func.count()).select_from(tables[0])
     else:
         column_select = [
             get_from_clause(
@@ -559,7 +559,7 @@ def get_select_query(
             if tc['dtype'] not in ('serial', 'bigserial')
         ]
 
-        select_query = sqlalchemy.select(column_select)
+        select_query = sqlalchemy.select(*column_select)
 
     # Build WHERE section of our select query
     wheres = [w for w in wheres if w] if wheres else []
@@ -683,14 +683,14 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
             return sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))
         if dtype == 'text':
             return u''
-        
+
         return None
-        
+
     values = filter_nulls({
         tc['source']: get_val(tc)
         for tc in target_columns
     })
-    
+
     return update_query.values(values)
 
 
@@ -725,7 +725,7 @@ def get_combined_wheres(wheres, tables, variables, disable_variables=False, tabl
 def apply_output_filter(original_query, filter, variables=None):
     original_query = original_query.subquery('result')
     where_clause = eval_expression(clean_where(filter), variables, [], extra_keys={'result': original_query.columns})
-    return sqlalchemy.select(original_query.columns).where(where_clause)
+    return sqlalchemy.select(*original_query.columns).where(where_clause)
 
 
 def import_data_query(
@@ -857,7 +857,7 @@ def allocate(
 
     cte_consol_driver = (
         sqlalchemy.select(
-            [cte_driver.columns[d] for d in numerator_columns + denominator_columns]
+            * [cte_driver.columns[d] for d in numerator_columns + denominator_columns]
             + [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
         )
         .where(cte_driver.columns[driver_value_column] != 0)
@@ -867,7 +867,7 @@ def allocate(
 
     cte_denominator = (
         sqlalchemy.select(
-            [cte_consol_driver.columns[d] for d in denominator_columns]
+            * [cte_consol_driver.columns[d] for d in denominator_columns]
             + [sqlalchemy.func.sum(cte_consol_driver.columns[d]).label(d) for d in driver_value_columns]
         )
         .group_by(*[cte_consol_driver.columns[d] for d in denominator_columns])
@@ -876,7 +876,7 @@ def allocate(
 
     cte_ratios = (
         sqlalchemy.select(
-            [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns]
+            * [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns]
             + [
                 # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
                 sqlalchemy.func.cast(
@@ -907,7 +907,7 @@ def allocate(
 
     return (
         sqlalchemy.select(
-            [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+            * [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
             + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
             + [
                 sqlalchemy.case(
@@ -947,14 +947,14 @@ def allocate(
                 cte_source,
                 cte_ratios,
                 sqlalchemy.and_(
-                    *[cte_source.columns[dn] == cte_ratios.columns[dn] for dn in denominator_columns]
+                    * [cte_source.columns[dn] == cte_ratios.columns[dn] for dn in denominator_columns]
                     + [cte_source.columns[allocable_col] == 1]
                 ),
             )
         )
         .union_all(
             sqlalchemy.select(
-                [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+                * [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
                 + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
                 + [cte_source.columns[rc] for rc in reassignment_columns]
                 + [
