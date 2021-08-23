@@ -911,12 +911,10 @@ def allocate(
             + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
             + [
                 sqlalchemy.case(
-                    [
-                        (
-                            cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()),
-                            cte_ratios.columns[rc],
-                        )
-                    ],
+                    (
+                        cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()),
+                        cte_ratios.columns[rc],
+                    ),
                     else_=cte_source.columns[rc],
                 ).label(rc)
                 for rc in reassignment_columns
@@ -928,14 +926,14 @@ def allocate(
             ]
             + [
                 sqlalchemy.case(
-                    [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1)], else_=0
+                    (cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1), else_=0
                 ).label('alloc_status')
             ]
             + [cte_ratios.columns[_get_shred_col_name(d)] for d in driver_value_columns]
             + [
                 sqlalchemy.case(
                     # pass through source value if driver value is null (not found, not allocable, divide by zero)
-                    [(cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac])],
+                    (cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac]),
                     else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac],
                 ).label(_get_allocated_col_name(ac))
                 for ac in allocate_columns

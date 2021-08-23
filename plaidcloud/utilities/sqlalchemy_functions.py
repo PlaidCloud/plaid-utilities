@@ -142,7 +142,7 @@ class import_col(GenericFunction):
 # @compiles(import_col)
 # def compile_import_col(element, compiler, **kw):
 #     col, cast_expr, null_expr = list(element.clauses)
-#     return compiler.process(case([(func.regexp_replace(col, '\s*', '') == '', null_expr)], else_=cast_expr), **kw)
+#     return compiler.process(case((func.regexp_replace(col, '\s*', '') == '', null_expr), else_=cast_expr), **kw)
 
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
@@ -389,7 +389,7 @@ def compile_sql_set_null(element, compiler, **kw):
     val = args.pop(0)
     # Turn args into null
     return compiler.process(
-        sqlalchemy.case([
+        sqlalchemy.case(*[
             (val == arg, None)
             for arg in args
         ], else_=val),
