@@ -56,12 +56,8 @@ def eval_expression(expression, variables, tables, extra_keys=None, disable_vari
     else:
         expression_with_variables = apply_variables(expression, variables)
 
-    compiled_expression = compile(
-        expression_with_variables,
-        '<string>',
-        'eval',
-        division.compiler_flag,
-    )
+    compiled_expression = compile(expression_with_variables, '<string>', 'eval')
+
     try:
         return eval(compiled_expression, safe_dict)
     except Exception as e:
