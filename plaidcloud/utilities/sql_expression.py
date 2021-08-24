@@ -3,9 +3,6 @@
 
 """Utility library for sqlalchemy metaprogramming used in analyze transforms"""
 
-from __future__ import absolute_import
-from __future__ import division
-
 import re
 import uuid
 
