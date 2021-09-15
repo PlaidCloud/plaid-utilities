@@ -549,18 +549,19 @@ class Dimension:
         self.dim.move_nodes(project_id=self.project_id, name=self.name, moves=moves, new_parent=new_parent,
                             hierarchy=hierarchy, before=before, after=after)
 
-    def rename_node(self, old, new):
-        """rename_node(old, new)
+    def rename_node(self, old, new, force=False):
+        """rename_node(old, new, force)
         Renames the node
 
         Args:
             old (str): Current node unique ID
             new (str): New node unique ID
+            force (bool): Forces the node rename by renaming the current node out of the way
 
         Returns:
             None
         """
-        self.dim.rename_node(project_id=self.project_id, name=self.name, old=old, new=new)
+        self.dim.rename_node(project_id=self.project_id, name=self.name, old=old, new=new, force=force)
 
     def reorder_nodes(self, ancestor, children, hierarchy=MAIN):
         """reorder_nodes(self, ancestor, children, hierarchy=MAIN)
