@@ -142,7 +142,7 @@ class import_col(GenericFunction):
 # @compiles(import_col)
 # def compile_import_col(element, compiler, **kw):
 #     col, cast_expr, null_expr = list(element.clauses)
-#     return compiler.process(case((func.regexp_replace(col, '\s*', '') == '', null_expr), else_=cast_expr), **kw)
+#     return compiler.process(case([(func.regexp_replace(col, '\s*', '') == '', null_expr)], else_=cast_expr), **kw)
 
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
@@ -153,7 +153,7 @@ def compile_import_col(element, compiler, **kw):
     return compiler.process(
         import_cast(col, dtype, date_format, trailing_negs) if dtype == 'text' else
         case(
-            (func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None),
+            [(func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None)],
             else_=import_cast(col, dtype, date_format, trailing_negs)
         ),
         **kw
@@ -208,8 +208,7 @@ def compile_import_cast_hana(element, compiler, **kw):
     elif dtype == 'boolean':
         return compiler.process(
             func.case(
-                (func.to_nvarchar(col) == 'True', 1),
-                (func.to_nvarchar(col) == 'False', 0),
+                [(func.to_nvarchar(col) == 'True', 1), (func.to_nvarchar(col) == 'False', 0)],
                 else_=None
             )
         )
@@ -268,7 +267,7 @@ def compile_sql_metric_multiply(element, compiler, **kw):
             sqlalchemy.UnicodeText
         )
 
-    exp = sqlalchemy.case(*[
+    exp = sqlalchemy.case([
         (exp.endswith(abrev), apply_multiplier(exp, number_abbreviations[abrev]))
         for abrev in number_abbreviations
     ], else_=exp)
@@ -389,7 +388,7 @@ def compile_sql_set_null(element, compiler, **kw):
     val = args.pop(0)
     # Turn args into null
     return compiler.process(
-        sqlalchemy.case(*[
+        sqlalchemy.case([
             (val == arg, None)
             for arg in args
         ], else_=val),
