@@ -518,23 +518,19 @@ def get_select_query(
     """
 
     config = config or {}
-    vars_to_defaults = {
-        'aggregate': False,
-        'having': None,
-        'use_target_slicer': False,
-        'limit_target_start': 0,
-        'limit_target_end': 0,
-        'distinct': False,
-        'count': False,
-        'disable_variables': False,
-    }
-    for var in vars_to_defaults:
-        if locals().get(var) is None:
-            locals()[var] = config.get(var, vars_to_defaults.get(var))
+    aggregate = aggregate or config.get('aggregate', False)
+    having = having or config.get('having', None)
+    use_target_slicer = use_target_slicer or config.get('use_target_slicer', False)
+    limit_target_start = limit_target_start or config.get('limit_target_start', 0)
+    limit_target_end = limit_target_end or config.get('limit_target_end', 0)
+    distinct = distinct or config.get('distinct', False)
+    count = count or config.get('count', False)
+    disable_variables = disable_variables or config.get('disable_variables', False)
             
     import logging
+    import pprint
     logger = logging.getLogger(__name__)
-    logger.info(f'locals in get_select_query: {locals()}')
+    logger.info(f'locals in get_select_query: {pprint.pformat(locals())}')
 
     # Build SELECT x FROM y section of our select query
     if count:
