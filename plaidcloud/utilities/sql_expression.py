@@ -531,6 +531,10 @@ def get_select_query(
     for var in vars_to_defaults:
         if locals().get(var) is None:
             locals()[var] = config.get(var, vars_to_defaults.get(var))
+            
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f'locals in get_select_query: {locals()}')
 
     # Build SELECT x FROM y section of our select query
     if count:
