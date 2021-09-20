@@ -48,20 +48,21 @@ def replaceTags(value, data_record):
     return value
 
 
-def apply_variables(message, sub_dict, strict=True, nonstrict_error_handler=None):
+def apply_variables(message, variables=None, strict=True, nonstrict_error_handler=None):
     """
     Apply our variable substitution logic, used everywhere throughout analyze.
     It basically works like str.format(), but it raises specific errors
 
     Args:
         message (str): message with variables to be inserted.
-        sub_dict (dict): variables to use for replacement
+        variables (dict): variables to use for replacement
         strict (bool): If true, error on missing keys. If false, replace missing keys with empty string.
         nonstrict_error_handler (function(str)): function to handle a warning in the case of missing keys. Should take an error_message as an argument.
 
     Returns:
         (str): the message with the values of variables inserted.
     """
+    variables = variables or {}
     if message is None:
         return None
 
@@ -71,33 +72,32 @@ def apply_variables(message, sub_dict, strict=True, nonstrict_error_handler=None
     if not message:
         return message
 
-    if message:
-        try:
-            text_keys = set([
-                col[1]
-                for col in string.Formatter().parse(message)
-                if col[1] is not None
-            ])
-        except Exception as e:
-            raise Exception(f'Error trying to apply variables to string {message}: {str(e)}')
+    try:
+        text_keys = set([
+            col[1]
+            for col in string.Formatter().parse(message)
+            if col[1] is not None
+        ])
+    except Exception as e:
+        raise Exception(f'Error trying to apply variables to string {message}: {str(e)}')
 
-        bad_keys = [k for k in text_keys if k not in sub_dict]
-        if bad_keys:
-            bad_string = ", ".join(sorted(bad_keys))
-            error_message = (
-                'The following variables are invalid '
-                'or undefined: {}.'.format(bad_string)
-            )
-            if strict:
-                raise Exception(error_message)
-            else:
-                # Remove any .format tokens that are missing from the
-                # substitution dict
-                for key in bad_keys:
-                    token = ''.join(('{', str(key), '}'))
-                    message = message.replace(token, '')
+    bad_keys = [k for k in text_keys if k not in variables]
+    if bad_keys:
+        bad_string = ", ".join(sorted(bad_keys))
+        error_message = (
+            'The following variables are invalid '
+            'or undefined: {}.'.format(bad_string)
+        )
+        if strict:
+            raise Exception(error_message)
+        else:
+            # Remove any .format tokens that are missing from the
+            # substitution dict
+            for key in bad_keys:
+                token = ''.join(('{', str(key), '}'))
+                message = message.replace(token, '')
 
-                if nonstrict_error_handler:
-                    nonstrict_error_handler(error_message)
+            if nonstrict_error_handler:
+                nonstrict_error_handler(error_message)
 
-        return message.format(**sub_dict)
+    return message.format(**variables)

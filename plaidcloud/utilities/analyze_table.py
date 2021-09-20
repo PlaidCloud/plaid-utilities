@@ -124,7 +124,7 @@ class AnalyzeTable(sqlalchemy.Table):
 
 def compiled(sa_query, dialect='greenplum'):
     """Returns SQL query for the supplied dialect, in the form of a string, given a sqlalchemy query.
-      Also returns a params dict for use when calling engine.execute(query, params)
+      Also returns a params dict for use when calling engine.execute
 
     Notes:
         If the requests compilation dialect is not available, an error will be raised
