@@ -189,7 +189,7 @@ def get_from_clause(
     def label_fn(expr):
         return expr.label(name)
 
-    process = compose(label_fn, sort_fn, agg_fn, cast_fn)
+    process = compose(label_fn, sort_fn, cast_fn, agg_fn)
 
     if constant:
         # Agg_fn is ignored, and we wrap in sqlalchemy.literal
