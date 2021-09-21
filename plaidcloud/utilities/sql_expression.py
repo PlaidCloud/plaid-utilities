@@ -527,11 +527,6 @@ def get_select_query(
     count = count or config.get('count', False)
     disable_variables = disable_variables or config.get('disable_variables', False)
             
-    import logging
-    import pprint
-    logger = logging.getLogger(__name__)
-    logger.info(f'locals in get_select_query: {pprint.pformat(locals())}')
-
     # Build SELECT x FROM y section of our select query
     if count:
         # Much simpler for one table.
