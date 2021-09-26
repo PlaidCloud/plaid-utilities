@@ -292,7 +292,7 @@ def compile_sql_numericize(element, compiler, **kw):
         return func.coalesce(
             func.substring(text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
             func.nullif(
-                func.regexp_replace(text, '[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
+                func.regexp_replace(text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
                 ''
             )
         )
