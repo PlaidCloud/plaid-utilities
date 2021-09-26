@@ -873,7 +873,8 @@ def import_data_query(project_id, target_table_id, source_columns, target_column
 def allocate(source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
              overwrite_cols_for_allocated=True,
              include_source_columns=None,
-             unique_cte_index=1):
+             unique_cte_index=1,
+             parent_context_columns: dict = None):
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
     Args:
@@ -887,6 +888,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
         include_source_columns (list, optional): Columns for which we should include a *_source column (for reassignments with multiple allocation steps)
         unique_cte_index (int, optional): Unique index to use in the common table expressions if more than one
             allocation will be done within the same query
+        parent_context_columns (dict, optional): Dict of columns for which to use 'Parent' driver data {col: Selectable}
 
     Returns:
         sqlalchemy.Selectable: A Sqlalchemy query representing the allocation
@@ -900,6 +902,7 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     driver_count = len(driver_value_columns)
 
     include_source_columns = include_source_columns or []
+    parent_context_columns = parent_context_columns or {}
 
     # Denominator table is SUM of split values with GROUP BY denominator columns
     # Join the Denominator values to the numerator values to get a % split (add an alloc indicator of 1 in a fake column)
@@ -914,106 +917,171 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
     def _get_allocated_col_name(col):
         return col if overwrite_cols_for_allocated else f'{col}_allocated'
 
+    def _get_parent_col(col: str = ''):
+        return f'Parent{col}'
+
+    def _join_parent_dim(sel, left_table, col):
+        return sel.join_from(
+            left_table,
+            parent_cte_dict[col],
+            parent_cte_dict[col].columns['Child'] == left_table.columns[col]
+        )
+
     cte_source = source_query.cte(f'alloc_source_{unique_cte_index}')
     cte_driver = driver_query.cte(f'alloc_driver_{unique_cte_index}')
 
-    cte_consol_driver = sqlalchemy.select(
-        [cte_driver.columns[d] for d in numerator_columns + denominator_columns] +
-        [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
-    ).where(
-        cte_driver.columns[driver_value_column] != 0
-    ).group_by(
-        *[cte_driver.columns[d] for d in numerator_columns + denominator_columns]
-    ).cte(f'consol_driver_{unique_cte_index}')
+    parent_cte_dict = {}
+    # This assumes that the parent contains 'Parent' & 'Child' columns
+    if parent_context_columns:
+        for col, parent_query in parent_context_columns.items():
+            parent_cte_dict[col] = parent_query.cte(f'parent_{col}_{unique_cte_index}')
 
-    cte_denominator = sqlalchemy.select(
-        [cte_consol_driver.columns[d] for d in denominator_columns] +
-        [sqlalchemy.func.sum(cte_consol_driver.columns[d]).label(d) for d in driver_value_columns]
-    ).group_by(
-        *[cte_consol_driver.columns[d] for d in denominator_columns]
-    ).cte(f'denominator_{unique_cte_index}')
+        parent_driver_select = sqlalchemy.select(
+            * [col for col in cte_driver.columns]
+            + [parent_cte_dict[col].columns[_get_parent_col()].label(_get_parent_col(col)) for col in parent_context_columns.keys()]
+        )
+        for col in parent_context_columns.keys():
+            parent_driver_select = _join_parent_dim(parent_driver_select, cte_driver, col)
 
-    cte_ratios = sqlalchemy.select(
-        [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns] +
-        # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
-        [
-            sqlalchemy.func.cast(
-                sqlalchemy.func.nullif(
-                    sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC) / sqlalchemy.func.nullif(
-                        cte_denominator.columns[d], 0),
-                    0
-                ),
-                sqlalchemy.NUMERIC
-            ).label(_get_shred_col_name(d))
-            for d in driver_value_columns
-        ]
-    ).select_from(
-        sqlalchemy.join(
-            cte_consol_driver, cte_denominator,
-            sqlalchemy.and_(
-                *[cte_consol_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
+        cte_parent_driver = parent_driver_select.cte(f'parent_driver_{unique_cte_index}')
+
+        cte_consol_driver = (
+            sqlalchemy.select(
+                * [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns if d not in parent_context_columns.keys()]
+                + [cte_parent_driver.columns[_get_parent_col(p)].label(p) for p in parent_context_columns.keys()]
+                + [sqlalchemy.func.sum(cte_parent_driver.columns[d]).label(d) for d in driver_value_columns]
+            )
+            .where(cte_parent_driver.columns[driver_value_column] != 0)
+            .group_by(
+                * [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns if d not in parent_context_columns.keys()]
+                + [cte_parent_driver.columns[_get_parent_col(p)] for p in parent_context_columns.keys()]
+            )
+            .cte(f'consol_driver_{unique_cte_index}')
+        )
+    else:
+        cte_consol_driver = (
+            sqlalchemy.select(
+                * [cte_driver.columns[d] for d in numerator_columns + denominator_columns]
+                + [sqlalchemy.func.sum(cte_driver.columns[d]).label(d) for d in driver_value_columns]
+            )
+            .where(cte_driver.columns[driver_value_column] != 0)
+            .group_by(*[cte_driver.columns[d] for d in numerator_columns + denominator_columns])
+            .cte(f'consol_driver_{unique_cte_index}')
+        )
+
+    cte_denominator = (
+        sqlalchemy.select(
+            * [cte_consol_driver.columns[d] for d in denominator_columns]
+            + [sqlalchemy.func.sum(cte_consol_driver.columns[d]).label(d) for d in driver_value_columns]
+        )
+        .group_by(*[cte_consol_driver.columns[d] for d in denominator_columns])
+        .cte(f'denominator_{unique_cte_index}')
+    )
+
+    cte_ratios = (
+        sqlalchemy.select(
+            * [cte_consol_driver.columns[d] for d in denominator_columns + numerator_columns + driver_value_columns]
+            + [
+                # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
+                sqlalchemy.func.cast(
+                    sqlalchemy.func.nullif(
+                        sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC)
+                        / sqlalchemy.func.nullif(cte_denominator.columns[d], 0),
+                        0,
+                    ),
+                    sqlalchemy.NUMERIC,
+                ).label(_get_shred_col_name(d))
+                for d in driver_value_columns
+            ]
+        )
+        .select_from(
+            sqlalchemy.join(
+                cte_consol_driver,
+                cte_denominator,
+                sqlalchemy.and_(
+                    *[cte_consol_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
+                )
             )
         )
     ).cte(f'ratios_{unique_cte_index}')
 
     def _is_source_col(col):
-        return col not in set(
-            reassignment_columns +
-            (allocate_columns if overwrite_cols_for_allocated else [])
-        )
+        return col not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))
 
     allocation_select = sqlalchemy.select(
-        [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
-        [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
-        [
+        * [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+        + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
+        + [
             sqlalchemy.case(
-                [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), cte_ratios.columns[rc])],
-                else_=cte_source.columns[rc]
+                (
+                    cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()),
+                    sqlalchemy.func.coalesce(cte_ratios.columns[rc], cte_source.columns[rc]),
+                ),
+                else_=cte_source.columns[rc],
             ).label(rc)
             for rc in reassignment_columns
-        ] +
-        [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
-        [
+        ]
+        + [
+            cte_ratios.columns[dt]
+            for dt in all_driver_columns
+            if dt not in set(all_target_columns + reassignment_columns)
+        ]
+        + [
             sqlalchemy.case(
-                [(cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1)],
-                else_=0
+                (cte_ratios.columns[_get_shred_col_name(driver_value_columns[0])].isnot(sqlalchemy.null()), 1), else_=0
             ).label('alloc_status')
-        ] +
-        [
-            cte_ratios.columns[_get_shred_col_name(d)]
-            for d in driver_value_columns
-        ] +
-        [
+        ]
+        + [cte_ratios.columns[_get_shred_col_name(d)] for d in driver_value_columns]
+        + [
             sqlalchemy.case(
                 # pass through source value if driver value is null (not found, not allocable, divide by zero)
-                [(cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac])],
-                else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac]
+                (cte_ratios.columns[_get_shred_col_name(d)].is_(sqlalchemy.null()), cte_source.columns[ac]),
+                else_=cte_ratios.columns[_get_shred_col_name(d)] * cte_source.columns[ac],
             ).label(_get_allocated_col_name(ac))
             for ac in allocate_columns
             for d in driver_value_columns
         ]
-    ).select_from(
-        sqlalchemy.outerjoin(
-            cte_source, cte_ratios,
-            sqlalchemy.and_(
-                *[
-                    cte_source.columns[dn] == cte_ratios.columns[dn]
-                    for dn in denominator_columns
-                ] + [cte_source.columns[allocable_col] == 1]
-            )
-        )
-    ).union_all(
+    )
+    for col in parent_context_columns.keys():
+        allocation_select = _join_parent_dim(allocation_select, cte_source, col)
+
+    allocation_select = allocation_select.join_from(
+        cte_source,
+        cte_ratios,
+        sqlalchemy.and_(
+            * [
+                 cte_source.columns[dn] == cte_ratios.columns[dn]
+                 for dn in denominator_columns
+                 if dn not in parent_context_columns.keys()
+             ]
+            + [
+                 parent_cte_dict[col].columns[_get_parent_col()] == cte_ratios.columns[col]
+                 for col in parent_context_columns.keys()
+             ]
+            + [cte_source.columns[allocable_col] == 1]
+        ),
+        isouter=True
+    )
+
+    allocation_select = allocation_select.union_all(
         sqlalchemy.select(
-            [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)] +
-            [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns] +
-            [cte_source.columns[rc] for rc in reassignment_columns] +
-            [cte_ratios.columns[dt] for dt in all_driver_columns if dt not in set(all_target_columns + reassignment_columns)] +
-            [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')] +
-            [sqlalchemy.func.cast(sqlalchemy.literal(None), sqlalchemy.Numeric).label(_get_shred_col_name(d)) for d in driver_value_columns] +
-            [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
-        ).where(
-            cte_source.columns[allocable_col] == 0
-        ).distinct()
+            * [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
+            + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
+            + [cte_source.columns[rc] for rc in reassignment_columns]
+            + [
+                cte_ratios.columns[dt]
+                for dt in all_driver_columns
+                if dt not in set(all_target_columns + reassignment_columns)
+            ]
+            + [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')]
+            + [
+                sqlalchemy.func.cast(sqlalchemy.literal(None), sqlalchemy.Numeric).label(_get_shred_col_name(d))
+                for d in driver_value_columns
+            ]
+            + [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
+        )
+        .where(cte_source.columns[allocable_col] == 0)
+        .distinct()
     )
 
     return allocation_select
