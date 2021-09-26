@@ -314,6 +314,14 @@ class Dimension:
         if clear is True:
             self.clear()
 
+    def __getattr__(self, item):
+        """Hopefully a catch-all for RPCs that may be added to the RPC methods in plaid, but not yet implemented here
+            Just calls directly through
+        """
+        def rpc_wrapper(**kwargs):
+            getattr(self.dim, item)(project_id=self.project_id, name=self.name, **kwargs)
+        return rpc_wrapper
+
     # --------------------------------------------------------------------------------------------------
     # ==== DIMENSION METHODS ===========================================================================
     # --------------------------------------------------------------------------------------------------
@@ -1977,7 +1985,7 @@ class Dimension:
             hierarchy (str, list or none) - List of hierarchies to save, None means all
 
         Returns:
-            df (Dataframe): Datafame with hierarchy data
+            df (Dataframe): Dataframe with hierarchy data
         """
         json_df = self.dim.save_hierarchy_to_dataframe(project_id=self.project_id, name=self.name, hierarchy=hierarchy)
         df = self._decode_dataframe(json_df)
@@ -1991,7 +1999,7 @@ class Dimension:
             alias (str, list or none) - List of aliases to save, None means all
 
         Returns:
-            df (Dataframe): Datafame with alias nodes and values
+            df (Dataframe): Dataframe with alias nodes and values
         """
         json_df = self.dim.save_aliases_to_dataframe(project_id=self.project_id, name=self.name, alias=alias)
         df = self._decode_dataframe(json_df)
@@ -2004,7 +2012,7 @@ class Dimension:
         Args:
             property (str, list or none) - List of properties to save, None means all
         Returns:
-            df (Dataframe): Datafame with property nodes and values
+            df (Dataframe): Dataframe with property nodes and values
         """
         json_df = self.dim.save_properties_to_dataframe(project_id=self.project_id, name=self.name, property=property)
         df = self._decode_dataframe(json_df)
@@ -2018,12 +2026,15 @@ class Dimension:
             value (str, list or none) - List of values to save, None means all
 
         Returns:
-            df (Dataframe): Datafame with values nodes and values
+            df (Dataframe): Dataframe with values nodes and values
         """
         json_df = self.dim.save_values_to_dataframe(project_id=self.project_id, name=self.name, value=value)
         df = self._decode_dataframe(json_df)
         df.reset_index(inplace=True)
         return df
+
+    def save_parent_child_to_db(self, hierarchy: str, table_id: str):
+        self.dim.save_parent_child_to_db(project_id=self.project_id, name=self.name, hierarchy=hierarchy, table_id=table_id)
 
     # --------------------------------------------------------------------------------------------------
     # ==== GET DATAFRAME METHODS =======================================================================
@@ -2034,7 +2045,7 @@ class Dimension:
         Args:
 
         Returns:
-            df (Dataframe): Datafame with alias nodes and values
+            df (Dataframe): Dataframe with alias nodes and values
         """
         json_df = self.dim.get_aliases_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
@@ -2047,7 +2058,7 @@ class Dimension:
         Args:
 
         Returns:
-            df (Dataframe): Datafame with attribute nodes and values
+            df (Dataframe): Dataframe with attribute nodes and values
         """
         json_df = self.dim.get_attributes_dataframe(project_id=self.project_id, name=self.name)
         df = self._decode_dataframe(json_df)
