@@ -241,7 +241,7 @@ def get_from_clause(
 def get_project_schema(project_id):
     if project_id.startswith(SCHEMA_PREFIX):
         return project_id
-    
+
     return f'{SCHEMA_PREFIX}{project_id}'
 
 
@@ -282,7 +282,7 @@ class Result(object):
             if tc['dtype'] not in ('serial', 'bigserial')
         }
 
-        
+
 def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
@@ -526,7 +526,7 @@ def get_select_query(
     distinct = distinct or config.get('distinct', False)
     count = count or config.get('count', False)
     disable_variables = disable_variables or config.get('disable_variables', False)
-            
+
     # Build SELECT x FROM y section of our select query
     if count:
         # Much simpler for one table.
@@ -661,23 +661,31 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
 
     # Build values dict
     def get_val(tc):
+        # returns (include, val) where val should be used in the query if include is True, but filtered out if not
         if tc.get('nullify'):
-            return None
+            return (True, None)
         if tc.get('expression'):
-            return eval_expression(tc['expression'].strip(), variables, [table])
+            return (True, eval_expression(tc['expression'].strip(), variables, [table]))
 
         dtype = dtype_map.get(tc['source'], 'text')
         if tc.get('constant'):
-            return sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))
+            return (True, sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype)))
+
         if dtype == 'text':
-            return u''
+            # Special condition for empty string
+            return (True, u'')
 
-        return None
+        # If none of our conditions are true, then this column shouldn't be included in the values dict
+        return (False, None)
 
-    values = filter_nulls({
-        tc['source']: get_val(tc)
-        for tc in target_columns
-    })
+    values = {
+        col_name: value
+        for col_name, include, value in [
+            (tc['source'],) + get_val(tc)
+            for tc in target_columns
+        ]
+        if include
+    }
 
     return update_query.values(values)
 
