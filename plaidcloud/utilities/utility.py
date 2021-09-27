@@ -219,7 +219,7 @@ def get_run_time(start_time, end_time):
     """
 
     run_secs_unrounded = end_time - start_time
-    run_secs = round(run_secs_unrounded)  # pylint: disable=round-builtin
+    run_secs = round(run_secs_unrounded)
     minutes, seconds = divmod(run_secs, 60)
     hours, minutes = divmod(minutes, 60)
     run_time = "{}:{:02}:{:02}".format(int(hours),
