@@ -48,7 +48,7 @@ setup(
         'numpy;python_version>="3.5"',
         'numpy<=1.16.5;python_version<"3.5"',
         'pandas',
-        'plaidcloud-rpc@git+git://github.com/PlaidCloud/plaid-rpc.git@v1.0.0#egg=plaidcloud-rpc',
+        'plaidcloud-rpc@git+git://github.com/PlaidCloud/plaid-rpc.git@v0.0.9#egg=plaidcloud-rpc',
         'requests',
         'orjson',
         'openpyxl',
