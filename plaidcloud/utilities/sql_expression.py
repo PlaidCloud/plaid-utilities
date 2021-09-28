@@ -158,7 +158,7 @@ def get_from_clause(
     tables, target_column_config, source_column_configs, aggregate=False,
     sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
 ):
-    """Given info from a config, returns a sqlalchemy from clause."""
+    """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
     expression = target_column_config.get('expression')
     constant = target_column_config.get('constant')
@@ -1021,6 +1021,3 @@ def allocate(
     return allocation_select
 
 
-def apply_rules():
-    """"""
-    pass
