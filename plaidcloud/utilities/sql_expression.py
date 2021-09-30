@@ -219,6 +219,7 @@ def get_from_clause(
             source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
 
         if target_column_config.get('agg') == 'count_null':
+            #TODO: should this also check the "aggregate" param?
             col = None
         elif source in table.columns:
             col = table.columns[source]
@@ -550,11 +551,11 @@ def get_select_query(
         select_query = sqlalchemy.select(*column_select)
 
     # Build WHERE section of our select query
-    wheres = [w for w in wheres if w] if wheres else []
-    if wheres:
-        combined_wheres = get_combined_wheres(
-            wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
-        )
+    wheres = wheres or []
+    combined_wheres = get_combined_wheres(
+        wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
+    )
+    if combined_wheres:
         select_query = select_query.where(*combined_wheres)
 
     # Find any columns for sorting
@@ -567,6 +568,7 @@ def get_select_query(
             and stc['sort'].get('ascending') is not None
         )
     ]
+    #TODO: should this exclude columns with a sort section but no order param in it?
 
     # If there are any, build ORDER BY section of our select query
     if columns_to_sort_on:
@@ -585,9 +587,8 @@ def get_select_query(
         ]
         select_query = select_query.order_by(*sort_columns)
 
-    # Build GROUP BY and HAVING sections of our select query.
+    # Build GROUP BY section of our select query.
     if aggregate:
-        # GROUP BY
         select_query = select_query.group_by(
             *[
                 get_from_clause(
