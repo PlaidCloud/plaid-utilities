@@ -27,9 +27,6 @@ __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
 
-# Primarily used in workflow-runner :(, frame_manager :( and
-# plaidtools.cconnect, which is primarily used in udfs
-
 logger = logging.getLogger(__name__)
 SCHEMA_PREFIX = 'anlz'
 
@@ -43,7 +40,7 @@ _NA_VALUES = {'-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
 
 class Connection(object):
 
-    def __init__(self, project=None, rpc=None):
+    def __init__(self, project: str = None, rpc: Connect = None):
         """
 
         Args:
@@ -70,20 +67,20 @@ class Connection(object):
         else:
             self._project_id = rpc.project_id
 
-        _dialect_kind = 'greenplum'   # This should come from the project primary database setting eventually
+        _dialect_kind = self.rpc.anlyze.query.dialect()
 
         if _dialect_kind == 'greenplum':
             self.dialect = GreenplumDialect()
         elif _dialect_kind == 'hana':
             self.dialect = HANABaseDialect()
         elif _dialect_kind == 'hive':
-            raise Exception('Hive not supported from plaidtools currently.')
+            raise Exception('Hive currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'spark':
-            raise Exception('Spark not supported from plaidtools currently.')
+            raise Exception('Spark currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'oracle':
-            raise Exception('Oracle not supported from plaidtools currently.')
+            raise Exception('Oracle currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'mssql':
-            raise Exception('MS SQL Server not supported from plaidtools currently.')
+            raise Exception('MS SQL Server currently not supported from plaidcloud utilities.')
         else:
             self.dialect = PGDialect()
 
@@ -428,6 +425,30 @@ class Connection(object):
         """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
         bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
         """
+        def df_to_csv_string(df, col_order):
+            # if six.PY3:
+            #     # convert any byte strings to string to avoid 'b' prefix bug in pandas
+            #     # https://github.com/pandas-dev/pandas/issues/9712
+            #     str_df = df.select_dtypes([np.object])
+            #     str_df = str_df.stack().str.decode('utf-8').unstack()
+            #     for col in str_df:
+            #         df[col] = str_df[col]
+            cs = StringIO()
+            cs.writelines(
+                df[col_order].to_csv(
+                    index=False,
+                    header=True,
+                    na_rep='NaN',
+                    sep='\t',
+                    encoding='UTF-8',
+                    quoting=csv.QUOTE_MINIMAL,
+                    escapechar='"'
+                )
+            )
+
+            # logger.info('----- CSV DATA DIRECTLY FROM PANDAS---- {}'.format(cs.getvalue()))
+            return cs.getvalue()
+
         if len(df) == 0:
             logger.debug('Empty dataframe - nothing to insert')
             return
