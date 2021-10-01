@@ -563,6 +563,54 @@ class Connection(object):
                 project_id=self._project_id, table_id=table.id
             )
 
+    def save_data(self, query, table):
+        """Saves the data from the give query as a table in the database
+
+        Args:
+            query (): Query from which to create the table data
+            table (str or Table): Table name/path, or Table object
+
+        Returns:
+            None
+        """
+        if isinstance(table, str):
+            table = Table(
+                self,
+                table=table,
+                metadata=[
+                    {
+                        'id': col.name,
+                        'dtype': analyze_type(col.type)
+                    }
+                    for col in query.selected_columns
+                ],
+                overwrite=True
+            )
+        else:
+            # ensure the table exists as per the metadata
+            self.rpc.analyze.table.touch(
+                project_id=self._project_id,
+                table_id=table.id,
+                meta=[
+                    {
+                        'id': col.name,
+                        'dtype': analyze_type(col.type)
+                    }
+                    for col in query.selected_columns
+                ]
+            )
+        # use the upsert method to add the data
+        insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
+        self.rpc.analyze.query.upsert(
+            project_id=self._project_id,
+            table_id=table.id,
+            update_query=None,
+            update_params=None,
+            insert_query=insert_query,
+            insert_params=insert_params,
+            recreate=True
+        )
+
     @property
     def project_id(self):
         if not self._project_id:
@@ -719,6 +767,9 @@ class Table(sqlalchemy.Table):
 
     def get_data(self, clean=False):
         return self._conn.get_dataframe(self, clean=clean)
+
+    def save(self, query):
+        return self._conn.save_data(query, self)
 
 
 def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
