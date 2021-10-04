@@ -1311,20 +1311,19 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         matches = []  # for use when include_once is False
         index = 0
         for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
-            if verbose:
-                logger.info('')
-                logger.info('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
-
             # Find subset based on condition
             df_subset = df[df['include'] == True]
             input_length = len(df_subset)
             if include_once is True and input_length == 0:
                 break
+            if verbose:
+                logger.debug('')
+                logger.debug('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
             if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
                 try:
-                    df_subset = df_subset.query(rule[condition_column], engine='python')
+                    df_subset = df_subset.query(rule[condition_column])#, engine='python')
                     if verbose:
-                        logger.info('{} - input length'.format(input_length))
+                        logger.debug('{} - input length'.format(input_length))
                     if show_rules is True:
                         if include_once is True:
                             df.loc[list(df_subset.index), 'rule_number'] = list(map(write_rule_numbers, df.loc[list(df_subset.index), 'rule_number']))
@@ -1360,7 +1359,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             # df_final = pd.concat([df_final, df_subset])
             matched_length = len(df_subset)
             if verbose:
-                logger.info('{} - matched length'.format(matched_length))
+                logger.debug('{} - matched length'.format(matched_length))
 
             if include_once:
                 # Exclude the records of the current split from exposure to subsequent filters.
