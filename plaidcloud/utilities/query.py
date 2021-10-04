@@ -68,7 +68,7 @@ class Connection(object):
         else:
             self._project_id = rpc.project_id
 
-        _dialect_kind = self.rpc.anlyze.query.dialect()
+        _dialect_kind = self.rpc.analyze.query.dialect()
 
         if _dialect_kind == 'greenplum':
             self.dialect = GreenplumDialect()
