@@ -4,6 +4,7 @@ import os
 import tempfile
 import uuid
 import unicodecsv as csv
+from io import StringIO
 
 import pandas as pd
 import numpy as np
@@ -14,7 +15,6 @@ from sqlalchemy_greenplum.dialect import GreenplumDialect
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
 from plaidcloud.rpc.rpc_connect import Connect
-# from plaidcloud.utilities.analyze_table import compiled
 from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.database import PlaidDate
@@ -29,6 +29,7 @@ __email__ = 'paul.morel@tartansolutions.com'
 
 logger = logging.getLogger(__name__)
 SCHEMA_PREFIX = 'anlz'
+TABLE_PREFIX = 'analyzetable_'
 
 # We must override the default pandas na values to disallow 'NA'.
 # We are doing this by setting our own list, rather than using pandas.io.common._NA_VALUES in
@@ -656,7 +657,7 @@ class Table(sqlalchemy.Table):
             if not columns:
                 columns = []
 
-            if table.startswith('analyzetable_'):
+            if table.startswith(TABLE_PREFIX):
                 # This is already the ID.  Use it
                 name = 'Table {}'.format(table)
                 path = '/'
@@ -775,7 +776,7 @@ class Table(sqlalchemy.Table):
 
 
 def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
-    if name.startswith('analyzetable_'):
+    if name.startswith(TABLE_PREFIX):
         # This is already the ID.  Use it
         logger.warning('Table ID passed to _get_table_id. Not searching for paths or name.')
         return name, None, None
