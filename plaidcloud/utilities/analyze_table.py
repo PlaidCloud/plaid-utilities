@@ -39,13 +39,13 @@ def lookup_table(project_id, table, rpc=None):
 
 
 class AnalyzeTable(sqlalchemy.Table):
-    warnings.simplefilter('default', DeprecationWarning)
-    warnings.warn(
-        'AnalyzeTable is deprecated in favor of `plaidcloud.utilities.query.Table`',
-        DeprecationWarning
-    )
-
     def __new__(cls, project, table, metadata=None, rpc=None):
+        warnings.simplefilter('default', DeprecationWarning)
+        warnings.warn(
+            'AnalyzeTable is deprecated in favor of `plaidcloud.utilities.query.Table`',
+            DeprecationWarning
+        )
+
         if rpc:
             _rpc = rpc
         else:
