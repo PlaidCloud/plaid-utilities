@@ -574,17 +574,20 @@ class Connection(object):
         Returns:
             None
         """
+        def _table_meta():
+            return [
+                {
+                    'id': col.name,
+                    'dtype': analyze_type(col.type.compile(self.dialect))
+                }
+                for col in query.selected_columns
+            ]
+
         if isinstance(table, str):
             table = Table(
                 self,
                 table=table,
-                metadata=[
-                    {
-                        'id': col.name,
-                        'dtype': analyze_type(col.type)
-                    }
-                    for col in query.selected_columns
-                ],
+                metadata=_table_meta(),
                 overwrite=True
             )
         else:
@@ -592,13 +595,7 @@ class Connection(object):
             self.rpc.analyze.table.touch(
                 project_id=self._project_id,
                 table_id=table.id,
-                meta=[
-                    {
-                        'id': col.name,
-                        'dtype': analyze_type(col.type)
-                    }
-                    for col in query.selected_columns
-                ]
+                meta=_table_meta()
             )
         # use the upsert method to add the data
         insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
