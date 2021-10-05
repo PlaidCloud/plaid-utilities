@@ -5,6 +5,7 @@
 
 import re
 import uuid
+from copy import deepcopy
 
 from toolz.functoolz import juxt, compose, curry
 from toolz.functoolz import identity as ident
@@ -24,7 +25,6 @@ __copyright__ = '© Copyright 2017-2021, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
 # TODO: move transform functions here, document them, and refactor their api
-# TODO: write unit tests
 
 MAGIC_COLUMN_MAPPING = {
     'path': u':::DOCUMENT_PATH:::',
@@ -137,11 +137,11 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
 
     match = table_dot_column_regex.match(source_name)
     if match:  # They gave us a table number. Subtract 1 to find it's index
+        if source_name.startswith('table.'):  # special case for just 'table'
+            return source_tables[0]
+
         table_number = int(match.groups()[0])
         return source_tables[table_number - table_numbering_start]
-
-    if source_name.startswith('table.'):  # special case for just 'table'
-        return source_tables[0]
 
     # None of our shortcuts worked, so look for the first table to have a
     # column of that name.
@@ -154,6 +154,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
+# TODO: Refactor this into separate functions for expression, constant, and source. Possibly another function to generate process, run by all three of them, that takes flags for whether to include cast, agg, and sort. This should hopefully make the logic about cast, agg, and sort better organized
 def get_from_clause(
     tables, target_column_config, source_column_configs, aggregate=False,
     sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
@@ -167,7 +168,7 @@ def get_from_clause(
     type_ = sqlalchemy_from_dtype(target_column_config.get('dtype'))
 
     # always cast expressions, pay attention to cast param for source mappings
-    if expression or (source and cast):
+    if not constant and (expression or (source and cast)):
         cast_fn = curry(sqlalchemy.cast, type_=type_)
     else:
         cast_fn = ident
@@ -218,8 +219,8 @@ def get_from_clause(
         else:
             source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
 
+        #ADT2021: I'm really not sure whether this should also check the "aggregate" param
         if target_column_config.get('agg') == 'count_null':
-            #TODO: should this also check the "aggregate" param?
             col = None
         elif source in table.columns:
             col = table.columns[source]
@@ -406,7 +407,7 @@ def get_table_rep(table_id, columns, schema, metadata=None, column_key='source',
     return table
 
 
-def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='source', alias=None):
+def get_table_rep_using_id(table_id, columns, project_id, metadata=None, column_key='source', alias=None):
     """
     Returns:
         sqlalchemy.Table: object representing an analyze table
@@ -568,10 +569,12 @@ def get_select_query(
             and stc['sort'].get('ascending') is not None
         )
     ]
-    #TODO: should this exclude columns with a sort section but no order param in it?
 
     # If there are any, build ORDER BY section of our select query
     if columns_to_sort_on:
+        columns_with_order = [tc for tc in columns_to_sort_on if 'order' in tc['sort']]
+        columns_without_order = [tc for tc in columns_to_sort_on if 'order' not in tc['sort']]
+        sort_order = sorted(columns_with_order, key=lambda tc:tc['sort']['order']) + columns_without_order
         sort_columns = [
             get_from_clause(
                 tables,
@@ -583,7 +586,7 @@ def get_select_query(
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
             )
-            for tc in sorted(columns_to_sort_on, key=lambda stc: stc['sort']['order'])
+            for tc in sort_order
         ]
         select_query = select_query.order_by(*sort_columns)
 
@@ -720,6 +723,7 @@ def get_combined_wheres(wheres, tables, variables, disable_variables=False, tabl
 
 
 def apply_output_filter(original_query, filter, variables=None):
+    variables = variables or {}
     original_query = original_query.subquery('result')
     where_clause = eval_expression(clean_where(filter), variables, [], extra_keys={'result': original_query.columns})
     return sqlalchemy.select(*original_query.columns).where(where_clause)
@@ -727,7 +731,7 @@ def apply_output_filter(original_query, filter, variables=None):
 
 def import_data_query(
     project_id, target_table_id, source_columns, target_columns, date_format='',
-    trailing_negatives=False, config=None, variables=None,
+    trailing_negatives=False, config=None, variables=None, temp_table_id=None,
 ):
     """Provides a SQLAlchemy insert query to transfer data from a text import temporary table into the target table.
 
@@ -752,8 +756,9 @@ def import_data_query(
         sqlalchemy.sql.expression.Insert: The query to import data from the temporary text table to the target table
     """
     metadata = sqlalchemy.MetaData()
+    target_columns = deepcopy(target_columns)  # bandaid to avoid destructiveness
 
-    temp_table_id = f'temp_{str(uuid.uuid4())}'
+    temp_table_id = temp_table_id or f'temp_{str(uuid.uuid4())}'
     temp_table_columns = [
         {
             'source': s.get('source', s.get('name', s.get('id'))),
@@ -766,6 +771,7 @@ def import_data_query(
     for t in target_columns:
         if t['dtype'] in MAGIC_COLUMN_MAPPING:
             t['source'] = MAGIC_COLUMN_MAPPING[t['dtype']]
+    # TODO: refactor this to define instead of build and modify
 
     target_meta = [{'id': t['target'], 'dtype': t['dtype']} for t in target_columns]
 

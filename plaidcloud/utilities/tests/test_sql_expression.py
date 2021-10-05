@@ -2,6 +2,7 @@
 import unittest
 
 import sqlalchemy
+from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
 from plaidcloud.rpc.database import PlaidUnicode
@@ -15,7 +16,7 @@ __license__ = "Apache 2.0"
 __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
 
-
+#TODO: test allocate
 class TestSQLExpression(unittest.TestCase):
 
     def assertEquivalent(self, left, right):
@@ -28,12 +29,11 @@ class TestSQLExpression(unittest.TestCase):
 
     def test_get_agg_fn(self):
         self.assertEqual(se.get_agg_fn(None), ident)
-        self.assertEqual(se.get_agg_fn(''), ident)
         self.assertEqual(se.get_agg_fn('group'), ident)
         self.assertEqual(se.get_agg_fn('dont_group'), ident)
 
-        self.assertEqual(se.get_agg_fn('sum'), sqlalchemy.func.sum)
-        self.assertEqual(se.get_agg_fn('count_null'), sqlalchemy.func.count)
+        self.assertEquivalent(se.get_agg_fn('sum')(), sqlalchemy.func.sum())
+        self.assertEquivalent(se.get_agg_fn('count_null')(), sqlalchemy.func.count())
 
     def test_get_table_rep(self):
         table = se.get_table_rep(
@@ -44,19 +44,19 @@ class TestSQLExpression(unittest.TestCase):
             ],
             'anlz_schema',
         )
-        self.assertTrue(isinstance(table, sqlalchemy.Table))
+        self.assertIsInstance(table, sqlalchemy.Table)
 
         self.assertEqual(table.name, 'table_12345')
         self.assertEqual(table.schema, 'anlz_schema')
 
         self.assertEqual(len(table.columns), 2)
         column_1, column_2 = table.columns
-        self.assertTrue(isinstance(column_1, sqlalchemy.Column))
-        self.assertTrue(isinstance(column_2, sqlalchemy.Column))
+        self.assertIsInstance(column_1, sqlalchemy.Column)
+        self.assertIsInstance(column_2, sqlalchemy.Column)
         self.assertEqual(column_1.name, 'Column1')
-        self.assertEqual(column_1.type, PlaidUnicode(length=5000))
+        self.assertIsInstance(column_1.type, PlaidUnicode)
         self.assertEqual(column_2.name, 'Column2')
-        self.assertEqual(column_2.type, sqlalchemy.NUMERIC())
+        self.assertIsInstance(column_2.type, sqlalchemy.NUMERIC)
 
         same_table = se.get_table_rep(
             'table_12345',
@@ -91,7 +91,7 @@ class TestSQLExpression(unittest.TestCase):
             metadata=table.metadata,
             alias='table_alias',
         )
-        self.assertTrue(isinstance(aliased_table, sqlalchemy.sql.selectable.Alias))
+        self.assertIsInstance(aliased_table, sqlalchemy.sql.selectable.Alias)
         self.assertEqual(aliased_table.name, 'table_alias')
 
     def test_get_table_rep_using_id(self):
@@ -103,7 +103,7 @@ class TestSQLExpression(unittest.TestCase):
             ],
             'anlz_schema',
         )
-        table2 = se.get_table_rep(
+        table2 = se.get_table_rep_using_id(
             'table_12345',
             [
                 {'source': 'Column1', 'dtype': 'text'},
@@ -111,7 +111,7 @@ class TestSQLExpression(unittest.TestCase):
             ],
             '_schema',
         )
-        self.assertTrue(isinstance(table2, sqlalchemy.Table))
+        self.assertIsInstance(table2, sqlalchemy.Table)
         self.assertEqual(table.schema, table2.schema)
 
     def test_get_column_table(self):
@@ -319,7 +319,7 @@ class TestSQLExpression(unittest.TestCase):
                 table_b,
                 [
                     {'a_column': 'KeyA', 'b_column': 'KeyB'},
-                    {'a_column': 'ValueA', 'b_column': 'valueB'},
+                    {'a_column': 'ValueA', 'b_column': 'ValueB'},
                 ],
             ),
             sqlalchemy.and_(
@@ -353,13 +353,11 @@ class TestSQLExpression(unittest.TestCase):
         table = se.get_table_rep('table_12345', source_column_configs, 'anlz_schema')
 
         # Should always return a Label object
-        self.assertTrue(
-            isinstance(
-                se.get_from_clause(
-                    [table],
-                    {'source': 'Column1', 'target': 'TargetColumn', 'dtype': 'text'},
-                    source_column_configs,
-                )
+        self.assertIsInstance(
+            se.get_from_clause(
+                [table],
+                {'source': 'Column1', 'target': 'TargetColumn', 'dtype': 'text'},
+                source_column_configs,
             ),
             sqlalchemy.sql.elements.Label,
         )
@@ -413,27 +411,23 @@ class TestSQLExpression(unittest.TestCase):
                 source_column_configs,
             )
 
-        # weird edge case
+        # weird edge case - column with dot in the name that doesn't represent a relationship to a table
+        # Errors on a key error for column.with.dot. Hmm.
         edge_source_column_configs = [
             {'source': 'column.with.dot', 'dtype': 'text'},
         ]
         edge_table = se.get_table_rep('table_12345', edge_source_column_configs, 'anlz_schema')
+        
         self.assertEquivalent(
             se.get_from_clause(
                 [edge_table],
                 {'source': 'column.with.dot', 'target': 'TargetColumn', 'dtype': 'text'},
                 edge_source_column_configs,
             ),
-            sqlalchemy.cast(table.c['column.with.dot'], PlaidUnicode(length=5000)).label(
+            sqlalchemy.cast(edge_table.c['column.with.dot'], PlaidUnicode(length=5000)).label(
                 'TargetColumn'
             ),
         )
-
-                
-
-        
-
-        # TODO: test all the weird stuff related to which table columns come from, table.{}, etc.
 
         # For source, cast=False means don't cast
         self.assertEquivalent(
@@ -447,7 +441,7 @@ class TestSQLExpression(unittest.TestCase):
         )
 
         # constant
-        self.assertEquivalent)(
+        self.assertEquivalent(
             se.get_from_clause(
                 [table],
                 {'constant': 'foobar', 'target': 'TargetColumn', 'dtype': 'text'},
@@ -589,7 +583,7 @@ class TestSQLExpression(unittest.TestCase):
                 {'source': "Column1", 'target': 'TargetColumn', 'dtype': 'text', 'sort': {'ascending': True}},
                 source_column_configs
             ),
-            sqlalchemy.asc(sqlalchemy.cast(table.c.Column1, PlaidUnicode(length=5000))).label('TargetColumn')
+            sqlalchemy.cast(table.c.Column1, PlaidUnicode(length=5000)).label('TargetColumn')
         )
 
         # If a column doesn't have source, expression or constant, but is serial, return None
@@ -625,7 +619,7 @@ class TestSQLExpression(unittest.TestCase):
                 sort=True,
                 aggregate=True,
             ),
-            sqlalchemy.asc(sqlalchemy.func.count(sqlalchemy.cast(table.c.Column1, PlaidUnicode(length=5000)))).label('TargetColumn')
+            sqlalchemy.asc(sqlalchemy.cast(sqlalchemy.func.count(table.c.Column1), PlaidUnicode(length=5000))).label('TargetColumn')
         )
 
         # constant takes priority over expression takes priority over source
@@ -675,8 +669,6 @@ class TestSQLExpression(unittest.TestCase):
             ),
         )
 
-        #TODO: Hmm. Should this be refactored into three smaller functions for constant, expression, source? Plus one for generating the process function I guess? Probably yes, but compleete the tests first.
-
     def test_get_combined_wheres(self):
         table = se.get_table_rep(
             'table_12345',
@@ -687,10 +679,11 @@ class TestSQLExpression(unittest.TestCase):
             'anlz_schema',
         )
 
-        self.assertEquivalent(
-            se.get_combined_wheres(["table.Column1 == 'foo'", "table.Column2 == 0", ""], [table], {})
-            [table.c.Column1 == 'foo', table.c.Column2 == 'bar']
-        )
+        for returned_where, expected_where in zip(
+            se.get_combined_wheres(["table.Column1 == 'foo'", "table.Column2 == 0", ""], [table], {}),
+            [table.c.Column1 == 'foo', table.c.Column2 == 0]
+        ):
+            self.assertEquivalent(returned_where, expected_where)
 
     def test_get_select_query(self):
         source_columns =  [
@@ -703,33 +696,33 @@ class TestSQLExpression(unittest.TestCase):
             source_columns,
             'anlz_schema',
         )
-        from_clause = curry(se.get_from_clause, [table], [source_columns])
+        from_clause = curry(se.get_from_clause, [table], source_column_configs=[source_columns])
 
         # Things to test:
         # basic function
         target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], []),
             sqlalchemy.select(from_clause(target_column))
         )
         
         # serial are ignored
         row_number_tc = {'target': 'RowNumber', 'dtype': 'serial'}
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column, row_number_tc], []),
             se.get_select_query([table], [source_columns], [target_column], []),
         )
 
         # wheres section
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], ['table.Column2 > 0']),
             sqlalchemy.select(from_clause(target_column)).where(table.c.Column2 > 0),
         )
         
         # sorting
-        column_2_ascending = {'target': 'Column2', 'source': 'Column2', 'sort': {'ascending': True, 'order': 0}}
-        column_3_descending = {'target': 'Column3', 'source': 'Column3', 'sort': {'ascending': False, 'order': 1}}
-        se.assertEquivalent(
+        column_2_ascending = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': True, 'order': 0}}
+        column_3_descending = {'target': 'Column3', 'source': 'Column3', 'dtype': 'numeric', 'sort': {'ascending': False, 'order': 1}}
+        self.assertEquivalent(
             se.get_select_query(
                 [table],
                 [source_columns],
@@ -747,14 +740,13 @@ class TestSQLExpression(unittest.TestCase):
         )
         # neither select nor sort should include serial columns
         serial_ascending = {'target': 'RowCount', 'dtype': 'serial', 'sort': {'ascending': True, 'order': 3}}
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column, column_2_ascending, serial_ascending], []),
             se.get_select_query([table], [source_columns], [target_column, column_2_ascending], []),
         )
-        # sort should not include columns with malformed sort sections
-        # TODO: malformed is currently defined as missing ascending. I believe missing order will error and that that's a current bug
-        malformed_sort = {'target': 'Column2', 'source': 'Column2', 'sort': {'order': 4}}
-        se.assertEquivalent(
+        # sort should not include columns with sort sections that don't have the 'ascending' param
+        malformed_sort = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'order': 4}}
+        self.assertEquivalent(
             se.get_select_query(
                 [table],
                 [source_columns],
@@ -766,6 +758,21 @@ class TestSQLExpression(unittest.TestCase):
                 from_clause(malformed_sort),
                 from_clause(column_3_descending),
             ).order_by(from_clause(column_3_descending, sort=True)),
+        )
+        # columns without a sort order should go at the end for sort
+        sort_without_order = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': True}}
+        self.assertEquivalent(
+            se.get_select_query(
+                [table],
+                [source_columns],
+                [target_column, sort_without_order, column_3_descending],
+                [],
+            ),
+            sqlalchemy.select(
+                from_clause(target_column),
+                from_clause(sort_without_order),
+                from_clause(column_3_descending),
+            ).order_by(from_clause(column_3_descending, sort=True), from_clause(sort_without_order, sort=True)),
         )
             
         # groupby (if aggregate)
@@ -782,10 +789,10 @@ class TestSQLExpression(unittest.TestCase):
             sqlalchemy.select(
                 from_clause(groupby_column_1, aggregate=True),
                 from_clause(sum_column_2, aggregate=True),
-            ).group_by(from_clause(grouby_column_1, aggregate=False, cast=False)),
+            ).group_by(from_clause(groupby_column_1, aggregate=False, cast=False)),
         )
         # constants aren't included in groupby
-        groupby_constant = {'target': 'Five', 'constant': 5, 'dtype': 'numeric', 'agg': 'group'}
+        groupby_constant = {'target': 'Five', 'constant': '5', 'dtype': 'numeric', 'agg': 'group'}
         self.assertEquivalent(
             se.get_select_query(
                 [table],
@@ -812,7 +819,6 @@ class TestSQLExpression(unittest.TestCase):
             ),
             sqlalchemy.select(
                 from_clause(groupby_column_1, aggregate=True),
-                from_clause(groupby_serial, aggregate=True),
                 from_clause(sum_column_2, aggregate=True),
             ).group_by(from_clause(groupby_column_1, aggregate=False, cast=False)),
         )
@@ -845,10 +851,10 @@ class TestSQLExpression(unittest.TestCase):
             sqlalchemy.select(
                 from_clause(distinct_column_1),
                 from_clause(column_2),
-            ).distinct(from_clause(grouby_column_1)),
+            ).distinct(from_clause(groupby_column_1)),
         )
         # constants aren't included in distinct
-        distinct_constant = {'target': 'Five', 'constant': 5, 'dtype': 'numeric', 'distinct': True}
+        distinct_constant = {'target': 'Five', 'constant': '5', 'dtype': 'numeric', 'distinct': True}
         self.assertEquivalent(
             se.get_select_query(
                 [table],
@@ -875,9 +881,8 @@ class TestSQLExpression(unittest.TestCase):
             ),
             sqlalchemy.select(
                 from_clause(distinct_column_1),
-                from_clause(distinct_serial),
                 from_clause(column_2),
-            ).group_by(from_clause(distinct_column_1)),
+            ).distinct(from_clause(distinct_column_1)),
         )
         # don't apply distinct if distinct is turned off
         self.assertEquivalent(
@@ -895,35 +900,35 @@ class TestSQLExpression(unittest.TestCase):
         )
 
         # having
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], having='result.TargetColumn != 0'),
             se.apply_output_filter(se.get_select_query([table], [source_columns], [target_column], []), 'result.TargetColumn != 0')
         )
        
         # use_target_slicer
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
             sqlalchemy.select(from_clause(target_column)).limit(90).offset(10),
         )
         # defaults are 0
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True),
             sqlalchemy.select(from_clause(target_column)).limit(0).offset(0),
         )
         # typical use case, 0-10
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_end=10),
             sqlalchemy.select(from_clause(target_column)).limit(10).offset(0),
         )
 
         # count
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [], [], count=True),
             sqlalchemy.select(sqlalchemy.func.count()).select_from(table),
         )
 
         # args from config are the same as args passed in
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query(
                 [table],
                 [source_columns],
@@ -933,22 +938,22 @@ class TestSQLExpression(unittest.TestCase):
             ),
             se.get_select_query([table], [source_columns], [groupby_column_1, sum_column_2], [], config={'aggregate': True})
         )
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end = 100),
             se.get_select_query([table], [source_columns], [target_column], [], config={'use_target_slicer': True, 'limit_target_start': 10, 'limit_target_end': 100}),
         )
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [], [], count=True),
             se.get_select_query([table], [source_columns], [], [], config={'count': True}),
         )
 
         # args passed in take precedence over args from config
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [], [], count=True, config={'count': False}),
             se.get_select_query([table], [source_columns], [], [], count=True),
         )
         # ...unless Falsy (is this intended behavior? - probably fine since all the defaults are Falsy, just a little weird)
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0, config={'limit_target_start': 10, 'limit_target_end': 100}),
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
         )
@@ -958,12 +963,12 @@ class TestSQLExpression(unittest.TestCase):
         sum_column_2_asc = {'target': 'Sum2', 'source': 'Column2', 'dtype': 'numeric', 'agg': 'sum', 'sort': {'ascending': True, 'order': 0}, 'distinct': True}
         sum_column_3_desc = {'target': 'Sum3', 'source': 'Column3', 'dtype': 'numeric', 'agg': 'sum', 'sort': {'ascending': False, 'order': 1}}
 
-        se.assertEquivalent(
+        self.assertEquivalent(
             se.get_select_query(
                 [table],
                 [source_columns],
                 [groupby_column_1_new, sum_column_2_asc, sum_column_3_desc],
-                ['table.Column2' > 0],
+                ['table.Column2 > 0'],
                 aggregate=True,
                 distinct=True,
                 having='result.Category != "foobar"',
@@ -994,6 +999,109 @@ class TestSQLExpression(unittest.TestCase):
             .offset(10)
         )
 
+    def test_simple_select_query(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+        target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
+        self.assertEquivalent(
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+            }, '_schema', None, {}),
+            se.get_select_query([table], [source_columns], [target_column], []),
+        )
+        self.assertEquivalent(
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+                'source_where': 'table.Column1 == "foobar"',
+            }, '_schema', None, {}),
+            se.get_select_query([table], [source_columns], [target_column], ['table.Column1 == "foobar"']),
+        )
+        aliased_table = sqlalchemy.orm.aliased(table, name='table_alias')
+        self.assertEquivalent(
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+                'source_alias': 'table_alias',
+            }, '_schema', None, {}),
+            se.get_select_query([aliased_table], [source_columns], [target_column], []),
+        )
+
+    def test_modified_select_query(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+        target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
+
+        # no fmt or mapping_fn
+        with self.assertRaises(se.SQLExpressionError):
+            se.modified_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+            }, 'schema', None)
+
+        # fmt
+        self.assertEquivalent(
+            se.modified_select_query({
+                'source_b': 'table_12345',
+                'source_columns_b': source_columns,
+                'target_columns_b': [target_column],
+            }, 'schema', None, fmt='{}_b'),
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+            }, 'schema', None, {}),
+        )
+
+        #mapping_fn
+        self.assertEquivalent(
+            se.modified_select_query({
+                'source_b': 'table_12345',
+                'source_columns_b': source_columns,
+                'target_columns_b': [target_column],
+            }, 'schema', None, mapping_fn=lambda x: f'{x}_b'),
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+            }, 'schema', None, {}),
+        )
+
+        #default to standard key
+        self.assertEquivalent(
+            se.modified_select_query({
+                'source_b': 'table_12345',
+                'source_columns_b': source_columns,
+                'target_columns': [target_column],
+            }, 'schema', None, fmt='{}_b'),
+            se.simple_select_query({
+                'source': 'table_12345',
+                'source_columns': source_columns,
+                'target_columns': [target_column],
+            }, 'schema', None, {}),
+        )
+
     def test_apply_output_filter(self):
         source_columns =  [
             {'source': 'Column1', 'dtype': 'text'},
@@ -1005,7 +1113,7 @@ class TestSQLExpression(unittest.TestCase):
             source_columns,
             'anlz_schema',
         )
-        from_clause = curry(se.get_from_clause, [table], [source_columns])
+        from_clause = curry(se.get_from_clause, [table], source_column_configs=[source_columns])
         target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
         select = sqlalchemy.select(from_clause(target_column))
         result = select.subquery('result')
@@ -1014,8 +1122,247 @@ class TestSQLExpression(unittest.TestCase):
             sqlalchemy.select(*result.columns).where(result.c.TargetColumn != 0)
         )
 
-    #TODO: get_insert_query
-    #TODO: get_update_query
-    #TODO: get_delete_query
-    #TODO: import_data_query
-    #TODO: allocate (this is another big one?)
+    def test_get_insert_query(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        source_table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+        from_clause = curry(se.get_from_clause, [source_table], source_column_configs=[source_columns])
+        target_table_columns = [
+            {'source': 'TargetColumn', 'dtype': 'text'}
+        ]
+        target_table = se.get_table_rep(
+            'table_54321',
+            target_table_columns,
+            'anlz_schema',
+        )
+        target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
+        select = sqlalchemy.select(from_clause(target_column))
+        self.assertEquivalent(
+            se.get_insert_query(target_table, [target_column], select),
+            target_table.insert().from_select(['TargetColumn'], select)
+        )
+
+        # Don't include serial columns
+        serial_column = {'target': 'RowNumber', 'dtype': 'serial'}
+        serial_target_table_columns = [{'source': 'TargetColumn', 'dtype': 'text'}, {'source': 'RowNumber', 'dtype': 'serial'}]
+        serial_target_table = se.get_table_rep(
+            'table_54321',
+            serial_target_table_columns,
+            'anlz_schema',
+        )
+        serial_select = sqlalchemy.select(from_clause(target_column), from_clause(serial_column))
+        self.assertEquivalent(
+            se.get_insert_query(serial_target_table, [target_column, serial_column], serial_select),
+            target_table.insert().from_select(['TargetColumn'], serial_select)
+        )
+
+    def test_get_delete_query(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        source_table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+
+        # If no where clause, delete everything
+        self.assertEquivalent(
+            se.get_delete_query(source_table, []),
+            sqlalchemy.delete(source_table),
+        )
+
+        # if there's a where clause, use it
+        self.assertEquivalent(
+            se.get_delete_query(source_table, ['table.Column1 == "foobar"']),
+            sqlalchemy.delete(source_table).where(source_table.c.Column1 == 'foobar'),
+        )
+
+    def test_import_data_query(self):
+        source_columns = [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        target_column = {'target': 'TargetColumn', 'source': 'Column1', 'dtype': 'text'}
+        target_table_columns = [{'source': 'TargetColumn', 'dtype': 'text'}]
+        target_table = se.get_table_rep(
+            'table_54321',
+            target_table_columns,
+            'anlz_schema',
+        )
+        expected_temp_table_columns = [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'text'},
+            {'source': 'Column3', 'dtype': 'text'},
+            {'source': u':::DOCUMENT_PATH:::', 'dtype': 'path'},
+            {'source': u':::FILE_NAME:::', 'dtype': 'file_name'},
+            {'source': u':::TAB_NAME:::', 'dtype': 'tab_name'},
+            {'source': u':::LAST_MODIFIED:::', 'dtype': 'last_modified'},
+        ]
+        expected_target_column = {
+            'target': 'TargetColumn',
+            'source': 'Column1',
+            'dtype': 'text',
+            'expression': """func.import_col(get_column(table, 'Column1'), 'text', '', False)""",
+        }
+        expected_temp_table = se.get_table_rep(
+            'temp_table',
+            expected_temp_table_columns,
+            'anlz_schema',
+            alias='text_import',
+        )
+
+        self.assertEquivalent(
+            se.import_data_query(
+                '_schema',
+                'table_54321',
+                source_columns,
+                [target_column],
+                temp_table_id='temp_table',
+            ),
+            se.get_insert_query(
+                target_table,
+                [expected_target_column],
+                se.get_select_query(
+                    [expected_temp_table],
+                    [expected_temp_table_columns],
+                    [expected_target_column],
+                    [],
+                ),
+            ),
+        )
+
+        # trailing_neagives
+        expected_target_column_tn = {
+            'target': 'TargetColumn',
+            'source': 'Column1',
+            'dtype': 'text',
+            'expression': """func.import_col(get_column(table, 'Column1'), 'text', '', True)""",
+        }
+        self.assertEquivalent(
+            se.import_data_query(
+                '_schema',
+                'table_54321',
+                source_columns,
+                [target_column],
+                trailing_negatives=True,
+                temp_table_id='temp_table',
+            ),
+            se.get_insert_query(
+                target_table,
+                [expected_target_column_tn],
+                se.get_select_query(
+                    [expected_temp_table],
+                    [expected_temp_table_columns],
+                    [expected_target_column_tn],
+                    [],
+                ),
+            ),
+        )
+
+        # date_format
+        expected_target_column_df = {
+            'target': 'TargetColumn',
+            'source': 'Column1',
+            'dtype': 'text',
+            'expression': """func.import_col(get_column(table, 'Column1'), 'text', 'YYYYMMDD', False)""",
+        }
+        self.assertEquivalent(
+            se.import_data_query(
+                '_schema',
+                'table_54321',
+                source_columns,
+                [target_column],
+                date_format='YYYYMMDD',
+                temp_table_id='temp_table',
+            ),
+            se.get_insert_query(
+                target_table,
+                [expected_target_column_df],
+                se.get_select_query(
+                    [expected_temp_table],
+                    [expected_temp_table_columns],
+                    [expected_target_column_df],
+                    [],
+                ),
+            ),
+        )
+
+        # magic columns
+        magic_target_columns = [
+            {'target': 'Path', 'dtype': 'path'},
+            {'target': 'FileName', 'dtype': 'file_name'},
+            {'target': 'TabName', 'dtype': 'tab_name'},
+            {'target': 'LastModified', 'dtype': 'last_modified'},
+        ]
+        magic_target_table_columns = [
+            {'source': 'Path', 'dtype': 'path'},
+            {'source': 'FileName', 'dtype': 'file_name'},
+            {'source': 'TabName', 'dtype': 'tab_name'},
+            {'source': 'LastModified', 'dtype': 'last_modified'},
+        ]
+        magic_target_table = se.get_table_rep(
+            'table_54321',
+            magic_target_table_columns,
+            'anlz_schema',
+        )
+        magic_expected_target_columns = [
+            {
+                'target': 'Path',
+                'source': u':::DOCUMENT_PATH:::',
+                'dtype': 'path',
+                'expression': """func.import_col(get_column(table, ':::DOCUMENT_PATH:::'), 'path', '', False)""",
+            },
+            {
+                'target': 'FileName',
+                'source': u':::FILE_NAME:::',
+                'dtype': 'file_name',
+                'expression': """func.import_col(get_column(table, ':::FILE_NAME:::'), 'file_name', '', False)""",
+            },
+            {
+                'target': 'TabName',
+                'source': u':::TAB_NAME:::',
+                'dtype': 'tab_name',
+                'expression': """func.import_col(get_column(table, ':::TAB_NAME:::'), 'tab_name', '', False)""",
+            },
+            {
+                'target': 'LastModified',
+                'source': u':::LAST_MODIFIED:::',
+                'dtype': 'last_modified',
+                'expression': """func.import_col(get_column(table, ':::LAST_MODIFIED:::'), 'last_modified', '', False)""",
+            },
+        ]
+
+        self.assertEquivalent(
+            se.import_data_query(
+                '_schema',
+                'table_54321',
+                source_columns,
+                magic_target_columns,
+                temp_table_id='temp_table',
+            ),
+            se.get_insert_query(
+                magic_target_table,
+                magic_expected_target_columns,
+                se.get_select_query(
+                    [expected_temp_table],
+                    [expected_temp_table_columns],
+                    magic_expected_target_columns,
+                    []
+                ),
+            ),
+        )
+        
+
+if __name__ == '__main__':
+    unittest.main()
