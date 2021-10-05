@@ -2472,7 +2472,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
     logger.debug('Finished converting')
 
 
-def dtype_from_excel(cls, excel_type):
+def dtype_from_excel(excel_type):
     return {
         xlrd.XL_CELL_TEXT: 'text',
         xlrd.XL_CELL_NUMBER: 'numeric',
