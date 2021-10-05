@@ -1041,7 +1041,10 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
             for ac in allocate_columns
             for d in driver_value_columns
         ]
+    ).where(
+        cte_source.columns[allocable_col] == 1
     )
+
     for col in parent_context_columns.keys():
         allocation_select = _join_parent_dim(allocation_select, cte_source, col)
 
@@ -1058,7 +1061,6 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
                  parent_cte_dict[col].columns[_get_parent_col()] == cte_ratios.columns[col]
                  for col in parent_context_columns.keys()
              ]
-            + [cte_source.columns[allocable_col] == 1]
         ),
         isouter=True
     )
