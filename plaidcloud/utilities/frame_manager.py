@@ -2436,6 +2436,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                     unique_column_names.add(column_name)
                     header_columns.append(column_name)
 
+                logger.info(f'Header Row for Excel Import: {header_columns}')
                 wr.writerow(header_columns)
             else:
                 if clean:
