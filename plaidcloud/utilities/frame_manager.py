@@ -2428,6 +2428,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
 
                     trial_count = 1
                     trim_size = 58
+                    
                     while column_name in unique_column_names:
                         trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
                         # All target column names must be unique.  Force this to something unique
