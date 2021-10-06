@@ -2378,9 +2378,12 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     logger.debug('opening workbook for conversion')
+    column_information = []
     wb = xlrd.open_workbook(excel_file_name, on_demand=True)
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
+    column_count = sh.ncols
+
     with open(csv_file_name, 'wb') as csv_file:
         wr = csv.writer(
             csv_file,
@@ -2407,7 +2410,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 invalid_characters = set(',.()[];:*')
                 header_columns = []
 
-                for col in range(0, sh.ncols):
+                for col in range(0, column_count):
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(sh.cell(skip_rows, col).ctype)
                     if column_name_dtype == 'timestamp':
@@ -2422,9 +2425,12 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                     else:
                         column_name = str(sh.cell(skip_rows, col).value).strip().replace('\n', '').replace('\r', '')
 
-                    column_name = column_name.lstrip(string.digits) # Strip off leading digits
+                    if column_name[0:1] in string.digits:
+                        column_name = f'_{column_name}'
                     column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
                     column_name = column_name[:63] # Truncate to max length
+                    if not column_name:
+                        column_name = 'blank'
 
                     trial_count = 1
                     trim_size = 58
@@ -2435,41 +2441,59 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         trial_count += 1
                     unique_column_names.add(column_name)
                     header_columns.append(column_name)
+                    column_information.append({
+                        'id': column_name,
+                        'dtype': dtype_from_excel(sh.cell(skip_rows + 1, col).ctype) # go to next row to determine dytype of the data
+                    })
 
-                logger.info(f'Header Row for Excel Import: {header_columns}')
+                logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
+                column_count = len(header_columns)
             else:
                 if clean:
                     if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
                         # Skip rows that have no data.
                         skipped_rows += 1
                         continue
-                wr.writerow([
-                    (
-                        c.value
-                        if c.ctype not in [xlrd.XL_CELL_DATE, xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR, xlrd.XL_CELL_NUMBER]
-                        # else xlrd.error_text_from_code[c.value]  # if you wanted the error text instead of NULL
-                        # if c.ctype == xlrd.XL_CELL_ERROR
-                        else '<NULL>'
-                        if c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR]
-                        else int(c.value)
-                        if c.ctype == xlrd.XL_CELL_NUMBER and c.value == int(c.value)
-                        else get_formatted_number(c.value)
-                        if c.ctype == xlrd.XL_CELL_NUMBER
-                        else datetime.datetime(
-                            *xlrd.xldate_as_tuple(c.value, datemode)
-                        ).isoformat()
-                        if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0
-                        else datetime.time(
-                            *xlrd.xldate_as_tuple(c.value, datemode)[:3]
-                        ).isoformat()
-                    )
-                    for c in sh.row(rownum)
-                ])
+
+                row = []
+                col_pos = 0
+                for c in sh.row(rownum):
+                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                        row.append('<NULL>')
+                    else:
+                        dtype = dtype_from_excel(c.ctype)
+
+                        if dtype != column_information[col_pos]['dtype']:
+                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+
+                        if dtype == 'text':
+                            row.append(c.value)
+                        elif dtype == 'numeric':
+                            if int(c.value) ==  c.value:
+                                row.append(int(c.value)) # This appears to be an int
+                            else:
+                                row.append(get_formatted_number(c.value)) # some other type of number
+                        elif dtype == 'boolean':
+                            row.append(c.value)
+                        elif dtype == 'datetime':
+                            if xlrd.xldate_as_tuple(c.value, datemode)[0] == 0:
+                                row.append('<NULL>')
+                            else:
+                                row.append(datetime.time(*xlrd.xldate_as_tuple(c.value, datemode)[:3]).isoformat())
+                        else:
+                            row.append('<NULL>')
+                    col_pos += 1
+                    if col_pos > column_count:
+                        # Avoid picking up stray data outside the header range
+                        break
+                wr.writerow(row)
 
         if skipped_rows:
             logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
     logger.debug('Finished converting')
+
+    return column_information
 
 
 def dtype_from_excel(excel_type):
