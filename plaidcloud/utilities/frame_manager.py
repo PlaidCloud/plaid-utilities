@@ -12,11 +12,13 @@ import posixpath
 import sys
 import math
 import datetime
+import string
 from functools import wraps
 import traceback
 import xlrd3 as xlrd
 import openpyxl
 import unicodecsv as csv
+from math import log10, floor
 
 from pandas.api.types import is_string_dtype
 import pandas as pd
@@ -2401,12 +2403,41 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # Remove newlines
                 # Remove carriage returns
                 # Force to string
-                wr.writerow([
-                    (
-                        six.text_type(c.value).strip().replace('\n', '').replace('\r', '')
-                    )
-                    for c in sh.row(rownum)
-                ])
+                unique_column_names = set()
+                invalid_characters = set(',.()[];:*')
+                header_columns = []
+
+                for col in range(0, sh.ncols):
+                    # See if this column name is a date type
+                    column_name_dtype = dtype_from_excel(sh.cell(skip_rows, col).ctype)
+                    if column_name_dtype == 'timestamp':
+                        # Need to convert this from an Excel date stamp to human readable form
+                        column_date_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
+                        column_name = f'_{column_date_name}' # column names can't start with numbers so we prefix with _
+                    elif column_name_dtype == 'boolean':
+                        if sh.cell(skip_rows, col).value:
+                            column_name = 'TRUE'
+                        else:
+                            column_name = 'FALSE'
+                    else:
+                        column_name = str(sh.cell(skip_rows, col).value).strip().replace('\n', '').replace('\r', '')
+
+                    column_name = column_name.lstrip(string.digits) # Strip off leading digits
+                    column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
+                    column_name = column_name[:63] # Truncate to max length
+
+                    trial_count = 1
+                    trim_size = 58
+                    while column_name in unique_column_names:
+                        trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
+                        # All target column names must be unique.  Force this to something unique
+                        column_name = f'{column_name[:trim_size]}_dup{trial_count}'
+                        trial_count += 1
+                    unique_column_names.add(column_name)
+                    header_columns.append(column_name)
+
+                logger.info(f'Header Row for Excel Import: {header_columns}')
+                wr.writerow(header_columns)
             else:
                 if clean:
                     if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
@@ -2439,6 +2470,15 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
         if skipped_rows:
             logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
     logger.debug('Finished converting')
+
+
+def dtype_from_excel(excel_type):
+    return {
+        xlrd.XL_CELL_TEXT: 'text',
+        xlrd.XL_CELL_NUMBER: 'numeric',
+        xlrd.XL_CELL_DATE: 'timestamp',
+        xlrd.XL_CELL_BOOLEAN: 'boolean',
+    }.get(excel_type, 'text')
 
 
 def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
