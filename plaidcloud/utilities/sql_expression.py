@@ -1083,7 +1083,6 @@ def allocate(source_query, driver_query, allocate_columns, numerator_columns, de
             + [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
         )
         .where(cte_source.columns[allocable_col] == 0)
-        .distinct()
     )
 
     return allocation_select
