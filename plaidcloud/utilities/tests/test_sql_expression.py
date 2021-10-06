@@ -94,6 +94,9 @@ class TestSQLExpression(unittest.TestCase):
         self.assertIsInstance(aliased_table, sqlalchemy.sql.selectable.Alias)
         self.assertEqual(aliased_table.name, 'table_alias')
 
+        with self.assertRaises(se.SQLExpressionError):
+            se.get_table_rep(None, [], None)
+
     def test_get_table_rep_using_id(self):
         table = se.get_table_rep(
             'table_12345',
@@ -417,7 +420,7 @@ class TestSQLExpression(unittest.TestCase):
             {'source': 'column.with.dot', 'dtype': 'text'},
         ]
         edge_table = se.get_table_rep('table_12345', edge_source_column_configs, 'anlz_schema')
-        
+
         self.assertEquivalent(
             se.get_from_clause(
                 [edge_table],
@@ -705,7 +708,7 @@ class TestSQLExpression(unittest.TestCase):
             se.get_select_query([table], [source_columns], [target_column], []),
             sqlalchemy.select(from_clause(target_column))
         )
-        
+
         # serial are ignored
         row_number_tc = {'target': 'RowNumber', 'dtype': 'serial'}
         self.assertEquivalent(
@@ -718,7 +721,7 @@ class TestSQLExpression(unittest.TestCase):
             se.get_select_query([table], [source_columns], [target_column], ['table.Column2 > 0']),
             sqlalchemy.select(from_clause(target_column)).where(table.c.Column2 > 0),
         )
-        
+
         # sorting
         column_2_ascending = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': True, 'order': 0}}
         column_3_descending = {'target': 'Column3', 'source': 'Column3', 'dtype': 'numeric', 'sort': {'ascending': False, 'order': 1}}
@@ -774,7 +777,7 @@ class TestSQLExpression(unittest.TestCase):
                 from_clause(column_3_descending),
             ).order_by(from_clause(column_3_descending, sort=True), from_clause(sort_without_order, sort=True)),
         )
-            
+
         # groupby (if aggregate)
         groupby_column_1 = {'target': 'Category', 'source': 'Column1', 'dtype': 'text', 'agg': 'group'}
         sum_column_2 = {'target': 'Sum', 'source': 'Column2', 'dtype': 'numeric', 'agg': 'sum'}
@@ -904,7 +907,7 @@ class TestSQLExpression(unittest.TestCase):
             se.get_select_query([table], [source_columns], [target_column], [], having='result.TargetColumn != 0'),
             se.apply_output_filter(se.get_select_query([table], [source_columns], [target_column], []), 'result.TargetColumn != 0')
         )
-       
+
         # use_target_slicer
         self.assertEquivalent(
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
@@ -957,7 +960,7 @@ class TestSQLExpression(unittest.TestCase):
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0, config={'limit_target_start': 10, 'limit_target_end': 100}),
             se.get_select_query([table], [source_columns], [target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
         )
- 
+
         # everything is applied in the right order
         groupby_column_1_new = {'target': 'Category', 'source': 'Column1', 'dtype': 'text', 'agg': 'group'}
         sum_column_2_asc = {'target': 'Sum2', 'source': 'Column2', 'dtype': 'numeric', 'agg': 'sum', 'sort': {'ascending': True, 'order': 0}, 'distinct': True}
@@ -1362,7 +1365,100 @@ class TestSQLExpression(unittest.TestCase):
                 ),
             ),
         )
-        
+
+    def test_get_update_query(self):
+        pass
+
+    def test_get_update_value(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+        dtype_map = {
+            sc['source']: sc['dtype']
+            for sc in source_columns
+        }
+        null_target_col = {'source': 'Column1', 'nullify': 'True'}
+        self.assertEqual(
+            se.get_update_value(null_target_col, table, dtype_map, {}),
+            (True, None)
+        )
+        expression_col = {'source': 'Column1', 'expression': '"foobar"'}
+        self.assertEqual(
+            se.get_update_value(expression_col, table, dtype_map, {}),
+            (True, 'foobar')
+        )
+        constant_col = {'source': 'Column2', 'constant': '5'}
+        include, value = se.get_update_value(constant_col, table, dtype_map, {})
+        self.assertTrue(include)
+        self.assertEquivalent(
+            value,
+            sqlalchemy.literal('5', type_=sqlalchemy.NUMERIC)
+        )
+        # TODO: test this against version 1.0 (will require testing at the "get_update_query" level)
+        empty_string_col = {'source': 'Column1', 'expression': 'None'}
+        self.assertEqual(
+            se.get_update_value(empty_string_col, table, dtype_map, {}),
+            (True, u''),
+        )
+        #TODO: also test this against version 1.0, but I think it's a bug
+        include_because_text_col = {'source': 'Column1'}
+        self.assertEqual(
+            se.get_update_value(include_because_text_col, table, dtype_map, {}),
+            (True, u'')
+        )
+        dont_include_col = {'source': 'Column2'}
+        # We don't care about the value, only about include
+        self.assertFalse(se.get_update_value(dont_include_col, table, dtype_map, {})[0])
+
+    def test_get_update_query(self):
+        source_columns =  [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep(
+            'table_12345',
+            source_columns,
+            'anlz_schema',
+        )
+        dtype_map = {
+            sc['source']: sc['dtype']
+            for sc in source_columns
+        }
+        target_columns = [
+            {'source': 'Column1', 'nullify': True},
+            {'source': 'Column2', 'expression': '2'},
+            {'source': 'Column3'},
+        ]
+        self.assertEquivalent(
+            se.get_update_query(table, target_columns, [], dtype_map),
+            sqlalchemy.update(table).values({'Column1': None, 'Column2': 2}),
+        )
+        self.assertEquivalent(
+            se.get_update_query(table, target_columns, ['table.Column1 == "foobar"'], dtype_map),
+            sqlalchemy.update(table).where(table.c.Column1 == 'foobar').values({'Column1': None, 'Column2': 2}),
+        )
+        # weird empty string stuff
+        # This one makes sense to me
+        empty_string_col = {'source': 'Column1', 'expression': 'None'}
+        self.assertEquivalent(
+            se.get_update_query(table, [empty_string_col], [], dtype_map),
+            sqlalchemy.update(table).values({'Column1': u''})
+        )
+        # This one seems wrong
+        include_because_text_col = {'source': 'Column1'}
+        self.assertEquivalent(
+            se.get_update_query(table, [include_because_text_col], [], dtype_map),
+            sqlalchemy.update(table).values({'Column1': u''})
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

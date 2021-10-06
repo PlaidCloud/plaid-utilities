@@ -260,6 +260,7 @@ def get_agg_fn(agg_str):
     if hasattr(sqlalchemy.func, agg_str):
         return getattr(sqlalchemy.func, agg_str)
 
+    # ADT2021 - I believe this line is unreachable, because hasattr(sqlalchemy.func, _) should always be True
     return ident
 
 
@@ -655,6 +656,31 @@ def get_insert_query(target_table, target_columns, select_query):
         select_query,
     )
 
+def get_update_value(tc, table, dtype_map, variables):
+    """returns (include, val) where val should be used in the query if include is True, but filtered out if not"""
+    dtype = dtype_map.get(tc['source'], 'text')
+    if dtype == 'text':
+        def conditional_empty_string_fn(val):
+            # Transforms None into u'', but only if dtype is 'text'
+            if val is None:
+                return u''
+            return val
+    else:
+        conditional_empty_string_fn = ident
+
+    if tc.get('nullify'):
+        return (True, None)
+    if tc.get('constant'):
+        return (True, conditional_empty_string_fn(sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))))
+    if tc.get('expression'):
+        return (True, conditional_empty_string_fn(eval_expression(tc['expression'].strip(), variables, [table])))
+    if dtype == 'text':
+        # Special condition for empty string
+        # ADT2021: I'm suspicious this is attempting to duplicate a bug in 1.0
+        return (True, u'')
+
+    # If none of our conditions are true, then this column shouldn't be included in the values dict
+    return (False, None)
 
 def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     update_query = sqlalchemy.update(table)
@@ -664,28 +690,10 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
         update_query = update_query.where(*combined_wheres)
 
     # Build values dict
-    def get_val(tc):
-        # returns (include, val) where val should be used in the query if include is True, but filtered out if not
-        if tc.get('nullify'):
-            return (True, None)
-        if tc.get('expression'):
-            return (True, eval_expression(tc['expression'].strip(), variables, [table]))
-
-        dtype = dtype_map.get(tc['source'], 'text')
-        if tc.get('constant'):
-            return (True, sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype)))
-
-        if dtype == 'text':
-            # Special condition for empty string
-            return (True, u'')
-
-        # If none of our conditions are true, then this column shouldn't be included in the values dict
-        return (False, None)
-
     values = {
         col_name: value
         for col_name, include, value in [
-            (tc['source'],) + get_val(tc)
+            (tc['source'],) + get_update_value(tc, table, dtype_map, variables)
             for tc in target_columns
         ]
         if include
@@ -1027,5 +1035,3 @@ def allocate(
         .where(cte_source.columns[allocable_col] == 0)
     )
     return allocation_select
-
-
