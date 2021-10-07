@@ -1641,7 +1641,7 @@ class TestGetUpdateQuery(TestSQLExpression):
         )
 
     def test_empty_string_no_matter_what(self):
-        # This one seems wrong, but it matches v1.0.0's behavior. I think we should change hwo this works unless there's a good reason for it?
+        # It works this way because it's impossible to type 'constant': '' in the UI
         include_because_text_col = {'source': 'Column1'}
         self.assertEquivalent(
             se.get_update_query(self.table, [include_because_text_col], [], self.dtype_map),

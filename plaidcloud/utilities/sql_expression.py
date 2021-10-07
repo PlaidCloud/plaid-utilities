@@ -681,7 +681,7 @@ def get_update_value(tc, table, dtype_map, variables):
         return (True, conditional_empty_string_fn(eval_expression(tc['expression'].strip(), variables, [table])))
     if dtype == 'text':
         # Special condition for empty string
-        # ADT2021: I'm suspicious this is attempting to duplicate a bug in 1.0
+        # It works this way because it's impossible to type 'constant': '' in the UI
         return (True, u'')
 
     # If none of our conditions are true, then this column shouldn't be included in the values dict
