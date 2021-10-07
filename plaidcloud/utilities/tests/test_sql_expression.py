@@ -313,7 +313,7 @@ class TestCleanWhere(TestSQLExpression):
     def test_trims(self):
         self.assertEqual(se.clean_where(' where_clause '), 'where_clause')
 
-class TeestEvalExpression(TestSQLExpression):
+class TestEvalExpression(TestSQLExpression):
     def setUp(self):
         self.table = se.get_table_rep(
             'table_12345',
