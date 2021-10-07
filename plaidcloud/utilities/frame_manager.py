@@ -2411,15 +2411,16 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 invalid_characters = set(',.()[];:*')
                 header_columns = []
 
-                logger.info(f'----- Detecting Column Haders on row: {rownum}')
+                logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
                 for col in range(0, column_count):
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(sh.cell(rownum, col).ctype)
                     logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
                     if has_header:
-                        logger.info(f'----- Column Header has header flag is {has_header}')
-                        logger.info(f'----- Column Header Cell Value: {sh.cell(rownum, col).value}')
+                        cell_value = str(sh.cell(rownum, col).value)
+                        # logger.info(f'----- Column Header has header flag is {has_header}')
+                        logger.info(f'----- Column Header Cell Value: {cell_value}')
                         if column_name_dtype == 'timestamp':
                             # Need to convert this from an Excel date stamp to human readable form
                             column_name = xlrd.xldate_as_datetime(sh.cell(rownum, col).value, 0).date().isoformat()
@@ -2430,14 +2431,14 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                                 column_name = 'FALSE'
                         else:
                             column_name = str(sh.cell(rownum, col).value).strip().replace('\n', '').replace('\r', '')
-                        logger.info(f'----- Raw Column name prior to compliance check {column_name}')
+                        # logger.info(f'----- Raw Column name prior to compliance check {column_name}')
 
                         if column_name[0:1] in string.digits:
                             column_name = f'_{column_name}'
                         column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
                         column_name = column_name[:63] # Truncate to max length
                         data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
-                        logger.info(f'----- Column name after compliance check {column_name}')
+                        # logger.info(f'----- Column name after compliance check {column_name}')
                     else:
                         column_name = None
                         data_dtype = column_name_dtype
