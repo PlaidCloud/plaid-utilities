@@ -2411,14 +2411,17 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 invalid_characters = set(',.()[];:*')
                 header_columns = []
 
+                logger.info(f'----- Detecting Column Haders on row: {rownum}')
+
                 for col in range(0, column_count):
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(sh.cell(skip_rows, col).ctype)
+                    logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
                     if has_header:
+                        logger.info(f'----- Column Header has header flag is {has_header}')
                         if column_name_dtype == 'timestamp':
                             # Need to convert this from an Excel date stamp to human readable form
-                            column_date_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
-                            column_name = f'_{column_date_name}' # column names can't start with numbers so we prefix with _
+                            column_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
                         elif column_name_dtype == 'boolean':
                             if sh.cell(skip_rows, col).value:
                                 column_name = 'TRUE'
@@ -2432,12 +2435,15 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
                         column_name = column_name[:63] # Truncate to max length
                         data_dtype = dtype_from_excel(sh.cell(skip_rows + 1, col).ctype) # go to next row to determine dytype of the data
+                        logger.info(f'----- Column name after compliance check {column_name}')
                     else:
                         column_name = None
                         data_dtype = column_name_dtype
 
                     if not column_name:
                         column_name = f'column_{col}'
+
+                    logger.info(f'----- Column name final: {column_name}')
 
                     trial_count = 1
                     trim_size = 58
@@ -2449,7 +2455,8 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                     unique_column_names.add(column_name)
                     header_columns.append(column_name)
                     column_information.append({
-                        'id': column_name,
+                        'source': column_name,
+                        'target': column_name,
                         'dtype': data_dtype 
                     })
 
