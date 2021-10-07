@@ -1042,12 +1042,11 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
         )
 
-     # this one errors in v1.0.0 because apply_output_filter has a default of None for the variables param, but None isn't a valid value for that param. In the new version I've changed it to a better default. But I also don't believe apply_output_filter is ever called in our actual code without providing a variables dict
     def test_having(self):
         # having
         self.assertEquivalent(
             se.get_select_query([self.table], [self.source_columns], [self.target_column], [], having='result.TargetColumn != 0'),
-            se.apply_output_filter(se.get_select_query([self.table], [self.source_columns], [self.target_column], []), 'result.TargetColumn != 0')
+            se.apply_output_filter(se.get_select_query([self.table], [self.source_columns], [self.target_column], []), 'result.TargetColumn != 0', {})
         )
 
     def test_use_target_slicer(self):
@@ -1105,7 +1104,6 @@ class TestGetSelectQuery(TestSQLExpression):
             se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0),
         )
 
-    # this one errors in v1.0.0 because apply_output_filter has a default of None for the variables param, but None isn't a valid value for that param. In the new version I've changed it to a better default. But I also don't believe apply_output_filter is ever called in our actual code without providing a variables dict
     def test_order(self):
         # everything is applied in the right order
         groupby_column_1_new = {'target': 'Category', 'source': 'Column1', 'dtype': 'text', 'agg': 'group'}
@@ -1142,7 +1140,8 @@ class TestGetSelectQuery(TestSQLExpression):
                 .distinct(
                     self.from_clause(sum_column_2_asc, aggregate=True)
                 ),
-                'result.Category != "foobar"'
+                'result.Category != "foobar"',
+                {},
             )
             .limit(90)
             .offset(10)
@@ -1264,7 +1263,6 @@ class TestModifiedSelectQuery(TestSQLExpression):
         )
 
 class TestApplyOutputFilter(TestSQLExpression):
-    # Again, this fails because apply_output_filter has a bad default value for variables.
     def test_apply_output_filter(self):
         source_columns =  [
             {'source': 'Column1', 'dtype': 'text'},
@@ -1281,7 +1279,7 @@ class TestApplyOutputFilter(TestSQLExpression):
         select = sqlalchemy.select(from_clause(target_column))
         result = select.subquery('result')
         self.assertEquivalent(
-            se.apply_output_filter(select, 'result.TargetColumn != 0'),
+            se.apply_output_filter(select, 'result.TargetColumn != 0', {}),
             sqlalchemy.select(*result.columns).where(result.c.TargetColumn != 0)
         )
 
