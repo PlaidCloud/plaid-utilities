@@ -21,6 +21,8 @@ class TestSQLExpression(unittest.TestCase):
     def assertEquivalent(self, left, right):
         """Asserts that two sqlalchemy expressions resolve to the same SQL code"""
         return self.assertEqual(compiled(left), compiled(right))
+    def assertNotEquivalent(self, left, right):
+        return self.assertNotEqual(compiled(left), compiled(right))
 
 
 class TestGetProjectSchema(TestSQLExpression):
@@ -147,6 +149,7 @@ class TestGetTableRepUsingID(TestSQLExpression):
                 {'source': 'Column2', 'dtype': 'numeric'},
             ],
             '_schema',
+            metadata=None,
         )
         self.assertIsInstance(table2, sqlalchemy.Table)
         self.assertEqual(table.schema, table2.schema)
@@ -251,6 +254,7 @@ class TestGetColumnTable(TestSQLExpression):
             'table1',
         )
 
+    # This one errors in v1.0.0 because the check for table.column comes after the check for tableN.column. table.column matches the tableN.column regex, but then there's no N, so it errors. This has been fixed by checking for table.column first.
     def test_table_dot_column(self):
         self.assertEqual(
             se.get_column_table(
@@ -536,7 +540,10 @@ class TestGetFromClause(TestSQLExpression):
                 {'constant': 'foobar', 'target': 'TargetColumn', 'dtype': 'text'},
                 self.source_column_configs,
             ),
-            sqlalchemy.literal('foobar').label('TargetColumn'),
+            sqlalchemy.cast(
+                sqlalchemy.literal('foobar').label('TargetColumn'),
+                type_ = PlaidUnicode(length=5000)
+            ),
         )
 
     def test_constant_variables(self):
@@ -547,7 +554,10 @@ class TestGetFromClause(TestSQLExpression):
                 self.source_column_configs,
                 variables={'var': 'foobar'},
             ),
-            sqlalchemy.literal('foobar').label('TargetColumn'),
+            sqlalchemy.cast(
+                sqlalchemy.literal('foobar').label('TargetColumn'),
+                type_ = PlaidUnicode(length=5000)
+            ),
         )
 
     def test_constant_disable_variables(self):
@@ -559,11 +569,14 @@ class TestGetFromClause(TestSQLExpression):
                 variables={'var': 'foobar'},
                 disable_variables=True,
             ),
-            sqlalchemy.literal('{var}').label('TargetColumn'),
+            sqlalchemy.cast(
+                sqlalchemy.literal('{var}').label('TargetColumn'),
+                type_ = PlaidUnicode(length=5000)
+            ),
         )
 
     def test_constant_irrelevant_cast(self):
-        # For constant columns, cast is irrelevant
+        # For constant columns, cast param is irrelevant
         self.assertEquivalent(
             se.get_from_clause(
                 [self.table],
@@ -747,8 +760,11 @@ class TestGetFromClause(TestSQLExpression):
                 },
                 self.source_column_configs,
             ),
-            sqlalchemy.literal('barfoo').label(
-                'TargetColumn'
+            sqlalchemy.cast(
+                sqlalchemy.literal('barfoo').label(
+                    'TargetColumn',
+                ),
+                type_=PlaidUnicode(length=5000),
             ),
         )
 
@@ -874,6 +890,7 @@ class TestGetSelectQuery(TestSQLExpression):
             ).order_by(self.from_clause(self.column_3_descending, sort=True)),
         )
 
+    # In v1.0.0 this kind of config just errors. I'm not sure it's possible to produce a config like this in the UI, but there is a reasonable way to handle such a config, so that's better than erroring
     def test_put_columns_without_order_at_end_of_sort(self):
         # columns without a sort order should go at the end for sort
         sort_without_order = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': True}}
@@ -1025,6 +1042,7 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
         )
 
+     # this one errors in v1.0.0 because apply_output_filter has a default of None for the variables param, but None isn't a valid value for that param. In the new version I've changed it to a better default. But I also don't believe apply_output_filter is ever called in our actual code without providing a variables dict
     def test_having(self):
         # having
         self.assertEquivalent(
@@ -1081,12 +1099,13 @@ class TestGetSelectQuery(TestSQLExpression):
         )
 
     def test_config_special_falsy_case(self):
-        # ...unless Falsy (is this intended behavior? - probably fine since all the defaults are Falsy, just a little weird)
+        # Tests that a bug in v1.0.2 is fixed
         self.assertEquivalent(
             se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0, config={'limit_target_start': 10, 'limit_target_end': 100}),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0),
         )
 
+    # this one errors in v1.0.0 because apply_output_filter has a default of None for the variables param, but None isn't a valid value for that param. In the new version I've changed it to a better default. But I also don't believe apply_output_filter is ever called in our actual code without providing a variables dict
     def test_order(self):
         # everything is applied in the right order
         groupby_column_1_new = {'target': 'Category', 'source': 'Column1', 'dtype': 'text', 'agg': 'group'}
@@ -1245,6 +1264,7 @@ class TestModifiedSelectQuery(TestSQLExpression):
         )
 
 class TestApplyOutputFilter(TestSQLExpression):
+    # Again, this fails because apply_output_filter has a bad default value for variables.
     def test_apply_output_filter(self):
         source_columns =  [
             {'source': 'Column1', 'dtype': 'text'},
@@ -1337,6 +1357,7 @@ class TestGetDeleteQuery(TestSQLExpression):
             sqlalchemy.delete(self.source_table).where(self.source_table.c.Column1 == 'foobar'),
         )
 
+# these tests error in v1.0.0, because import_data_query is not a true function and generates a random uuid for the temp table name. For testing purposes, I've added the ability to pass in a temp table name.
 class TestImportDataQuery(TestSQLExpression):
     def setUp(self):
         self.source_columns = [
@@ -1518,6 +1539,7 @@ class TestImportDataQuery(TestSQLExpression):
             ),
         )
 
+# This function doesn't exist in v1.0.0. It's used to implement another function more clearly, and test more cleanly
 class TestGetUpdateValue(TestSQLExpression):
     def setUp(self):
         self.source_columns =  [

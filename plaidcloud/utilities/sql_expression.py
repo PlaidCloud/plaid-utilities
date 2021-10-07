@@ -167,8 +167,8 @@ def get_from_clause(
     name = target_column_config.get('target')
     type_ = sqlalchemy_from_dtype(target_column_config.get('dtype'))
 
-    # always cast expressions, pay attention to cast param for source mappings
-    if not constant and (expression or (source and cast)):
+    # always cast expressions and constants, pay attention to cast param for source mappings
+    if constant or expression or (source and cast):
         cast_fn = curry(sqlalchemy.cast, type_=type_)
     else:
         cast_fn = ident
@@ -520,15 +520,20 @@ def get_select_query(
 
     """
 
+    def fill_in(var, var_name, default):
+        if var is not None:
+            return var
+        return config.get(var_name, default)
+
     config = config or {}
-    aggregate = aggregate or config.get('aggregate', False)
-    having = having or config.get('having', None)
-    use_target_slicer = use_target_slicer or config.get('use_target_slicer', False)
-    limit_target_start = limit_target_start or config.get('limit_target_start', 0)
-    limit_target_end = limit_target_end or config.get('limit_target_end', 0)
-    distinct = distinct or config.get('distinct', False)
-    count = count or config.get('count', False)
-    disable_variables = disable_variables or config.get('disable_variables', False)
+    aggregate = fill_in(aggregate, 'aggregate', False)
+    having = fill_in(having, 'having', None)
+    use_target_slicer = fill_in(use_target_slicer, 'use_target_slicer', False)
+    limit_target_start = fill_in(limit_target_start, 'limit_target_start', 0)
+    limit_target_end = fill_in(limit_target_end, 'limit_target_end', 0)
+    distinct = fill_in(distinct, 'distinct', False)
+    count = fill_in(count, 'count', False)
+    disable_variables = fill_in(disable_variables, 'disable_variables', False)
 
     # Build SELECT x FROM y section of our select query
     if count:
