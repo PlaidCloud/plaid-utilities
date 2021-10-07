@@ -1581,7 +1581,6 @@ class TestGetUpdateValue(TestSQLExpression):
         )
 
     def test_expression_none_returns_empty_string_for_text(self):
-        # TODO: test this against version 1.0 (will require testing at the "get_update_query" level)
         empty_string_col = {'source': 'Column1', 'expression': 'None'}
         self.assertEqual(
             se.get_update_value(empty_string_col, self.table, self.dtype_map, {}),
@@ -1589,7 +1588,6 @@ class TestGetUpdateValue(TestSQLExpression):
         )
 
     def test_include_because_text(self):
-        #TODO: also test this against version 1.0, but I think it's a bug
         include_because_text_col = {'source': 'Column1'}
         self.assertEqual(
             se.get_update_value(include_because_text_col, self.table, self.dtype_map, {}),
@@ -1645,7 +1643,7 @@ class TestGetUpdateQuery(TestSQLExpression):
         )
 
     def test_empty_string_no_matter_what(self):
-        # This one seems wrong
+        # This one seems wrong, but it matches v1.0.0's behavior. I think we should change hwo this works unless there's a good reason for it?
         include_because_text_col = {'source': 'Column1'}
         self.assertEquivalent(
             se.get_update_query(self.table, [include_because_text_col], [], self.dtype_map),
