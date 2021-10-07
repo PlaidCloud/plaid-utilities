@@ -2408,19 +2408,22 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # Remove carriage returns
                 # Force to string
                 unique_column_names = set()
+                unique_source_names = set()
                 invalid_characters = set(',.()[];:*')
                 header_columns = []
 
-                logger.info(f'----- Detecting Column Headers on row: {rownum}')
+                # logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
                 for col in range(0, column_count):
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(sh.cell(rownum, col).ctype)
-                    logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
+                    # logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
                     if has_header:
                         cell_value = str(sh.cell(rownum, col).value)
+                        source_name = cell_value.strip().replace('\n', '').replace('\r', '')
+
                         # logger.info(f'----- Column Header has header flag is {has_header}')
-                        logger.info(f'----- Column Header Cell Value: {cell_value}')
+                        # logger.info(f'----- Column Header Cell Value: {cell_value}')
                         if column_name_dtype == 'timestamp':
                             # Need to convert this from an Excel date stamp to human readable form
                             column_name = xlrd.xldate_as_datetime(sh.cell(rownum, col).value, 0).date().isoformat()
@@ -2430,7 +2433,8 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                             else:
                                 column_name = 'FALSE'
                         else:
-                            column_name = str(sh.cell(rownum, col).value).strip().replace('\n', '').replace('\r', '')
+                            column_name = source_name
+                        
                         # logger.info(f'----- Raw Column name prior to compliance check {column_name}')
 
                         if column_name[0:1] in string.digits:
@@ -2446,7 +2450,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                     if not column_name:
                         column_name = f'column_{col}'
 
-                    logger.info(f'----- Column name final: {column_name}')
+                    # logger.info(f'----- Column name final: {column_name}')
 
                     trial_count = 1
                     trim_size = 58
@@ -2456,14 +2460,24 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         column_name = f'{column_name[:trim_size]}_dup{trial_count}'
                         trial_count += 1
                     unique_column_names.add(column_name)
-                    header_columns.append(column_name)
+
+                    trial_count = 1
+                    trim_size = 58
+                    while source_name in unique_source_names:
+                        trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
+                        # All target column names must be unique.  Force this to something unique
+                        source_name = f'{source_name[:trim_size]}_dup{trial_count}'
+                        trial_count += 1
+                    unique_source_names.add(source_name)
+
+                    header_columns.append(source_name)
                     column_information.append({
-                        'source': column_name,
+                        'source': source_name,
                         'target': column_name,
                         'dtype': data_dtype 
                     })
 
-                logger.info(f'Column information for Excel Import: {column_information}')
+                # logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
                 column_count = len(column_information)
                 continue
