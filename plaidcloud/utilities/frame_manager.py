@@ -2458,7 +2458,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 column_count = len(column_information)
                 continue
             else:
-                logger.info(f'Row Headers: {header_columns}')
+                # logger.info(f'Row Headers: {header_columns}')
                 if clean:
                     if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
                         # Skip rows that have no data.
@@ -2474,7 +2474,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         row.append(null_value)
                     else:
                         dtype = dtype_from_excel(c.ctype)
-                        logger.info(f'Column: {col_pos}')
+                        # logger.info(f'Column: {col_pos}')
                         if dtype != col_info['dtype']:
                             col_info['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
 
