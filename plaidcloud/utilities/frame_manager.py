@@ -2383,6 +2383,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
     column_count = sh.ncols
+    null_value = '<null>'
 
     with open(csv_file_name, 'wb') as csv_file:
         wr = csv.writer(
@@ -2400,7 +2401,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
             # The check on the first element of the tuple is to account for times.
             if skip_rows > 0 and skip_rows > rownum:
                 continue
-            if rownum == skip_rows and has_header:
+            if rownum == skip_rows:
                 # This is the header row. Force to clean header values
                 # Remove whitespace on either side
                 # Remove newlines
@@ -2413,24 +2414,30 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 for col in range(0, column_count):
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(sh.cell(skip_rows, col).ctype)
-                    if column_name_dtype == 'timestamp':
-                        # Need to convert this from an Excel date stamp to human readable form
-                        column_date_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
-                        column_name = f'_{column_date_name}' # column names can't start with numbers so we prefix with _
-                    elif column_name_dtype == 'boolean':
-                        if sh.cell(skip_rows, col).value:
-                            column_name = 'TRUE'
+                    if has_header:
+                        if column_name_dtype == 'timestamp':
+                            # Need to convert this from an Excel date stamp to human readable form
+                            column_date_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
+                            column_name = f'_{column_date_name}' # column names can't start with numbers so we prefix with _
+                        elif column_name_dtype == 'boolean':
+                            if sh.cell(skip_rows, col).value:
+                                column_name = 'TRUE'
+                            else:
+                                column_name = 'FALSE'
                         else:
-                            column_name = 'FALSE'
-                    else:
-                        column_name = str(sh.cell(skip_rows, col).value).strip().replace('\n', '').replace('\r', '')
+                            column_name = str(sh.cell(skip_rows, col).value).strip().replace('\n', '').replace('\r', '')
 
-                    if column_name[0:1] in string.digits:
-                        column_name = f'_{column_name}'
-                    column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
-                    column_name = column_name[:63] # Truncate to max length
+                        if column_name[0:1] in string.digits:
+                            column_name = f'_{column_name}'
+                        column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
+                        column_name = column_name[:63] # Truncate to max length
+                        data_dtype = dtype_from_excel(sh.cell(skip_rows + 1, col).ctype) # go to next row to determine dytype of the data
+                    else:
+                        column_name = None
+                        data_dtype = column_name_dtype
+
                     if not column_name:
-                        column_name = 'blank'
+                        column_name = f'column_{col}'
 
                     trial_count = 1
                     trim_size = 58
@@ -2443,29 +2450,32 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                     header_columns.append(column_name)
                     column_information.append({
                         'id': column_name,
-                        'dtype': dtype_from_excel(sh.cell(skip_rows + 1, col).ctype) # go to next row to determine dytype of the data
+                        'dtype': data_dtype 
                     })
 
                 logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
-                column_count = len(header_columns)
+                column_count = len(column_information)
             else:
+                logger.info(f'Row Headers: {header_columns}')
                 if clean:
                     if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
                         # Skip rows that have no data.
-                        skipped_rows += 1
                         continue
 
                 row = []
                 col_pos = 0
-                for c in sh.row(rownum):
+                for col_info in column_information:
+
+                    c = sh.cell(rownum, col_pos)
+
                     if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
-                        row.append('<NULL>')
+                        row.append(null_value)
                     else:
                         dtype = dtype_from_excel(c.ctype)
-
-                        if dtype != column_information[col_pos]['dtype']:
-                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+                        logger.info(f'Column: {col_pos}')
+                        if dtype != col_info['dtype']:
+                            col_info['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
 
                         if dtype == 'text':
                             row.append(c.value)
@@ -2478,15 +2488,12 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                             row.append(c.value)
                         elif dtype == 'datetime':
                             if xlrd.xldate_as_tuple(c.value, datemode)[0] == 0:
-                                row.append('<NULL>')
+                                row.append(null_value)
                             else:
                                 row.append(datetime.time(*xlrd.xldate_as_tuple(c.value, datemode)[:3]).isoformat())
                         else:
-                            row.append('<NULL>')
+                            row.append(null_value)
                     col_pos += 1
-                    if col_pos > column_count:
-                        # Avoid picking up stray data outside the header range
-                        break
                 wr.writerow(row)
 
         if skipped_rows:
