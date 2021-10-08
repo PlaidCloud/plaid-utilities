@@ -257,11 +257,7 @@ def get_agg_fn(agg_str):
     if agg_str.endswith('_null'):
         return get_agg_fn(agg_str[:-5])
 
-    if hasattr(sqlalchemy.func, agg_str):
-        return getattr(sqlalchemy.func, agg_str)
-
-    # ADT2021 - I believe this line is unreachable, because hasattr(sqlalchemy.func, _) should always be True
-    return ident
+    return getattr(sqlalchemy.func, agg_str)
 
 
 class Result(object):
