@@ -5,6 +5,7 @@
 
 import re
 import uuid
+from copy import deepcopy
 
 from toolz.functoolz import juxt, compose, curry
 from toolz.functoolz import identity as ident
@@ -24,7 +25,6 @@ __copyright__ = '© Copyright 2017-2021, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
 # TODO: move transform functions here, document them, and refactor their api
-# TODO: write unit tests
 
 MAGIC_COLUMN_MAPPING = {
     'path': u':::DOCUMENT_PATH:::',
@@ -137,11 +137,11 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
 
     match = table_dot_column_regex.match(source_name)
     if match:  # They gave us a table number. Subtract 1 to find it's index
+        if source_name.startswith('table.'):  # special case for just 'table'
+            return source_tables[0]
+
         table_number = int(match.groups()[0])
         return source_tables[table_number - table_numbering_start]
-
-    if source_name.startswith('table.'):  # special case for just 'table'
-        return source_tables[0]
 
     # None of our shortcuts worked, so look for the first table to have a
     # column of that name.
@@ -154,11 +154,12 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
+# TODO: Refactor this into separate functions for expression, constant, and source. Possibly another function to generate process, run by all three of them, that takes flags for whether to include cast, agg, and sort. This should hopefully make the logic about cast, agg, and sort better organized
 def get_from_clause(
     tables, target_column_config, source_column_configs, aggregate=False,
     sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
 ):
-    """Given info from a config, returns a sqlalchemy from clause."""
+    """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
     expression = target_column_config.get('expression')
     constant = target_column_config.get('constant')
@@ -166,8 +167,8 @@ def get_from_clause(
     name = target_column_config.get('target')
     type_ = sqlalchemy_from_dtype(target_column_config.get('dtype'))
 
-    # always cast expressions, pay attention to cast param for source mappings
-    if expression or (source and cast):
+    # always cast expressions and constants, pay attention to cast param for source mappings
+    if constant or expression or (source and cast):
         cast_fn = curry(sqlalchemy.cast, type_=type_)
     else:
         cast_fn = ident
@@ -218,6 +219,7 @@ def get_from_clause(
         else:
             source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
 
+        #ADT2021: I'm really not sure whether this should also check the "aggregate" param
         if target_column_config.get('agg') == 'count_null':
             col = None
         elif source in table.columns:
@@ -255,10 +257,7 @@ def get_agg_fn(agg_str):
     if agg_str.endswith('_null'):
         return get_agg_fn(agg_str[:-5])
 
-    if hasattr(sqlalchemy.func, agg_str):
-        return getattr(sqlalchemy.func, agg_str)
-
-    return ident
+    return getattr(sqlalchemy.func, agg_str)
 
 
 class Result(object):
@@ -405,7 +404,7 @@ def get_table_rep(table_id, columns, schema, metadata=None, column_key='source',
     return table
 
 
-def get_table_rep_using_id(table_id, columns, project_id, metadata, column_key='source', alias=None):
+def get_table_rep_using_id(table_id, columns, project_id, metadata=None, column_key='source', alias=None):
     """
     Returns:
         sqlalchemy.Table: object representing an analyze table
@@ -517,15 +516,20 @@ def get_select_query(
 
     """
 
+    def fill_in(var, var_name, default):
+        if var is not None:
+            return var
+        return config.get(var_name, default)
+
     config = config or {}
-    aggregate = aggregate or config.get('aggregate', False)
-    having = having or config.get('having', None)
-    use_target_slicer = use_target_slicer or config.get('use_target_slicer', False)
-    limit_target_start = limit_target_start or config.get('limit_target_start', 0)
-    limit_target_end = limit_target_end or config.get('limit_target_end', 0)
-    distinct = distinct or config.get('distinct', False)
-    count = count or config.get('count', False)
-    disable_variables = disable_variables or config.get('disable_variables', False)
+    aggregate = fill_in(aggregate, 'aggregate', False)
+    having = fill_in(having, 'having', None)
+    use_target_slicer = fill_in(use_target_slicer, 'use_target_slicer', False)
+    limit_target_start = fill_in(limit_target_start, 'limit_target_start', 0)
+    limit_target_end = fill_in(limit_target_end, 'limit_target_end', 0)
+    distinct = fill_in(distinct, 'distinct', False)
+    count = fill_in(count, 'count', False)
+    disable_variables = fill_in(disable_variables, 'disable_variables', False)
 
     # Build SELECT x FROM y section of our select query
     if count:
@@ -550,11 +554,11 @@ def get_select_query(
         select_query = sqlalchemy.select(*column_select)
 
     # Build WHERE section of our select query
-    wheres = [w for w in wheres if w] if wheres else []
-    if wheres:
-        combined_wheres = get_combined_wheres(
-            wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
-        )
+    wheres = wheres or []
+    combined_wheres = get_combined_wheres(
+        wheres, tables, variables, disable_variables, table_numbering_start=table_numbering_start
+    )
+    if combined_wheres:
         select_query = select_query.where(*combined_wheres)
 
     # Find any columns for sorting
@@ -570,6 +574,9 @@ def get_select_query(
 
     # If there are any, build ORDER BY section of our select query
     if columns_to_sort_on:
+        columns_with_order = [tc for tc in columns_to_sort_on if 'order' in tc['sort']]
+        columns_without_order = [tc for tc in columns_to_sort_on if 'order' not in tc['sort']]
+        sort_order = sorted(columns_with_order, key=lambda tc:tc['sort']['order']) + columns_without_order
         sort_columns = [
             get_from_clause(
                 tables,
@@ -581,13 +588,12 @@ def get_select_query(
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
             )
-            for tc in sorted(columns_to_sort_on, key=lambda stc: stc['sort']['order'])
+            for tc in sort_order
         ]
         select_query = select_query.order_by(*sort_columns)
 
-    # Build GROUP BY and HAVING sections of our select query.
+    # Build GROUP BY section of our select query.
     if aggregate:
-        # GROUP BY
         select_query = select_query.group_by(
             *[
                 get_from_clause(
@@ -651,6 +657,31 @@ def get_insert_query(target_table, target_columns, select_query):
         select_query,
     )
 
+def get_update_value(tc, table, dtype_map, variables):
+    """returns (include, val) where val should be used in the query if include is True, but filtered out if not"""
+    dtype = dtype_map.get(tc['source'], 'text')
+    if dtype == 'text':
+        def conditional_empty_string_fn(val):
+            # Transforms None into u'', but only if dtype is 'text'
+            if val is None:
+                return u''
+            return val
+    else:
+        conditional_empty_string_fn = ident
+
+    if tc.get('nullify'):
+        return (True, None)
+    if tc.get('constant'):
+        return (True, conditional_empty_string_fn(sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))))
+    if tc.get('expression'):
+        return (True, conditional_empty_string_fn(eval_expression(tc['expression'].strip(), variables, [table])))
+    if dtype == 'text':
+        # Special condition for empty string
+        # It works this way because it's impossible to type 'constant': '' in the UI
+        return (True, u'')
+
+    # If none of our conditions are true, then this column shouldn't be included in the values dict
+    return (False, None)
 
 def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     update_query = sqlalchemy.update(table)
@@ -660,28 +691,10 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
         update_query = update_query.where(*combined_wheres)
 
     # Build values dict
-    def get_val(tc):
-        # returns (include, val) where val should be used in the query if include is True, but filtered out if not
-        if tc.get('nullify'):
-            return (True, None)
-        if tc.get('expression'):
-            return (True, eval_expression(tc['expression'].strip(), variables, [table]))
-
-        dtype = dtype_map.get(tc['source'], 'text')
-        if tc.get('constant'):
-            return (True, sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype)))
-
-        if dtype == 'text':
-            # Special condition for empty string
-            return (True, u'')
-
-        # If none of our conditions are true, then this column shouldn't be included in the values dict
-        return (False, None)
-
     values = {
         col_name: value
         for col_name, include, value in [
-            (tc['source'],) + get_val(tc)
+            (tc['source'],) + get_update_value(tc, table, dtype_map, variables)
             for tc in target_columns
         ]
         if include
@@ -719,6 +732,7 @@ def get_combined_wheres(wheres, tables, variables, disable_variables=False, tabl
 
 
 def apply_output_filter(original_query, filter, variables=None):
+    variables = variables or {}
     original_query = original_query.subquery('result')
     where_clause = eval_expression(clean_where(filter), variables, [], extra_keys={'result': original_query.columns})
     return sqlalchemy.select(*original_query.columns).where(where_clause)
@@ -726,7 +740,7 @@ def apply_output_filter(original_query, filter, variables=None):
 
 def import_data_query(
     project_id, target_table_id, source_columns, target_columns, date_format='',
-    trailing_negatives=False, config=None, variables=None,
+    trailing_negatives=False, config=None, variables=None, temp_table_id=None,
 ):
     """Provides a SQLAlchemy insert query to transfer data from a text import temporary table into the target table.
 
@@ -751,8 +765,9 @@ def import_data_query(
         sqlalchemy.sql.expression.Insert: The query to import data from the temporary text table to the target table
     """
     metadata = sqlalchemy.MetaData()
+    target_columns = deepcopy(target_columns)  # bandaid to avoid destructiveness
 
-    temp_table_id = f'temp_{str(uuid.uuid4())}'
+    temp_table_id = temp_table_id or f'temp_{str(uuid.uuid4())}'
     temp_table_columns = [
         {
             'source': s.get('source', s.get('name', s.get('id'))),
@@ -765,6 +780,7 @@ def import_data_query(
     for t in target_columns:
         if t['dtype'] in MAGIC_COLUMN_MAPPING:
             t['source'] = MAGIC_COLUMN_MAPPING[t['dtype']]
+    # TODO: refactor this to define instead of build and modify
 
     target_meta = [{'id': t['target'], 'dtype': t['dtype']} for t in target_columns]
 
@@ -1020,8 +1036,3 @@ def allocate(
         .where(cte_source.columns[allocable_col] == 0)
     )
     return allocation_select
-
-
-def apply_rules():
-    """"""
-    pass
