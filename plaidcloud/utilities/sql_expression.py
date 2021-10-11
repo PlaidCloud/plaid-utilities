@@ -9,7 +9,7 @@ from copy import deepcopy
 
 from toolz.functoolz import juxt, compose, curry
 from toolz.functoolz import identity as ident
-from toolz.dicttoolz import merge, valfilter
+from toolz.dicttoolz import merge, valfilter, assoc
 
 import sqlalchemy
 import sqlalchemy.orm
@@ -774,20 +774,31 @@ def import_data_query(
             'dtype': 'text',
         }
         for s in source_columns
+    ] + [
+        {'source': MAGIC_COLUMN_MAPPING[k], 'dtype': k}
+        for k in MAGIC_COLUMN_MAPPING
     ]
-    temp_table_columns.extend([{'source': MAGIC_COLUMN_MAPPING[k], 'dtype': k} for k in MAGIC_COLUMN_MAPPING])
-
-    for t in target_columns:
-        if t['dtype'] in MAGIC_COLUMN_MAPPING:
-            t['source'] = MAGIC_COLUMN_MAPPING[t['dtype']]
-    # TODO: refactor this to define instead of build and modify
 
     target_meta = [{'id': t['target'], 'dtype': t['dtype']} for t in target_columns]
 
-    # Add default expression to target columns
-    for tc in target_columns:
-        if not tc.get('expression'):
-            tc['expression'] = f"""func.import_col(get_column(table, '{tc['source']}'), '{tc['dtype']}', '{date_format}', {trailing_negatives or False})"""
+    def processed_target_column(tc):
+        def add_expression(tc):
+            return assoc(
+                tc,
+                'expression',
+                tc.get('expression')
+                or f"""func.import_col(get_column(table, '{tc['source']}'), '{tc['dtype']}', '{date_format}', {trailing_negatives or False})""",
+            )
+        def add_magic_column_source(tc):
+            return assoc(
+                tc, 'source', MAGIC_COLUMN_MAPPING.get(tc['dtype'], tc.get('source'))
+            )
+        return compose(
+            add_expression,
+            add_magic_column_source,
+        )(tc)
+    
+    processed_target_columns = [processed_target_column(tc) for tc in target_columns]
 
     from_table = get_table_rep_using_id(
         temp_table_id,
@@ -801,7 +812,7 @@ def import_data_query(
     select_query = get_select_query(
         tables=[from_table],
         source_columns=[temp_table_columns],
-        target_columns=target_columns,
+        target_columns=processed_target_columns,
         wheres=[config.get('source_where')],
         config=config,
         variables=variables,
@@ -817,7 +828,7 @@ def import_data_query(
     )
 
     # Figure out the insert query, based on the select query
-    return get_insert_query(new_table, target_columns, select_query)
+    return get_insert_query(new_table, processed_target_columns, select_query)
 
 
 def allocate(
