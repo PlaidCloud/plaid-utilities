@@ -2415,20 +2415,21 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
                 for col in range(0, column_count):
+                    c = sh.cell(rownum, col_pos)
                     # See if this column name is a date type
-                    column_name_dtype = dtype_from_excel(sh.cell(rownum, col).ctype)
+                    column_name_dtype = dtype_from_excel(c.ctype)
                     # logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
                     if has_header:
-                        cell_value = str(sh.cell(rownum, col).value)
+                        cell_value = str(c.value)
                         source_name = cell_value.strip().replace('\n', '').replace('\r', '')
 
                         # logger.info(f'----- Column Header has header flag is {has_header}')
                         # logger.info(f'----- Column Header Cell Value: {cell_value}')
                         if column_name_dtype == 'timestamp':
                             # Need to convert this from an Excel date stamp to human readable form
-                            column_name = xlrd.xldate_as_datetime(sh.cell(rownum, col).value, 0).date().isoformat()
+                            column_name = xlrd.xldate_as_datetime(c.value, 0).date().isoformat()
                         elif column_name_dtype == 'boolean':
-                            if sh.cell(rownum, col).value:
+                            if c.value:
                                 column_name = 'TRUE'
                             else:
                                 column_name = 'FALSE'
@@ -2441,7 +2442,12 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                             column_name = f'_{column_name}'
                         column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
                         column_name = column_name[:63] # Truncate to max length
-                        data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
+                        try:
+                            data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
+                        except:
+                            # If anything goes wrong with reading the next row just default to Text to be safe.
+                            data_dtype = 'text'
+
                         # logger.info(f'----- Column name after compliance check {column_name}')
                     else:
                         column_name = None
@@ -2480,7 +2486,6 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
                 column_count = len(column_information)
-                continue
             else:
                 # logger.info(f'Row Headers: {header_columns}')
                 if clean:
@@ -2511,11 +2516,8 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                                 row.append(get_formatted_number(c.value)) # some other type of number
                         elif dtype == 'boolean':
                             row.append(c.value)
-                        elif dtype == 'datetime':
-                            if xlrd.xldate_as_tuple(c.value, datemode)[0] == 0:
-                                row.append(null_value)
-                            else:
-                                row.append(datetime.time(*xlrd.xldate_as_tuple(c.value, datemode)[:3]).isoformat())
+                        elif dtype == 'timestamp':
+                            row.append(xlrd.xldate_as_datetime(c.value, datemode).date().isoformat())
                         else:
                             row.append(null_value)
                     col_pos += 1
