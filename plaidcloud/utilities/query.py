@@ -305,7 +305,15 @@ class Connection(object):
             # a set of object columns with keep_default_na = True and then recombine them into 1 dataframe with all of the columns.
             # Pandas supports reading a subset of columns from a source file. See 'usecols' kwarg.
             # Probably not a big deal though. We're being memory-efficient with our non-object columns now (nans come in as Null now in numeric cols (float, int, etc)
-            df = pd.read_csv(file_path, dtype=dtypes, parse_dates=parse_dates, converters=converters, encoding=encoding, keep_default_na=False, na_values=_NA_VALUES)
+            df = pd.read_csv(
+                file_path,
+                dtype=dtypes,
+                parse_dates=parse_dates,
+                converters=converters,
+                encoding=encoding,
+                keep_default_na=False,
+                na_values=_NA_VALUES,
+            )
             nan_overrides = {}
 
             # Create a list of string (object) columns and NaN override for each ('').
@@ -313,7 +321,7 @@ class Connection(object):
                 if df[col].dtype == np.dtype('object'):
                     nan_overrides[col] = ''
 
-            df = df.fillna(value=nan_overrides)
+            df = df.fillna(value=nan_overrides)  # pylint: disable=no-member
 
         else:
             # No column information is available.  Blind dataframe creation with implicit guessing.
