@@ -1,36 +1,24 @@
-from __future__ import absolute_import
-from __future__ import print_function
-
-import io
-import time
 import logging
-import sqlalchemy
 import os
-import threading
-from datetime import datetime, timedelta
-import re
 import uuid
-import yaml
 import unicodecsv as csv
-from six.moves import cStringIO
 
 import pandas as pd
 import numpy as np
-import six
+import sqlalchemy
 from sqlalchemy.dialects.postgresql.base import PGDialect
-from sqlalchemy.types import TypeDecorator, DateTime, Unicode, CHAR, TEXT, NVARCHAR, UnicodeText, Numeric
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
 from plaidcloud.rpc.rpc_connect import Connect
-from plaidcloud.utilities.analyze_table import compiled
+# from plaidcloud.utilities.analyze_table import compiled
 from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.database import PlaidDate
 
 __author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
@@ -69,7 +57,7 @@ class Connection(object):
             try:
                 # See if this is a project ID already
                 uuid.UUID(project)
-                self._project_id = six.text_type(project)
+                self._project_id = str(project)
             except ValueError:
                 if '/' in project:
                     # This is a path lookup
@@ -160,7 +148,7 @@ class Connection(object):
 
     def get_csv_by_query(self, query, params=None):
         """Returns a file path to the query results as a CSV file."""
-        if isinstance(query, six.string_types):
+        if isinstance(query, str):
             query_string = query
         else:
             query_string, params = self._compiled(query)
@@ -185,7 +173,7 @@ class Connection(object):
         with open(file_name, 'rb') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                for k, v in six.iteritems(row):
+                for k, v in row.items():
                     # Keep the value as None if we want to preserve nulls.
                     if preserve_nulls and v is None:
                         pass
@@ -211,13 +199,13 @@ class Connection(object):
                 return self.get_dataframe(data_source, encoding=encoding, clean=clean)
             if isinstance(data_source, sqlalchemy.sql.Select):
                 return self.get_dataframe_by_query(data_source, encoding=encoding)
-            if isinstance(data_source, six.string_types):
+            if isinstance(data_source, str):
                 return self.get_dataframe_by_querystring(data_source, encoding=encoding)
             raise Exception('Unknown type for Data Source {}'.format(repr(data_source)))
         elif return_type == 'csv':
             if isinstance(data_source, Table):
                 return self.get_csv(data_source.fully_qualified_name, encoding=encoding, clean=clean)
-            if isinstance(data_source, six.string_types):
+            if isinstance(data_source, str):
                 if str(data_source).lower().startswith('select'):
                     self.get_csv_by_query(data_source)
                 else:
@@ -329,13 +317,13 @@ class Connection(object):
 
         else:
             # No column information is available.  Blind dataframe creation with implicit guessing.
-            df = pd.read_csv(file_path, encoding=encoding, keep_default_na=not six.PY3)
+            df = pd.read_csv(file_path, encoding=encoding, keep_default_na=False)
 
         return df
 
     def execute(self, query, params=None, return_df=False):
 
-        if isinstance(query, six.string_types):
+        if isinstance(query, str):
             query_string = query
         else:
             query_string, params = self._compiled(query)
@@ -445,6 +433,7 @@ class Connection(object):
         # get table metadata for existing table object from analyze
         table_meta_in = self.rpc.analyze.table.table_meta(project_id=self._project_id, table_id=table_object.id)
         cols_analyze = []
+        col_order = []
         if table_meta_in and len(table_meta_in) > 0:
             for rec in table_meta_in:
                 cols_analyze.append(rec['id'])
@@ -456,10 +445,10 @@ class Connection(object):
         # get column order of dataframe
         cols_dataframe = df.columns
 
-        cols_append = [c for c in cols_analyze if c in cols_dataframe] # in target and df
-        cols_leftover = [c for c in cols_dataframe if c not in cols_analyze] # in df, but not target
-        cols_missing = [c for c in cols_analyze if c not in cols_dataframe] #in target, but not df
-        cols_overwrite = cols_append + cols_leftover # use if append=false... best effort to maintain col order
+        cols_append = [c for c in cols_analyze if c in cols_dataframe]  # in target and df
+        cols_leftover = [c for c in cols_dataframe if c not in cols_analyze]  # in df, but not target
+        cols_missing = [c for c in cols_analyze if c not in cols_dataframe]  # in target, but not df
+        cols_overwrite = cols_append + cols_leftover  # use if append=false... best effort to maintain col order
 
         table_meta_out = None
         if append:
@@ -498,9 +487,6 @@ class Connection(object):
             col_order = cols_overwrite
 
         csv_data = df_to_csv_string(df, col_order)
-        #print('csv data: \n')
-        #print(csv_data)
-        #print(repr(csv_data))
 
         self._load_csv(
             project_id=self._project_id,
@@ -614,8 +600,7 @@ class Table(sqlalchemy.Table):
             project_id=_project_id, table_id=_table_id,
         )
         if not columns:
-            columns = []  # If the table doesn't actually exist, we assume it's
-                          # got no columns
+            columns = []  # If the table doesn't actually exist, we assume it's got no columns
 
         if _project_id.startswith(SCHEMA_PREFIX):
             _schema = _project_id
@@ -634,9 +619,9 @@ class Table(sqlalchemy.Table):
             ],
             schema=_schema,
             extend_existing=False  # If this is the second object representing
-                                  # this table, update.
-                                  # If you made it with this function, it should
-                                  # be no different.
+                                   # this table, update.
+                                   # If you made it with this function, it should
+                                   # be no different.
         )
 
         table_object._metadata = _metadata
