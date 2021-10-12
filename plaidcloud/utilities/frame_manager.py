@@ -2415,7 +2415,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
                 for col in range(0, column_count):
-                    c = sh.cell(rownum, col_pos)
+                    c = sh.cell(rownum, col)
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(c.ctype)
                     # logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
