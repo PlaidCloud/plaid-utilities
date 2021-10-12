@@ -154,7 +154,81 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
-# TODO: Refactor this into separate functions for expression, constant, and source. Possibly another function to generate process, run by all three of them, that takes flags for whether to include cast, agg, and sort. This should hopefully make the logic about cast, agg, and sort better organized
+def process_fn(sort_type, cast_type, agg_type, name):
+    "Returns a function to apply to the source/constant/expression of a target column. sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is. cast_type should be a sqlalchemy dtype, sort_type should be True (for ascending) or False (for descending), agg_type should be a string from the 'agg' param of the column. Processing will always include applying the label in the param 'name'"
+    if cast_type:
+        cast_fn = curry(sqlalchemy.cast, type_=cast_type)
+    else:
+        cast_fn = ident
+
+    agg_fn = get_agg_fn(agg_type)  # get_agg_fn returns ident for falsy agg_types
+
+    # python has a thousand ways to express ternary branching (True, False, None), and none of them are quite clear
+    if sort_type is True:
+        sort_fn = sqlalchemy.asc
+    elif sort_type is False:
+        sort_fn = sqlalchemy.desc
+    else:
+        sort_fn = ident
+
+    def label_fn(expr):
+        return expr.label(name)
+
+    return compose(label_fn, sort_fn, cast_fn, agg_fn)
+
+#TODO: write tests, though TestGetFromClause already covers this
+def constant_from_clause(constant, sort_type, cast_type, name, variables=None, disable_variables=False):
+    "Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"
+    if disable_variables:
+        var_fn = ident
+    else:
+        var_fn = curry(apply_variables, variables=variables)
+    const = sqlalchemy.literal(var_fn(constant), type_=cast_type)
+
+    # never aggregate
+    return process_fn(sort_type, cast_type, None, name)(const)
+
+#TODO: write tests, though TestGetFromClause already covers this
+def expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables=None, disable_variables=False, table_numbering_start=1):
+    "Get a representation of a target column based on an expression."
+    expr = eval_expression(
+        expression.strip(),
+        variables,
+        tables,
+        disable_variables=disable_variables,
+        table_numbering_start=table_numbering_start,
+    )
+    return process_fn(sort_type, cast_type, agg_type, name)(expr)
+
+#TODO: write tests, though TestGetFromClause already covers this
+def source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start=1):
+    "Get a representation of a target column based on a source column."
+    table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
+
+    if '.' in source:
+        source_without_table = source.split('.', 1)[1]
+    else:
+        source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
+
+    #ADT2021: I'm really not sure whether this should also check the "aggregate" param
+    if target_column_config.get('agg') == 'count_null':
+        col = None
+    elif source in table.columns:
+        col = table.columns[source]
+    elif source_without_table in table.columns:
+        col = table.columns[source_without_table]
+    else:
+        raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
+
+    # cast can be turned off
+    if cast:
+        cancellable_cast_type = cast_type
+    else:
+        cancellable_cast_type = None
+
+    return process_fn(sort_type, cancellable_cast_type, agg_type, name)(col)
+
+
 def get_from_clause(
     tables, target_column_config, source_column_configs, aggregate=False,
     sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
@@ -164,73 +238,26 @@ def get_from_clause(
     expression = target_column_config.get('expression')
     constant = target_column_config.get('constant')
     source = target_column_config.get('source')
+
     name = target_column_config.get('target')
-    type_ = sqlalchemy_from_dtype(target_column_config.get('dtype'))
+    cast_type = sqlalchemy_from_dtype(target_column_config.get('dtype'))
 
-    # always cast expressions and constants, pay attention to cast param for source mappings
-    if constant or expression or (source and cast):
-        cast_fn = curry(sqlalchemy.cast, type_=type_)
+    if aggregate:
+        agg_type = target_column_config.get('agg')
     else:
-        cast_fn = ident
+        agg_type = None
 
-    # aggregate applies to expressions and source mappings but not constants
-    if aggregate and not constant:
-        agg_fn = get_agg_fn(target_column_config.get('agg'))
+    if sort and 'sort' in target_column_config:
+        sort_type = target_column_config['sort']['ascending']
     else:
-        agg_fn = ident
-
-    # sort everything
-    if not sort or 'sort' not in target_column_config:
-        sort_fn = ident
-    elif target_column_config['sort']['ascending']:
-        sort_fn = sqlalchemy.asc
-    else:
-        sort_fn = sqlalchemy.desc
-
-    def label_fn(expr):
-        return expr.label(name)
-
-    process = compose(label_fn, sort_fn, cast_fn, agg_fn)
+        sort_type = None
 
     if constant:
-        # Agg_fn is ignored, and we wrap in sqlalchemy.literal
-        # So is cast
-        if disable_variables:
-            var_fn = ident
-        else:
-            var_fn = curry(apply_variables, variables=variables)
-        const = sqlalchemy.literal(var_fn(constant), type_=type_)
-        return process(const)
-
+        return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables)
     if expression:
-        expr = eval_expression(
-            expression.strip(),
-            variables,
-            tables,
-            disable_variables=disable_variables,
-            table_numbering_start=table_numbering_start,
-        )
-        return process(expr)
-
+        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start)
     if source:
-        table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
-        if '.' in source:
-            source_without_table = source.split('.', 1)[1]
-        else:
-            source_without_table = source  # a couple extra checks, in an error scenario, but flatter code
-
-        #ADT2021: I'm really not sure whether this should also check the "aggregate" param
-        if target_column_config.get('agg') == 'count_null':
-            col = None
-        elif source in table.columns:
-            col = table.columns[source]
-        elif source_without_table in table.columns:
-            col = table.columns[source_without_table]
-        else:
-            raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
-
-        return process(col)
-
+        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start)
     if target_column_config.get('dtype') in ('serial', 'bigserial'):
         return None
 
@@ -797,7 +824,7 @@ def import_data_query(
             add_expression,
             add_magic_column_source,
         )(tc)
-    
+
     processed_target_columns = [processed_target_column(tc) for tc in target_columns]
 
     from_table = get_table_rep_using_id(
