@@ -2414,7 +2414,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
 
                 # logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
-                for col in range(0, column_count):
+                for col_pos in range(0, column_count):
                     c = sh.cell(rownum, col_pos)
                     # See if this column name is a date type
                     column_name_dtype = dtype_from_excel(c.ctype)
@@ -2443,7 +2443,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
                         column_name = column_name[:63] # Truncate to max length
                         try:
-                            data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
+                            data_dtype = dtype_from_excel(sh.cell(rownum + 1, col_pos).ctype) # go to next row to determine dytype of the data
                         except:
                             # If anything goes wrong with reading the next row just default to Text to be safe.
                             data_dtype = 'text'
@@ -2454,7 +2454,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         data_dtype = column_name_dtype
 
                     if not column_name:
-                        column_name = f'column_{col}'
+                        column_name = f'column_{col_pos}'
 
                     # logger.info(f'----- Column name final: {column_name}')
 
