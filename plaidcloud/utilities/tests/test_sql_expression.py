@@ -426,6 +426,30 @@ class TestOnClause(TestSQLExpression):
             ),
         )
 
+class TestProcessFn(TestSQLExpression):
+    def test_cast(self):
+        self.assertEquivalent(
+            se.process_fn(None, sqlalchemy.NUMERIC, None, 'test')(321),
+            sqlalchemy.cast(321, sqlalchemy.NUMERIC).label('test'),
+        )
+
+    def test_agg(self):
+        for agg_type in [None, 'group', 'dont_group', 'sum', 'count_null']:
+            with self.subTest(agg_type=agg_type):
+                self.assertEquivalent(
+                    se.process_fn(None, sqlalchemy.NUMERIC, agg_type, 'test')(321),
+                    sqlalchemy.cast(se.get_agg_fn(agg_type)(321), sqlalchemy.Numeric).label('test'),
+                )
+
+    def test_sort(self):
+        for sort_type, expected_fn in [(True, sqlalchemy.asc), (False, sqlalchemy.desc), (None, ident)]:
+            with self.subTest(sort_type=sort_type, expected_fn=expected_fn):
+                self.assertEquivalent(
+                    se.process_fn(sort_type, sqlalchemy.NUMERIC, None, 'test')(321),
+                    expected_fn(sqlalchemy.cast(321, sqlalchemy.NUMERIC)).label('test'),
+                )
+
+
 class TestGetFromClause(TestSQLExpression):
     def setUp(self):
         self.source_column_configs = [
