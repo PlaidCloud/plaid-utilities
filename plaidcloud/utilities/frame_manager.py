@@ -2499,7 +2499,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
 
                     c = sh.cell(rownum, col_pos)
 
-                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
                         row.append(null_value)
                     else:
                         dtype = dtype_from_excel(c.ctype)
