@@ -2378,9 +2378,13 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     logger.debug('opening workbook for conversion')
+    column_information = []
     wb = xlrd.open_workbook(excel_file_name, on_demand=True)
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
+    column_count = sh.ncols
+    null_value = None
+
     with open(csv_file_name, 'wb') as csv_file:
         wr = csv.writer(
             csv_file,
@@ -2397,34 +2401,62 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
             # The check on the first element of the tuple is to account for times.
             if skip_rows > 0 and skip_rows > rownum:
                 continue
-            if rownum == skip_rows and has_header:
+            if rownum == skip_rows:
                 # This is the header row. Force to clean header values
                 # Remove whitespace on either side
                 # Remove newlines
                 # Remove carriage returns
                 # Force to string
                 unique_column_names = set()
+                unique_source_names = set()
                 invalid_characters = set(',.()[];:*')
                 header_columns = []
 
-                for col in range(0, sh.ncols):
-                    # See if this column name is a date type
-                    column_name_dtype = dtype_from_excel(sh.cell(skip_rows, col).ctype)
-                    if column_name_dtype == 'timestamp':
-                        # Need to convert this from an Excel date stamp to human readable form
-                        column_date_name = xlrd.xldate_as_datetime(sh.cell(skip_rows, col).value, 0).date().isoformat()
-                        column_name = f'_{column_date_name}' # column names can't start with numbers so we prefix with _
-                    elif column_name_dtype == 'boolean':
-                        if sh.cell(skip_rows, col).value:
-                            column_name = 'TRUE'
-                        else:
-                            column_name = 'FALSE'
-                    else:
-                        column_name = str(sh.cell(skip_rows, col).value).strip().replace('\n', '').replace('\r', '')
+                # logger.info(f'----- Detecting Column Headers on row: {rownum}')
 
-                    column_name = column_name.lstrip(string.digits) # Strip off leading digits
-                    column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
-                    column_name = column_name[:63] # Truncate to max length
+                for col in range(0, column_count):
+                    c = sh.cell(rownum, col)
+                    # See if this column name is a date type
+                    column_name_dtype = dtype_from_excel(c.ctype)
+                    # logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
+                    if has_header:
+                        cell_value = str(c.value)
+                        source_name = cell_value.strip().replace('\n', '').replace('\r', '')
+
+                        # logger.info(f'----- Column Header has header flag is {has_header}')
+                        # logger.info(f'----- Column Header Cell Value: {cell_value}')
+                        if column_name_dtype == 'timestamp':
+                            # Need to convert this from an Excel date stamp to human readable form
+                            column_name = xlrd.xldate_as_datetime(c.value, 0).date().isoformat()
+                        elif column_name_dtype == 'boolean':
+                            if c.value:
+                                column_name = 'TRUE'
+                            else:
+                                column_name = 'FALSE'
+                        else:
+                            column_name = source_name
+                        
+                        # logger.info(f'----- Raw Column name prior to compliance check {column_name}')
+
+                        if column_name[0:1] in string.digits:
+                            column_name = f'_{column_name}'
+                        column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
+                        column_name = column_name[:63] # Truncate to max length
+                        try:
+                            data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
+                        except:
+                            # If anything goes wrong with reading the next row just default to Text to be safe.
+                            data_dtype = 'text'
+
+                        # logger.info(f'----- Column name after compliance check {column_name}')
+                    else:
+                        column_name = None
+                        data_dtype = column_name_dtype
+
+                    if not column_name:
+                        column_name = f'column_{col}'
+
+                    # logger.info(f'----- Column name final: {column_name}')
 
                     trial_count = 1
                     trim_size = 58
@@ -2434,42 +2466,68 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         column_name = f'{column_name[:trim_size]}_dup{trial_count}'
                         trial_count += 1
                     unique_column_names.add(column_name)
-                    header_columns.append(column_name)
 
-                logger.info(f'Header Row for Excel Import: {header_columns}')
+                    trial_count = 1
+                    trim_size = 58
+                    while source_name in unique_source_names:
+                        trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
+                        # All target column names must be unique.  Force this to something unique
+                        source_name = f'{source_name[:trim_size]}_dup{trial_count}'
+                        trial_count += 1
+                    unique_source_names.add(source_name)
+
+                    header_columns.append(source_name)
+                    column_information.append({
+                        'source': source_name,
+                        'target': column_name,
+                        'dtype': data_dtype 
+                    })
+
+                # logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
+                column_count = len(column_information)
             else:
+                # logger.info(f'Row Headers: {header_columns}')
                 if clean:
                     if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
                         # Skip rows that have no data.
-                        skipped_rows += 1
                         continue
-                wr.writerow([
-                    (
-                        c.value
-                        if c.ctype not in [xlrd.XL_CELL_DATE, xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR, xlrd.XL_CELL_NUMBER]
-                        # else xlrd.error_text_from_code[c.value]  # if you wanted the error text instead of NULL
-                        # if c.ctype == xlrd.XL_CELL_ERROR
-                        else '<NULL>'
-                        if c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR]
-                        else int(c.value)
-                        if c.ctype == xlrd.XL_CELL_NUMBER and c.value == int(c.value)
-                        else get_formatted_number(c.value)
-                        if c.ctype == xlrd.XL_CELL_NUMBER
-                        else datetime.datetime(
-                            *xlrd.xldate_as_tuple(c.value, datemode)
-                        ).isoformat()
-                        if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0
-                        else datetime.time(
-                            *xlrd.xldate_as_tuple(c.value, datemode)[:3]
-                        ).isoformat()
-                    )
-                    for c in sh.row(rownum)
-                ])
+
+                row = []
+                col_pos = 0
+                for col_info in column_information:
+
+                    c = sh.cell(rownum, col_pos)
+
+                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                        row.append(null_value)
+                    else:
+                        dtype = dtype_from_excel(c.ctype)
+                        # logger.info(f'Column: {col_pos}')
+                        if dtype != col_info['dtype']:
+                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+
+                        if dtype == 'text':
+                            row.append(c.value)
+                        elif dtype == 'numeric':
+                            if int(c.value) ==  c.value:
+                                row.append(int(c.value)) # This appears to be an int
+                            else:
+                                row.append(get_formatted_number(c.value)) # some other type of number
+                        elif dtype == 'boolean':
+                            row.append(c.value)
+                        elif dtype == 'timestamp':
+                            row.append(xlrd.xldate_as_datetime(c.value, datemode).date().isoformat())
+                        else:
+                            row.append(null_value)
+                    col_pos += 1
+                wr.writerow(row)
 
         if skipped_rows:
             logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
     logger.debug('Finished converting')
+
+    return column_information
 
 
 def dtype_from_excel(excel_type):

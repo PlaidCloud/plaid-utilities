@@ -1074,5 +1074,11 @@ def allocate(
             + [cte_source.columns[ac].label(_get_allocated_col_name(ac)) for ac in allocate_columns]
         )
         .where(cte_source.columns[allocable_col] == 0)
+        .join_from(
+            cte_source,
+            cte_ratios,
+            False,
+            isouter=True
+        )
     )
     return allocation_select
