@@ -1,5 +1,7 @@
+import base64
 import logging
 import os
+import tempfile
 import uuid
 import unicodecsv as csv
 
@@ -355,9 +357,11 @@ class Connection(object):
         if columns:
             return [c['id'] for c in columns]
 
-    def _load_csv(self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\', date_format='YYYY-MM-DD', source_columns=None, append=False, update_table_shape=True):
+    def _load_csv(
+        self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\',
+        date_format='YYYY-MM-DD', source_columns=None, append=False, update_table_shape=True, compressed=True
+    ):
         return self.rpc.analyze.table.load_csv(
-            # auth_id,
             project_id=project_id,
             table_id=table_id,
             meta=meta,
@@ -370,7 +374,8 @@ class Connection(object):
             date_format=date_format,
             source_columns=source_columns,
             append=append,
-            update_table_shape=update_table_shape
+            update_table_shape=update_table_shape,
+            compressed=compressed,
         )
 
     def query(self, entities, **kwargs):
@@ -423,17 +428,6 @@ class Connection(object):
         """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
         bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
         """
-        def df_to_csv_string(df, col_order):
-            return df[col_order].to_csv(
-                index=False,
-                header=True,
-                na_rep='NaN',
-                sep='\t',
-                encoding='UTF-8',
-                quoting=csv.QUOTE_MINIMAL,
-                escapechar='"',
-            )
-
         if len(df) == 0:
             logger.debug('Empty dataframe - nothing to insert')
             return
@@ -494,20 +488,32 @@ class Connection(object):
         if not col_order:
             col_order = cols_overwrite
 
-        csv_data = df_to_csv_string(df, col_order)
-
-        self._load_csv(
-            project_id=self._project_id,
-            table_id=table_object.id,
-            meta=table_meta_out,
-            csv_data=csv_data,
-            header=True,
-            delimiter='\t',
-            null_as='NaN',
-            quote='"',
-            escape='"',
-            append=append
-        )
+        with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
+            df[col_order].to_csv(
+                csv_file,
+                index=False,
+                header=True,
+                na_rep='NaN',
+                sep='\t',
+                encoding='UTF-8',
+                quoting=csv.QUOTE_MINIMAL,
+                escapechar='"',
+                compression='zip'
+            )
+            csv_file.seek(0)
+            self._load_csv(
+                project_id=self._project_id,
+                table_id=table_object.id,
+                meta=table_meta_out,
+                csv_data=base64.b64encode(csv_file.read()),
+                header=True,
+                delimiter='\t',
+                null_as='NaN',
+                quote='"',
+                escape='"',
+                append=append,
+                compressed=True,
+            )
 
     def commit(self):
         """Here for completeness.  Does nothing"""
