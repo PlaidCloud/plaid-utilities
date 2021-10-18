@@ -2510,16 +2510,17 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         if dtype == 'text':
                             row.append(c.value)
                         elif dtype == 'numeric':
-                            if int(c.value) ==  c.value:
-                                row.append(int(c.value)) # This appears to be an int
+                            if int(c.value) == c.value:
+                                row.append(int(c.value))  # This appears to be an int
                             else:
-                                row.append(get_formatted_number(c.value)) # some other type of number
+                                row.append(get_formatted_number(c.value))  # some other type of number
                         elif dtype == 'boolean':
                             row.append(c.value)
                         elif dtype == 'timestamp':
                             row.append(xlrd.xldate_as_datetime(c.value, datemode).date().isoformat())
                         else:
-                            row.append(null_value)
+                            #  Default is to insert the value as-is, no conversion
+                            row.append(c.value)
                     col_pos += 1
                 wr.writerow(row)
 
