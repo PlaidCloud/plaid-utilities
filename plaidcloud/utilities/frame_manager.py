@@ -2517,7 +2517,11 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         elif dtype == 'boolean':
                             row.append(c.value)
                         elif dtype == 'timestamp':
-                            row.append(xlrd.xldate_as_datetime(c.value, datemode).date().isoformat())
+                            # If there is a year, use as datetime
+                            if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
+                                row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
+                            else:
+                                row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
                         else:
                             #  Default is to insert the value as-is, no conversion
                             row.append(c.value)
