@@ -2383,7 +2383,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
     datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
     sh = wb.sheet_by_name(sheet_name)
     column_count = sh.ncols
-    null_value = None
+    null_value = '<NULL>'
 
     with open(csv_file_name, 'wb') as csv_file:
         wr = csv.writer(
