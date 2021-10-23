@@ -2451,10 +2451,14 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                         # logger.info(f'----- Column name after compliance check {column_name}')
                     else:
                         column_name = None
+                        source_name = None
                         data_dtype = column_name_dtype
 
                     if not column_name:
                         column_name = f'column_{col}'
+
+                    if not source_name:
+                        source_name = f'column_{col}'
 
                     # logger.info(f'----- Column name final: {column_name}')
 
