@@ -13,11 +13,10 @@ from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
-from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
-from plaidcloud.rpc.rpc_connect import Connect
-from plaidcloud.utilities import data_helpers as dh
-from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.database import PlaidDate
+from plaidcloud.rpc.rpc_connect import Connect
+from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
+from plaidcloud.utilities import data_helpers as dh
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
