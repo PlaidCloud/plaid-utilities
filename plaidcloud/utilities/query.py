@@ -425,30 +425,6 @@ class Connection(object):
         """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
         bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
         """
-        def df_to_csv_string(df, col_order):
-            # if six.PY3:
-            #     # convert any byte strings to string to avoid 'b' prefix bug in pandas
-            #     # https://github.com/pandas-dev/pandas/issues/9712
-            #     str_df = df.select_dtypes([np.object])
-            #     str_df = str_df.stack().str.decode('utf-8').unstack()
-            #     for col in str_df:
-            #         df[col] = str_df[col]
-            cs = StringIO()
-            cs.writelines(
-                df[col_order].to_csv(
-                    index=False,
-                    header=True,
-                    na_rep='NaN',
-                    sep='\t',
-                    encoding='UTF-8',
-                    quoting=csv.QUOTE_MINIMAL,
-                    escapechar='"'
-                )
-            )
-
-            # logger.info('----- CSV DATA DIRECTLY FROM PANDAS---- {}'.format(cs.getvalue()))
-            return cs.getvalue()
-
         if len(df) == 0:
             logger.debug('Empty dataframe - nothing to insert')
             return
