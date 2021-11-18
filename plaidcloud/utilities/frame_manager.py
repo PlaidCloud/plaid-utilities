@@ -199,20 +199,17 @@ def list_of_dicts_to_typed_psv(lod, outfile, types, fieldnames=None, sep='|'):
         # Caller doesn't care about the order
         fieldnames = list(types.keys())
 
-    if isinstance(outfile, str):
-        buf = open(outfile, 'wb')
-    else:
-        buf = outfile
-
-    try:
+    def write(buf):
         writer = csv.DictWriter(buf, fieldnames=fieldnames, delimiter=sep)
         writer.writerow(header)  # It's not just the keys, so we're not using writeheader
         for row in lod:
             writer.writerow(row)
-    finally:
-        if isinstance(outfile, str):
-            buf.close()
-            #Otherwise leave it open, since this function didn't open it.
+
+    if isinstance(outfile, str):
+        with open(outfile, 'wb') as buf:
+            write(buf)
+    else:
+        write(outfile)
 
 
 def get_project_variables(token, uri, project_id):
