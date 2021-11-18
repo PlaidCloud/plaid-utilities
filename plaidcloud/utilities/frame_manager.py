@@ -12,7 +12,7 @@ from functools import wraps
 from io import BytesIO
 import traceback
 import xlrd3 as xlrd
-import openpyxl
+
 import unicodecsv as csv
 from math import log10, floor
 
@@ -2371,12 +2371,6 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
     return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
-    # try:
-    #     openpyxl.load_workbook(excel_file_name, read_only=True)
-    # except:
-    #     logger.exception(f'Unable to open workbook with openpyxl: {excel_file_name}')
-    #     return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
-    # return excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
 
 
 def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
@@ -2580,6 +2574,9 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
         has_header (bool, optional): The file has a header row
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
+    # Importing openpyxl here because it's a slightly heavy import and we don't even use it
+    import openpyxl
+
     logger.debug('opening workbook for conversion')
     wb = openpyxl.load_workbook(excel_file_name, read_only=True, data_only=True, keep_links=False, keep_vba=False)
     logger.debug('Workbook Open')
