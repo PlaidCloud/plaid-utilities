@@ -11,16 +11,14 @@ import string
 from functools import wraps
 from io import BytesIO
 import traceback
-import xlrd3 as xlrd
-
-import unicodecsv as csv
 from math import log10, floor
 
-from pandas.api.types import is_string_dtype
+import xlrd3 as xlrd
+import unicodecsv as csv
 import pandas as pd
+from pandas.api.types import is_string_dtype
 import numpy as np
 import orjson as json
-
 
 from plaidcloud.rpc import utc
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
@@ -1643,12 +1641,10 @@ def column_info(df):
             Dtypes
     """
 
-    column_info = []
-    for column_name, data_type in df.dtypes.items():
-        temp = {'id': column_name, 'dtype': str(data_type)}
-        column_info.append(temp)
-
-    return column_info
+    return [
+        {'id': column_name, 'dtype': str(data_type)}
+        for column_name, data_type in df.dtypes.items()
+    ]
 
 
 def set_column_types(df, type_dict):
@@ -1807,16 +1803,12 @@ def has_data(df):
     Returns:
         bool: If `df` has any data
     """
-    row_max = 0
     try:
-        for k, v in df.count().items():
-            row_max = max(row_max, int(v))
+        counts = [int(v) for v in df.count().values()]
+        if not counts:
+            return False
+        return max(counts) > 0
     except:
-        pass
-
-    if row_max > 0:
-        return True
-    else:
         return False
 
 def convert_currency(
@@ -2603,7 +2595,7 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
                 ])
                 header_done = True
             else:
-                if clean and all([cell is None for cell in row]):
+                if clean and all(cell is None for cell in row):
                     # Skip rows that have no data.
                     skipped_rows += 1
                     continue
