@@ -12,8 +12,8 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import numpy as np
 import texttable
-from IPython.core.display import HTML
 import functools
+# Note: one function imports from IPython
 
 __author__ = 'Michael Rea'
 __copyright__ = ' Copyright 2014-2019, Tartan Solutions, Inc'
@@ -114,6 +114,9 @@ def jupyter_table(input):
     Also, it will work on non-pandas stuff where browser-based
     line wrapping is not desired.
     """
+
+    # Importing here because IPython is a big import that we don't need for anything else in data_helpers
+    from IPython.core.display import HTML
 
     # TODO: Just make this an option of inspect
     jupyter_wrapper = ''.join(['<div style="font-weight: normal;font-family: monospace;white-space:pre;">', input, '</div>'])
