@@ -8,11 +8,13 @@ import re
 import math
 import platform
 import locale
+import functools
+
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-import numpy as np
 import texttable
-import functools
+
 # Note: one function imports from IPython
 
 __author__ = 'Michael Rea'
@@ -629,16 +631,8 @@ def to_xl(df_source,
         sht = _get_sheet(wb, sheet)
         sht.clear()  # clear contents of worksheet
 
-        # if six.PY3:
-        #     # convert any byte strings to string to avoid 'b' prefix bug in pandas
-        #     # https://github.com/pandas-dev/pandas/issues/9712
-        #     str_df = df.select_dtypes([np.object])
-        #     str_df = str_df.stack().str.decode('utf-8').unstack()
-        #     for col in str_df:
-        #         df[col] = str_df[col]
-
         def force_text(item):
-            return "'{}".format(str(item))
+            return f"'{item}"
 
         for col in df.columns:
             cur_type = df[col].dtype
@@ -951,8 +945,8 @@ def safe_divide(numerator, denominator, error_return_value=0):
 
     if pd.isna(result) or abs(result) == np.inf or pd.isnull(result):
         return error_return_value
-    else:
-        return result
+
+    return result
 
 
 def remove_all(string, substrs):
