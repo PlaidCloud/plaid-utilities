@@ -324,7 +324,6 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
 
     default_keys = {
         'sqlalchemy': sqlalchemy,
-        'table': tables[0].columns if tables else None,
         'and_': sqlalchemy.and_,
         'or_': sqlalchemy.or_,
         'not_': sqlalchemy.not_,
@@ -384,6 +383,10 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
         'LARGEBINARY': sqlalchemy.LargeBinary,
     }
 
+    # Only put in the table key if we have a table
+    # this gives a better error for post-filtering where we use 'result' instead of 'table'
+    if tables:
+        default_keys['table'] = tables[0].columns
     # Generate table1, table2, ...
     table_keys = {f'table{n}': table.columns for n, table in enumerate(tables, start=table_numbering_start)}
 
