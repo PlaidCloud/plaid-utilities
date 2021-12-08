@@ -424,7 +424,7 @@ class Connection(object):
         #
         #         self._load_csv(table_object, path)
 
-    def bulk_insert_dataframe(self, table_object, df, append=False):
+    def bulk_insert_dataframe(self, table_object, df, append=False, chunk_size=500000):
         """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
         bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
         """
@@ -488,32 +488,34 @@ class Connection(object):
         if not col_order:
             col_order = cols_overwrite
 
-        with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
-            df[col_order].to_csv(
-                csv_file,
-                index=False,
-                header=True,
-                na_rep='NaN',
-                sep='\t',
-                encoding='UTF-8',
-                quoting=csv.QUOTE_MINIMAL,
-                escapechar='"',
-                compression='zip'
-            )
-            csv_file.seek(0)
-            self._load_csv(
-                project_id=self._project_id,
-                table_id=table_object.id,
-                meta=table_meta_out,
-                csv_data=base64.b64encode(csv_file.read()),
-                header=True,
-                delimiter='\t',
-                null_as='NaN',
-                quote='"',
-                escape='"',
-                append=append,
-                compressed=True,
-            )
+        df = df.reindex(columns=col_order)
+        for row in range(0, df.shape[0], chunk_size):
+            with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
+                df[row:row + chunk_size].to_csv(
+                    csv_file,
+                    index=False,
+                    header=True,
+                    na_rep='NaN',
+                    sep='\t',
+                    encoding='UTF-8',
+                    quoting=csv.QUOTE_MINIMAL,
+                    escapechar='"',
+                    compression='zip'
+                )
+                csv_file.seek(0)
+                self._load_csv(
+                    project_id=self._project_id,
+                    table_id=table_object.id,
+                    meta=table_meta_out,
+                    csv_data=base64.b64encode(csv_file.read()),
+                    header=True,
+                    delimiter='\t',
+                    null_as='NaN',
+                    quote='"',
+                    escape='"',
+                    append=append or row > 0,
+                    compressed=True,
+                )
 
     def commit(self):
         """Here for completeness.  Does nothing"""

@@ -2962,7 +2962,7 @@ def allocate(
     return df_result
 
 
-def save(frame, name, conn=None, append=False, update_structure=False):
+def save(frame, name, conn=None, append=False, chunk_size=500000):
     """Saves the frame to the specified name
 
     Args:
@@ -2970,7 +2970,7 @@ def save(frame, name, conn=None, append=False, update_structure=False):
         name (str): Name and perhaps full path to a table
         conn (Connect object): plaid connect object
         append (bool): Append to existing table or truncate and rewrite
-        update_structure (bool): Change metadata (columns, column type, etc)
+        chunk_size (int, optional):
 
     Returns:
         None
@@ -2988,6 +2988,4 @@ def save(frame, name, conn=None, append=False, update_structure=False):
 
     t = Table(conn, name)
     logger.debug('Table ID is: {0}'.format(t.id))
-    conn.bulk_insert_dataframe(t, frame, append=append)
-
-    return
+    conn.bulk_insert_dataframe(t, frame, append=append, chunk_size=chunk_size)
