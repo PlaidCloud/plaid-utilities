@@ -308,7 +308,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                 if query is None:
                     # no query passed. fetch whole table
                     df = conn.get_dataframe(table_obj, clean=clean)
-                    if isinstance(df, pd.core.frame.DataFrame):
+                    if isinstance(df, pd.DataFrame):
                         logger.debug("Downloaded {0}...".format(table_path))
                         break
                 elif isinstance(query, six.string_types):
@@ -318,7 +318,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                     except Exception as e:
                         logger.exception("Attempt {0}: Failed to download {1}: {2}".format(tries, table_path, e))
                     else:
-                        if isinstance(df, pd.core.frame.DataFrame):
+                        if isinstance(df, pd.DataFrame):
                             logger.debug("Downloaded {0}...".format(table_path))
                             break
                 else:
@@ -328,14 +328,14 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                     except Exception as e:
                         logger.exception("Attempt {0}: Failed to download {1}: {2}".format(tries, table_path, e))
                     else:
-                        if isinstance(df, pd.core.frame.DataFrame):
+                        if isinstance(df, pd.DataFrame):
                             logger.debug("Downloaded {0}...".format(table_path))
                             break
                 tries += 1
 
             columns = table_obj.cols()
             if columns:
-                if isinstance(df, pd.core.frame.DataFrame):
+                if isinstance(df, pd.DataFrame):
                     cols = [c['id'] for c in columns if c['id'] in df.columns.tolist()]
                     df = df[cols]  # this ensures that the column order is as expected
                 else:
@@ -356,7 +356,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
 
             df = table_result_to_df(table_result or pd.DataFrame())
 
-        if not isinstance(df, pd.core.frame.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             logger.exception('Table {0} failed to download!'.format(table_path))
         elif len(df.columns) == 0:
             logger.exception('Table {0} downloaded 0 records!'.format(table_path))
@@ -1467,8 +1467,8 @@ def covariance(df, columns, min_observations=0):
     """Compute pairwise covariances among the series in the DataFrame, also excluding NA/null values
 
     Args:
-        df (`pandas.DataFrame`): The dataframe to compute on
-        columns (None): DEPRICATED - Columns are now determined from `df`
+        df (`pd.DataFrame`): The dataframe to compute on
+        columns (None): DEPRECATED - Columns are now determined from `df`
         min_observations (int, optional): Minimum observations, defaults to `0`
     """
     df = df.columns
@@ -1543,15 +1543,18 @@ def find_duplicates(df, columns=None, take_last=False):
     """Locates duplicate values in a dataframe
 
     Args:
-        df (`pandas.DataFrame`): The DataFrame to find duplicates in
-        columns (`list`, optional): Spesific columns to find duplicates in
+        df (`pd.DataFrame`): The DataFrame to find duplicates in
+        columns (`list`, optional): Specific columns to find duplicates in
         take_last (bool, optional): Should the last duplicate not be marked as a duplicate?
             Defaults to `False`
 
     Returns:
-        `pandas.DataFrame`: A frame containing duplicates
+        `pd.DataFrame`: A frame containing duplicates
     """
-    mask = df.duplicated(cols=columns, take_last=take_last)
+    mask = df.duplicated(
+        subset=columns,
+        keep='last' if take_last else 'first',
+    )
     return df.loc[mask]
 
 
@@ -1592,7 +1595,7 @@ def replace(df, replace_dict):
 
     Args:
         df (`pandas.DataFrame`): The dataframe to replace values in
-        replacement_dict (dict): A dict containing columns, the values to replace, and what to replace them with.
+        replace_dict (dict): A dict containing columns, the values to replace, and what to replace them with.
             Should be formatted like:
             {
                 'column_a': {'$': '', ',':''},
