@@ -2392,7 +2392,6 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
             quotechar='"',
             escapechar='"',
         )
-
         skipped_rows = 0
         # Do some cleaning to account for common human errors
         for rownum in range(sh.nrows):
@@ -2500,36 +2499,41 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 row = []
                 col_pos = 0
                 for col_info in column_information:
+                    try:
+                        c = sh.cell(rownum, col_pos)
 
-                    c = sh.cell(rownum, col_pos)
-
-                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
-                        row.append(null_value)
-                    else:
-                        dtype = dtype_from_excel(c.ctype)
-                        # logger.info(f'Column: {col_pos}')
-                        if dtype != col_info['dtype']:
-                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
-
-                        if dtype == 'text':
-                            row.append(c.value)
-                        elif dtype == 'numeric':
-                            if int(c.value) == c.value:
-                                row.append(int(c.value))  # This appears to be an int
-                            else:
-                                row.append(get_formatted_number(c.value))  # some other type of number
-                        elif dtype == 'boolean':
-                            row.append(c.value)
-                        elif dtype == 'timestamp':
-                            # If there is a year, use as datetime
-                            if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
-                            else:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                        if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                            row.append(null_value)
                         else:
-                            #  Default is to insert the value as-is, no conversion
-                            row.append(c.value)
-                    col_pos += 1
+                            dtype = dtype_from_excel(c.ctype)
+                            # logger.info(f'Column: {col_pos}')
+                            if dtype != col_info['dtype']:
+                                column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+
+                            if dtype == 'text':
+                                row.append(c.value)
+                            elif dtype == 'numeric':
+                                if int(c.value) == c.value:
+                                    row.append(int(c.value))  # This appears to be an int
+                                else:
+                                    row.append(get_formatted_number(c.value))  # some other type of number
+                            elif dtype == 'boolean':
+                                row.append(c.value)
+                            elif dtype == 'timestamp':
+                                # If there is a year, use as datetime
+                                if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
+                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
+                                else:
+                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                            else:
+                                #  Default is to insert the value as-is, no conversion
+                                row.append(c.value)
+                        col_pos += 1
+                    except Exception as e:
+                        raise Exception(
+                            f'Error importing cell at row {rownum}, column {col_pos}. '
+                            f'Check the cell is formatted correctly'
+                        ) from e
                 wr.writerow(row)
 
         if skipped_rows:
