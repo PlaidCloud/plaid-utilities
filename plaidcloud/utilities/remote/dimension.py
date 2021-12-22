@@ -172,6 +172,32 @@ class Dimensions:
         """
         # TODO: @Dave - Needs calling update function
         self.dims.rename_dimension(project_id=self.project_id, old=old, new=new)
+        
+    def get_dimension_names(self):
+        """get_dimension_names(name)
+        Returns a list of all dimension names
+
+        Args:
+            None
+
+        Returns:
+            list: names of all dimensions in the project
+        """
+        dims = self.get_dimensions()
+        return [dims[i][0] for i in dims]
+    
+    def get_dimension_objects(self):
+        """get_dimension_names(name)
+        Returns a list of all dimension objects
+
+        Args:
+            None
+
+        Returns:
+            list: all dimensions in the project
+        """
+        dims = self.get_dimensions()
+        return [dims[i][1] for i in dims]
 
     # --------------------------------------------------------------------------------------------------
     # ==== MAPPING METHODS =============================================================================
