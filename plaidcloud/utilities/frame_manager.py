@@ -308,7 +308,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                 if query is None:
                     # no query passed. fetch whole table
                     df = conn.get_dataframe(table_obj, clean=clean)
-                    if isinstance(df, pd.core.frame.DataFrame):
+                    if isinstance(df, pd.DataFrame):
                         logger.debug("Downloaded {0}...".format(table_path))
                         break
                 elif isinstance(query, six.string_types):
@@ -318,7 +318,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                     except Exception as e:
                         logger.exception("Attempt {0}: Failed to download {1}: {2}".format(tries, table_path, e))
                     else:
-                        if isinstance(df, pd.core.frame.DataFrame):
+                        if isinstance(df, pd.DataFrame):
                             logger.debug("Downloaded {0}...".format(table_path))
                             break
                 else:
@@ -328,14 +328,14 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                     except Exception as e:
                         logger.exception("Attempt {0}: Failed to download {1}: {2}".format(tries, table_path, e))
                     else:
-                        if isinstance(df, pd.core.frame.DataFrame):
+                        if isinstance(df, pd.DataFrame):
                             logger.debug("Downloaded {0}...".format(table_path))
                             break
                 tries += 1
 
             columns = table_obj.cols()
             if columns:
-                if isinstance(df, pd.core.frame.DataFrame):
+                if isinstance(df, pd.DataFrame):
                     cols = [c['id'] for c in columns if c['id'] in df.columns.tolist()]
                     df = df[cols]  # this ensures that the column order is as expected
                 else:
@@ -356,7 +356,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
 
             df = table_result_to_df(table_result or pd.DataFrame())
 
-        if not isinstance(df, pd.core.frame.DataFrame):
+        if not isinstance(df, pd.DataFrame):
             logger.exception('Table {0} failed to download!'.format(table_path))
         elif len(df.columns) == 0:
             logger.exception('Table {0} downloaded 0 records!'.format(table_path))
@@ -1467,8 +1467,8 @@ def covariance(df, columns, min_observations=0):
     """Compute pairwise covariances among the series in the DataFrame, also excluding NA/null values
 
     Args:
-        df (`pandas.DataFrame`): The dataframe to compute on
-        columns (None): DEPRICATED - Columns are now determined from `df`
+        df (`pd.DataFrame`): The dataframe to compute on
+        columns (None): DEPRECATED - Columns are now determined from `df`
         min_observations (int, optional): Minimum observations, defaults to `0`
     """
     df = df.columns
@@ -1543,15 +1543,18 @@ def find_duplicates(df, columns=None, take_last=False):
     """Locates duplicate values in a dataframe
 
     Args:
-        df (`pandas.DataFrame`): The DataFrame to find duplicates in
-        columns (`list`, optional): Spesific columns to find duplicates in
+        df (`pd.DataFrame`): The DataFrame to find duplicates in
+        columns (`list`, optional): Specific columns to find duplicates in
         take_last (bool, optional): Should the last duplicate not be marked as a duplicate?
             Defaults to `False`
 
     Returns:
-        `pandas.DataFrame`: A frame containing duplicates
+        `pd.DataFrame`: A frame containing duplicates
     """
-    mask = df.duplicated(cols=columns, take_last=take_last)
+    mask = df.duplicated(
+        subset=columns,
+        keep='last' if take_last else 'first',
+    )
     return df.loc[mask]
 
 
@@ -1592,7 +1595,7 @@ def replace(df, replace_dict):
 
     Args:
         df (`pandas.DataFrame`): The dataframe to replace values in
-        replacement_dict (dict): A dict containing columns, the values to replace, and what to replace them with.
+        replace_dict (dict): A dict containing columns, the values to replace, and what to replace them with.
             Should be formatted like:
             {
                 'column_a': {'$': '', ',':''},
@@ -2392,7 +2395,6 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
             quotechar='"',
             escapechar='"',
         )
-
         skipped_rows = 0
         # Do some cleaning to account for common human errors
         for rownum in range(sh.nrows):
@@ -2500,36 +2502,41 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 row = []
                 col_pos = 0
                 for col_info in column_information:
+                    try:
+                        c = sh.cell(rownum, col_pos)
 
-                    c = sh.cell(rownum, col_pos)
-
-                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
-                        row.append(null_value)
-                    else:
-                        dtype = dtype_from_excel(c.ctype)
-                        # logger.info(f'Column: {col_pos}')
-                        if dtype != col_info['dtype']:
-                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
-
-                        if dtype == 'text':
-                            row.append(c.value)
-                        elif dtype == 'numeric':
-                            if int(c.value) == c.value:
-                                row.append(int(c.value))  # This appears to be an int
-                            else:
-                                row.append(get_formatted_number(c.value))  # some other type of number
-                        elif dtype == 'boolean':
-                            row.append(c.value)
-                        elif dtype == 'timestamp':
-                            # If there is a year, use as datetime
-                            if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
-                            else:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                        if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                            row.append(null_value)
                         else:
-                            #  Default is to insert the value as-is, no conversion
-                            row.append(c.value)
-                    col_pos += 1
+                            dtype = dtype_from_excel(c.ctype)
+                            # logger.info(f'Column: {col_pos}')
+                            if dtype != col_info['dtype']:
+                                column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+
+                            if dtype == 'text':
+                                row.append(c.value)
+                            elif dtype == 'numeric':
+                                if int(c.value) == c.value:
+                                    row.append(int(c.value))  # This appears to be an int
+                                else:
+                                    row.append(get_formatted_number(c.value))  # some other type of number
+                            elif dtype == 'boolean':
+                                row.append(c.value)
+                            elif dtype == 'timestamp':
+                                # If there is a year, use as datetime
+                                if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
+                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
+                                else:
+                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                            else:
+                                #  Default is to insert the value as-is, no conversion
+                                row.append(c.value)
+                        col_pos += 1
+                    except Exception as e:
+                        raise Exception(
+                            f'Error importing cell at row {rownum}, column {col_pos}. '
+                            f'Check the cell is formatted correctly'
+                        ) from e
                 wr.writerow(row)
 
         if skipped_rows:
@@ -2962,7 +2969,7 @@ def allocate(
     return df_result
 
 
-def save(frame, name, conn=None, append=False, update_structure=False):
+def save(frame, name, conn=None, append=False, chunk_size=500000):
     """Saves the frame to the specified name
 
     Args:
@@ -2970,7 +2977,7 @@ def save(frame, name, conn=None, append=False, update_structure=False):
         name (str): Name and perhaps full path to a table
         conn (Connect object): plaid connect object
         append (bool): Append to existing table or truncate and rewrite
-        update_structure (bool): Change metadata (columns, column type, etc)
+        chunk_size (int, optional):
 
     Returns:
         None
@@ -2988,6 +2995,4 @@ def save(frame, name, conn=None, append=False, update_structure=False):
 
     t = Table(conn, name)
     logger.debug('Table ID is: {0}'.format(t.id))
-    conn.bulk_insert_dataframe(t, frame, append=append)
-
-    return
+    conn.bulk_insert_dataframe(t, frame, append=append, chunk_size=chunk_size)
