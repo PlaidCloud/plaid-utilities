@@ -146,7 +146,6 @@ class Dimensions:
         for gst_dim in gst_dims:
             dimensions[gst_dim['id']] = [gst_dim['name'], Dimension(conn=self.conn, name=gst_dim['name'])]
         return dimensions
-    
 
     def is_dimension(self, name):
         """is_dimension(name)
@@ -159,7 +158,6 @@ class Dimensions:
             bool: Does the dimension exist
         """
         return self.dims.is_dimension(project_id=self.project_id, name=name)
-    
 
     def rename_dimension(self, old, new):
         """rename_dimension(old, new)
