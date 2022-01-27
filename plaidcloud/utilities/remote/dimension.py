@@ -2036,6 +2036,14 @@ class Dimension:
     def save_parent_child_to_db(self, hierarchy: str, table_id: str):
         self.dim.save_parent_child_to_db(project_id=self.project_id, name=self.name, hierarchy=hierarchy, table_id=table_id)
 
+    def save_node_leaves_to_db(self, hierarchy: str, table_id: str):
+        self.dim.save_node_leaves_to_db(
+            project_id=self.project_id,
+            name=self.name,
+            hierarchy=hierarchy,
+            table_id=table_id,
+        )
+
     # --------------------------------------------------------------------------------------------------
     # ==== GET DATAFRAME METHODS =======================================================================
     # --------------------------------------------------------------------------------------------------
