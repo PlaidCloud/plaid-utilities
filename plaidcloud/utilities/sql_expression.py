@@ -864,7 +864,7 @@ def import_data_query(
 def allocate(
     source_query, driver_query, allocate_columns, numerator_columns, denominator_columns, driver_value_column,
     overwrite_cols_for_allocated=True, include_source_columns=None, unique_cte_index=1,
-    parent_context_columns: dict = None
+    parent_context_queries: dict = None
 ):
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
@@ -879,7 +879,7 @@ def allocate(
         include_source_columns (list, optional): Columns for which we should include a *_source column (for reassignments with multiple allocation steps)
         unique_cte_index (int, optional): Unique index to use in the common table expressions if more than one
             allocation will be done within the same query
-        parent_context_columns (dict, optional): Dict of columns for which to use 'Parent' driver data {col: Selectable}
+        parent_context_queries (dict, optional): Dict of queries for use with 'Parent' driver data {col: {'PARENT_CHILD': Selectable, 'LEAVES': Selectable}}
 
     Returns:
         sqlalchemy.Selectable: A Sqlalchemy query representing the allocation
@@ -893,7 +893,7 @@ def allocate(
     driver_count = len(driver_value_columns)
 
     include_source_columns = include_source_columns or []
-    parent_context_columns = parent_context_columns or {}
+    parent_context_queries = parent_context_queries or {}
 
     # Denominator table is SUM of split values with GROUP BY denominator columns
     # Join the Denominator values to the numerator values to get a % split (add an alloc indicator of 1 in a fake column)
@@ -911,42 +911,63 @@ def allocate(
     def _get_parent_col(col: str = ''):
         return f'Parent{col}'
 
-    def _join_parent_dim(sel, left_table, col):
+    def _get_child_col(col: str = ''):
+        return f'Child{col}'
+
+    # def _join_parent_dim(sel, left_table, col):
+    #     return sel.join_from(
+    #         left_table,
+    #         parent_cte_dict[col],
+    #         parent_cte_dict[col].columns['Child'] == left_table.columns[col]
+    #     )
+
+    def _join_parent_leaves(sel, left_table, col):
         return sel.join_from(
             left_table,
+            leaves_cte_dict[col],
+            leaves_cte_dict[col].columns['Leaf'] == left_table.columns[col]
+        )
+
+    def _join_parent_child(sel, col):
+        return sel.join_from(
+            leaves_cte_dict[col],
             parent_cte_dict[col],
-            parent_cte_dict[col].columns['Child'] == left_table.columns[col]
+            parent_cte_dict[col].columns['Parent'] == leaves_cte_dict[col].columns['Node']
         )
 
     cte_source = source_query.cte(f'alloc_source_{unique_cte_index}')
     cte_driver = driver_query.cte(f'alloc_driver_{unique_cte_index}')
 
+    parent_context_columns = parent_context_queries.keys()
     parent_cte_dict = {}
-    # This assumes that the parent contains 'Parent' & 'Child' columns
-    if parent_context_columns:
-        for col, parent_query in parent_context_columns.items():
-            parent_cte_dict[col] = parent_query.cte(f'parent_{col}_{unique_cte_index}')
+    leaves_cte_dict = {}
+    # This assumes that the PARENT_CHILD contains 'Parent' & 'Child' columns
+    # and LEAVES contains 'Node', 'Leaf' columns
+    if parent_context_queries:
+        for col, queries in parent_context_queries.items():
+            parent_cte_dict[col] = queries['PARENT_CHILD'].cte(f'parent_{col}_{unique_cte_index}')
+            leaves_cte_dict[col] = queries['LEAVES'].cte(f'leaves_{col}_{unique_cte_index}')
 
         parent_driver_select = sqlalchemy.select(
-            * [col for col in cte_driver.columns]
-            + [parent_cte_dict[col].columns[_get_parent_col()].label(_get_parent_col(col)) for col in parent_context_columns.keys()]
+            * [col for col in cte_driver.columns if col.name not in parent_context_columns]
+            + [
+                  parent_cte_dict[col].columns[_get_child_col()].label(col)
+                  for col in parent_context_columns
+              ]
         )
-        for col in parent_context_columns.keys():
-            parent_driver_select = _join_parent_dim(parent_driver_select, cte_driver, col)
+        for col in parent_context_columns:
+            parent_driver_select = _join_parent_leaves(parent_driver_select, cte_driver, col)
+            parent_driver_select = _join_parent_child(parent_driver_select, col)
 
         cte_parent_driver = parent_driver_select.cte(f'parent_driver_{unique_cte_index}')
 
         cte_consol_driver = (
             sqlalchemy.select(
-                * [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns if d not in parent_context_columns.keys()]
-                + [cte_parent_driver.columns[_get_parent_col(p)].label(p) for p in parent_context_columns.keys()]
+                * [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns]
                 + [sqlalchemy.func.sum(cte_parent_driver.columns[d]).label(d) for d in driver_value_columns]
             )
             .where(cte_parent_driver.columns[driver_value_column] != 0)
-            .group_by(
-                * [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns if d not in parent_context_columns.keys()]
-                + [cte_parent_driver.columns[_get_parent_col(p)] for p in parent_context_columns.keys()]
-            )
+            .group_by(* [cte_parent_driver.columns[d] for d in numerator_columns + denominator_columns])
             .cte(f'consol_driver_{unique_cte_index}')
         )
     else:
@@ -1038,9 +1059,6 @@ def allocate(
         cte_source.columns[allocable_col] == 1
     )
 
-    for col in parent_context_columns.keys():
-        allocation_select = _join_parent_dim(allocation_select, cte_source, col)
-
     allocation_select = allocation_select.join_from(
         cte_source,
         cte_ratios,
@@ -1049,11 +1067,6 @@ def allocate(
             * [
                  cte_source.columns[dn] == cte_ratios.columns[dn]
                  for dn in denominator_columns
-                 if dn not in parent_context_columns.keys()
-             ]
-            + [
-                 parent_cte_dict[col].columns[_get_parent_col()] == cte_ratios.columns[col]
-                 for col in parent_context_columns.keys()
              ]
         ),
         isouter=True
