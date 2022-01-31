@@ -696,9 +696,6 @@ class Table(sqlalchemy.Table):
 
         return table_object
 
-    def metadata(self):  # pylint: disable=method-hidden
-        return self._metadata  # pylint: disable=no-member
-
     @property
     def project_id(self):
         return self._project_id  # pylint: disable=no-member
@@ -710,9 +707,6 @@ class Table(sqlalchemy.Table):
     @property
     def fully_qualified_name(self):
         return '"{}"."{}"'.format(self.schema, self.id)
-
-    def schema(self):  # pylint: disable=method-hidden
-        return self._schema  # pylint: disable=no-member
 
     def info(self, keys=None):  # pylint: disable=method-hidden
         return self.table_info(keys)
