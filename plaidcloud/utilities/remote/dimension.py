@@ -1599,9 +1599,19 @@ class Dimension:
         """
         self.dim.rename_property(project_id=self.project_id, name=self.name, old=old, new=new)
 
+    def clear_property(self, property):
+        """Clear all values of a property
+
+        Args:
+            property (str): Property unique ID
+
+        Returns:
+            None
+        """
+        self.dim.clear_property(project_id=self.project_id, name=self.name, property=property)
+
     def delete_node_property(self, node, property):
-        """delete_node_property(node, property)
-        Delete a property
+        """Delete a property
 
         Args:
             node (str): Unique hierarchy node identifier
