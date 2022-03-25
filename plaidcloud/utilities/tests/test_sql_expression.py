@@ -748,6 +748,16 @@ class TestGetFromClause(TestSQLExpression):
             )
         )
 
+    def test_magic_columns_is_none(self):
+        for dtype in se.MAGIC_COLUMN_MAPPING.keys():
+            self.assertIsNone(
+                se.get_from_clause(
+                    [self.table],
+                    {'target': 'TargetColumn', 'dtype': dtype},
+                    self.source_column_configs,
+                )
+            )
+
     def test_errors_when_no_source_expression_or_constant(self):
         # If a column doesn't have source, expression or constant, but is any type other than serial/bigserial, raise error
         with self.assertRaises(se.SQLExpressionError):
