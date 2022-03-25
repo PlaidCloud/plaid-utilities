@@ -258,7 +258,7 @@ def get_from_clause(
         return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start)
     if source:
         return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start)
-    if target_column_config.get('dtype') in ('serial', 'bigserial'):
+    if target_column_config.get('dtype') in {'serial', 'bigserial'}.union(set(MAGIC_COLUMN_MAPPING.keys())):
         return None
 
     # If we get here...
