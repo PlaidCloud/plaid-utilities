@@ -2215,7 +2215,7 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     @staticmethod
     def _decode_dataframe(json_df):
-        return pd.read_json(json_df, orient='table')
+        return pd.read_json(json_df, orient='table', precise_float=True)
 
     @staticmethod
     def _encode_dataframe(df):
