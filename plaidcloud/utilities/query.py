@@ -165,7 +165,7 @@ class Connection(object):
     def get_iterator_by_query(self, sa_query, preserve_nulls=True):
         """Returns a generator that yields each row as a dict."""
         query, params = self._compiled(sa_query)
-        return self._csv_stream(self.get_csv_by_query(query, params), sa_query.columns, preserve_nulls)
+        return self._csv_stream(self.get_csv_by_query(query, params), sa_query.selected_columns, preserve_nulls)
 
     def _csv_stream(self, file_name, columns, preserve_nulls):
         type_lookup = {c.name: c.type for c in columns}
