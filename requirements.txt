@@ -1,5 +1,3 @@
-aiocsv
-aiofiles
 argparse
 chardet
 ipython
