@@ -1,7 +1,6 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
-from __future__ import absolute_import
 from functools import reduce
 
 import sqlalchemy
@@ -290,10 +289,11 @@ def compile_sql_numericize(element, compiler, **kw):
     def sql_only_numeric(text):
         # Returns substring of numeric values only (-, ., numbers, scientific notation)
         # return func.nullif(func.substring(text, r'([+\-]?(\d\.?\d*[Ee][+\-]?\d+|(\d+\.\d*|\d*\.\d+)|\d+))'), '')
+        cast_text = func.cast(text, sqlalchemy.Text)
         return func.coalesce(
-            func.substring(text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
             func.nullif(
-                func.regexp_replace(text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
+                func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
                 ''
             )
         )
