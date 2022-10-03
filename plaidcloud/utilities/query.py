@@ -4,6 +4,7 @@ import os
 import tempfile
 import uuid
 import unicodecsv as csv
+from io import StringIO
 
 import pandas as pd
 import numpy as np
@@ -12,12 +13,10 @@ from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
-from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql
-from plaidcloud.rpc.rpc_connect import Connect
-# from plaidcloud.utilities.analyze_table import compiled
-from plaidcloud.utilities import data_helpers as dh
-from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.database import PlaidDate
+from plaidcloud.rpc.rpc_connect import Connect
+from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
+from plaidcloud.utilities import data_helpers as dh
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
@@ -27,11 +26,9 @@ __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
 
-# Primarily used in workflow-runner :(, frame_manager :( and
-# plaidtools.cconnect, which is primarily used in udfs
-
 logger = logging.getLogger(__name__)
 SCHEMA_PREFIX = 'anlz'
+TABLE_PREFIX = 'analyzetable_'
 
 # We must override the default pandas na values to disallow 'NA'.
 # We are doing this by setting our own list, rather than using pandas.io.common._NA_VALUES in
@@ -43,7 +40,7 @@ _NA_VALUES = {'-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
 
 class Connection(object):
 
-    def __init__(self, project=None, rpc=None):
+    def __init__(self, project: str = None, rpc: Connect = None):
         """
 
         Args:
@@ -70,20 +67,20 @@ class Connection(object):
         else:
             self._project_id = rpc.project_id
 
-        _dialect_kind = 'greenplum'   # This should come from the project primary database setting eventually
+        _dialect_kind = self.rpc.analyze.query.dialect()
 
         if _dialect_kind == 'greenplum':
             self.dialect = GreenplumDialect()
         elif _dialect_kind == 'hana':
             self.dialect = HANABaseDialect()
         elif _dialect_kind == 'hive':
-            raise Exception('Hive not supported from plaidtools currently.')
+            raise Exception('Hive currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'spark':
-            raise Exception('Spark not supported from plaidtools currently.')
+            raise Exception('Spark currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'oracle':
-            raise Exception('Oracle not supported from plaidtools currently.')
+            raise Exception('Oracle currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'mssql':
-            raise Exception('MS SQL Server not supported from plaidtools currently.')
+            raise Exception('MS SQL Server currently not supported from plaidcloud utilities.')
         else:
             self.dialect = PGDialect()
 
@@ -168,7 +165,7 @@ class Connection(object):
     def get_iterator_by_query(self, sa_query, preserve_nulls=True):
         """Returns a generator that yields each row as a dict."""
         query, params = self._compiled(sa_query)
-        return self._csv_stream(self.get_csv_by_query(query, params), sa_query.columns, preserve_nulls)
+        return self._csv_stream(self.get_csv_by_query(query, params), sa_query.selected_columns, preserve_nulls)
 
     def _csv_stream(self, file_name, columns, preserve_nulls):
         type_lookup = {c.name: c.type for c in columns}
@@ -424,7 +421,7 @@ class Connection(object):
         #
         #         self._load_csv(table_object, path)
 
-    def bulk_insert_dataframe(self, table_object, df, append=False):
+    def bulk_insert_dataframe(self, table_object, df, append=False, chunk_size=500000):
         """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
         bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
         """
@@ -488,32 +485,34 @@ class Connection(object):
         if not col_order:
             col_order = cols_overwrite
 
-        with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
-            df[col_order].to_csv(
-                csv_file,
-                index=False,
-                header=True,
-                na_rep='NaN',
-                sep='\t',
-                encoding='UTF-8',
-                quoting=csv.QUOTE_MINIMAL,
-                escapechar='"',
-                compression='zip'
-            )
-            csv_file.seek(0)
-            self._load_csv(
-                project_id=self._project_id,
-                table_id=table_object.id,
-                meta=table_meta_out,
-                csv_data=base64.b64encode(csv_file.read()),
-                header=True,
-                delimiter='\t',
-                null_as='NaN',
-                quote='"',
-                escape='"',
-                append=append,
-                compressed=True,
-            )
+        df = df.reindex(columns=col_order)
+        for row in range(0, df.shape[0], chunk_size):
+            with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
+                df[row:row + chunk_size].to_csv(
+                    csv_file,
+                    index=False,
+                    header=True,
+                    na_rep='NaN',
+                    sep='\t',
+                    encoding='UTF-8',
+                    quoting=csv.QUOTE_MINIMAL,
+                    escapechar='"',
+                    compression='zip'
+                )
+                csv_file.seek(0)
+                self._load_csv(
+                    project_id=self._project_id,
+                    table_id=table_object.id,
+                    meta=table_meta_out,
+                    csv_data=base64.b64encode(csv_file.read()),
+                    header=True,
+                    delimiter='\t',
+                    null_as='NaN',
+                    quote='"',
+                    escape='"',
+                    append=append or row > 0,
+                    compressed=True,
+                )
 
     def commit(self):
         """Here for completeness.  Does nothing"""
@@ -541,6 +540,51 @@ class Connection(object):
         return self.rpc.analyze.table.delete(
                 project_id=self._project_id, table_id=table.id
             )
+
+    def save_data(self, query, table):
+        """Saves the data from the give query as a table in the database
+
+        Args:
+            query (): Query from which to create the table data
+            table (str or Table): Table name/path, or Table object
+
+        Returns:
+            None
+        """
+        def _table_meta():
+            return [
+                {
+                    'id': col.name,
+                    'dtype': analyze_type(col.type.compile(self.dialect))
+                }
+                for col in query.selected_columns
+            ]
+
+        if isinstance(table, str):
+            table = Table(
+                self,
+                table=table,
+                metadata=_table_meta(),
+                overwrite=True
+            )
+        else:
+            # ensure the table exists as per the metadata
+            self.rpc.analyze.table.touch(
+                project_id=self._project_id,
+                table_id=table.id,
+                meta=_table_meta()
+            )
+        # use the upsert method to add the data
+        insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
+        self.rpc.analyze.query.upsert(
+            project_id=self._project_id,
+            table_id=table.id,
+            update_query=None,
+            update_params=None,
+            insert_query=insert_query,
+            insert_params=insert_params,
+            recreate=True
+        )
 
     @property
     def project_id(self):
@@ -585,7 +629,7 @@ class Table(sqlalchemy.Table):
             if not columns:
                 columns = []
 
-            if table.startswith('analyzetable_'):
+            if table.startswith(TABLE_PREFIX):
                 # This is already the ID.  Use it
                 name = 'Table {}'.format(table)
                 path = '/'
@@ -652,9 +696,6 @@ class Table(sqlalchemy.Table):
 
         return table_object
 
-    def metadata(self):  # pylint: disable=method-hidden
-        return self._metadata  # pylint: disable=no-member
-
     @property
     def project_id(self):
         return self._project_id  # pylint: disable=no-member
@@ -666,9 +707,6 @@ class Table(sqlalchemy.Table):
     @property
     def fully_qualified_name(self):
         return '"{}"."{}"'.format(self.schema, self.id)
-
-    def schema(self):  # pylint: disable=method-hidden
-        return self._schema  # pylint: disable=no-member
 
     def info(self, keys=None):  # pylint: disable=method-hidden
         return self.table_info(keys)
@@ -699,9 +737,12 @@ class Table(sqlalchemy.Table):
     def get_data(self, clean=False):
         return self._conn.get_dataframe(self, clean=clean)
 
+    def save(self, query):
+        return self._conn.save_data(query, self)
+
 
 def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
-    if name.startswith('analyzetable_'):
+    if name.startswith(TABLE_PREFIX):
         # This is already the ID.  Use it
         logger.warning('Table ID passed to _get_table_id. Not searching for paths or name.')
         return name, None, None

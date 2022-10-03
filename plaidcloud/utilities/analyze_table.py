@@ -1,23 +1,19 @@
 #!/usr/bin/env python
 # coding=utf-8
+import warnings
 
-from __future__ import absolute_import
-
-import six
 import sqlalchemy
-from sqlalchemy_greenplum.dialect import GreenplumDialect
-
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 
+from plaidcloud.utilities.query import TABLE_PREFIX, SCHEMA_PREFIX
+
 __author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
-
-SCHEMA_PREFIX = 'anlz'
 
 
 def lookup_project(project, rpc=None):
@@ -36,14 +32,20 @@ def lookup_table(project_id, table, rpc=None):
         path=table,
     )
 
-    if not table_id.startswith('analyzetable_'):
-        return 'analyzetable_' + table_id
+    if not table_id.startswith(TABLE_PREFIX):
+        return TABLE_PREFIX + table_id
     else:
         return table_id
 
 
 class AnalyzeTable(sqlalchemy.Table):
     def __new__(cls, project, table, metadata=None, rpc=None):
+        warnings.simplefilter('default', DeprecationWarning)
+        warnings.warn(
+            'AnalyzeTable is deprecated in favor of `plaidcloud.utilities.query.Table`',
+            DeprecationWarning
+        )
+
         if rpc:
             _rpc = rpc
         else:
@@ -150,7 +152,7 @@ def send_query(project, query, params=None, rpc=None):
 
     project_id = lookup_project(project, rpc)
 
-    if isinstance(query, six.string_types):
+    if isinstance(query, str):
         query_string = query
     else:
         query_string, params = compiled(query)

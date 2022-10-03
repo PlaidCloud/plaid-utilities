@@ -9,6 +9,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import uuid
 import pandas as pd
+import numpy as np
 
 __author__ = 'Dave Parsons'
 __copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
@@ -32,6 +33,7 @@ def validate_uuid4(uuid_string):
         # is not a valid hex code for a UUID.
         return False
     return True
+
 
 class Dimensions:
     """
@@ -172,6 +174,30 @@ class Dimensions:
         """
         # TODO: @Dave - Needs calling update function
         self.dims.rename_dimension(project_id=self.project_id, old=old, new=new)
+        
+    def get_dimension_names(self):
+        """get_dimension_names(name)
+        Returns a list of all dimension names
+
+        Args:
+
+        Returns:
+            list: names of all dimensions in the project
+        """
+        dims = self.get_dimensions()
+        return [dims[i][0] for i in dims]
+    
+    def get_dimension_objects(self):
+        """get_dimension_names(name)
+        Returns a list of all dimension objects
+
+        Args:
+
+        Returns:
+            list: all dimensions in the project
+        """
+        dims = self.get_dimensions()
+        return [dims[i][1] for i in dims]
 
     # --------------------------------------------------------------------------------------------------
     # ==== MAPPING METHODS =============================================================================
@@ -454,10 +480,12 @@ class Dimension:
             after (str): node to insert after
 
         Returns:
-            None
+            tuple: parent_added (bool), node_added (bool), node_moved (bool)
         """
-        self.dim.add_node(project_id=self.project_id, name=self.name, parent=parent, child=child,
-                          consolidation=consolidation, hierarchy=hierarchy, before=before, after=after)
+        return self.dim.add_node(
+            project_id=self.project_id, name=self.name, parent=parent, child=child,
+            consolidation=consolidation, hierarchy=hierarchy, before=before, after=after,
+        )
 
     def add_nodes(self, parent, children, consolidation='+', hierarchy=MAIN, before=None, after=None):
         """add_nodes(pparent, children, consolidation='+', hierarchy=MAIN, before=None, after=None)
@@ -1599,9 +1627,19 @@ class Dimension:
         """
         self.dim.rename_property(project_id=self.project_id, name=self.name, old=old, new=new)
 
+    def clear_property(self, property):
+        """Clear all values of a property
+
+        Args:
+            property (str): Property unique ID
+
+        Returns:
+            None
+        """
+        self.dim.clear_property(project_id=self.project_id, name=self.name, property=property)
+
     def delete_node_property(self, node, property):
-        """delete_node_property(node, property)
-        Delete a property
+        """Delete a property
 
         Args:
             node (str): Unique hierarchy node identifier
@@ -1876,62 +1914,259 @@ class Dimension:
                     - code (int): Result code
                     - message (str): Message string
         """
-        json_df = self._encode_dataframe(df)
+        if not isinstance(df, pd.DataFrame):
+            raise Exception('df parameter is not a valid dataframe')
 
-        results_df = self.dim.load_hierarchy_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
-                                                            parents=parents, children=children,
-                                                            consolidations=consolidations,
-                                                            consol_default=consol_default, hierarchy=hierarchy)
-        return_df = self._decode_dataframe(results_df)
-        return return_df
+        if parents not in df:
+            raise Exception(f'Parents column {parents} does not exist')
+
+        if children not in df:
+            raise Exception(f'Children column {children} does not exist')
+
+        if consolidations:
+            default_consol = False
+            if consolidations not in df:
+                raise Exception(f'Consolidations column {consolidations} does not exist')
+        else:
+            default_consol = True
+            if consol_default not in VALID_CONSOL:
+                raise Exception(f'Consolidation default value {consol_default} is invalid')
+
+        # Remove any duplicate rows
+        df.drop_duplicates(inplace=True)
+
+        # Tidy up data by converting to empty strings
+        df = df.replace(r'^\s*$', '', regex=True).replace('None', '')
+        df.fillna('', inplace=True)
+
+        # Do we have a hierarchy column?
+        if hierarchy in df.columns:
+            default_hier = False
+            load_hiers = list(np.unique(df[hierarchy]))
+            if len(load_hiers) == 0:
+                raise Exception(f'Hierarchy {hierarchy} column is null')
+        else:
+            default_hier = True
+            load_hiers = [hierarchy]
+
+        # Add/clear any necessary hierarchies
+        for load_hier in load_hiers:
+            if not self.is_hierarchy(load_hier) and load_hier != '':
+                self.add_alt_hierarchy(load_hier)
+            if clear:
+                self.clear_alt_hierarchy(load_hier)
+
+        # Node sets for use below
+        node_sets = {
+            load_hier: self.get_all_nodes(load_hier)
+            for load_hier in set(load_hiers + [MAIN])
+        }
+
+        def _get_result(node, status, code, message):
+            return {
+                'hierarchy': node['hierarchy'],
+                'parent': node['parent'],
+                'child': node['child'],
+                'consolidation': node['consol'],
+                'status': status,
+                'code': code,
+                'message': message,
+            }
+
+        # Results list for dataframe
+        results = []
+        for index, row in df.iterrows():
+            node = {
+                'parent': row[parents] or ROOT,
+                'child': row[children],
+                'consol': row[consolidations] if not consol_default and row[consolidations] in VALID_CONSOL else default_consol,
+                'hierarchy': row[hierarchy] if not default_hier else hierarchy
+            }
+            # only send nodes with a hierarchy set (unless defaulted)
+            if not node['hierarchy']:
+                results.append(_get_result(node, False, -32, 'Hierarchy is null'))
+            # Child cannot be empty, ROOT or equal to parent
+            elif not node['child']:
+                results.append(_get_result(node, False, -2, 'Child is null'))
+            elif node['child'] == ROOT:
+                results.append(_get_result(node, False, -4, 'Child cannot be Root'))
+            elif node['child'] == node['parent']:
+                results.append(_get_result(node, False, -8, 'Child is the same as Parent'))
+            # Cannot add to main node in an alternative hierarchy
+            elif node['parent'] in node_sets[MAIN] and node['parent'] != ROOT and node['hierarchy'] != MAIN:
+                results.append(_get_result(node, False, -16, 'Alt hierarchy cannot modify Main nodes'))
+            else:
+                parent_added, node_added, node_moved = self.add_node(
+                    parent=node['parent'],
+                    child=node['child'],
+                    consolidation=node['consol'],
+                    hierarchy=node['hierarchy'],
+                    before=node['before'],
+                    after=node['after'],
+                )
+                if node_added:
+                    results.append(_get_result(node, True, 2, 'Child added'))
+                elif node_moved:
+                    results.append(_get_result(node, True, 8, 'Child moved to new parent'))
+                else:
+                    results.append(_get_result(node, True, 0, 'No change'))
+                if parent_added:
+                    results.append(_get_result(node, True, 4, 'Parent added'))
+
+        df_results = pd.DataFrame(results, columns=['hierarchy', 'parent', 'child', 'consolidation',
+                                                    'status', 'code', 'message'])
+
+        return df_results
 
     # noinspection PyUnusedLocal
     def load_aliases_from_dataframe(self, df, nodes, names, values):
-        """load_aliases_from_dataframe(self, df, nodes, names, values)
-        Bulk loads aliases from a Dataframe
+        """Bulk loads aliases from a Dataframe
+
         Args:
-            df (Dataframe): Datafame with P/C nodes
+            df (Dataframe): Dataframe with P/C nodes
             nodes (str): Column with node names
             names (str): Column with alias names
             values (str): Column with alias values
         Returns:
             None
         """
-        json_df = self._encode_dataframe(df)
-        self.dim.load_aliases_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
-                                             nodes=nodes, names=names, values=values)
+        # Basic error checking
+        if not isinstance(df, pd.DataFrame):
+            raise Exception('df parameter is not a valid dataframe')
+        if not isinstance(nodes, str):
+            raise Exception('nodes parameter is not a valid string')
+        if not isinstance(names, str):
+            raise Exception('names parameter is not a valid string')
+        if not isinstance(values, str):
+            raise Exception('values parameter is not a valid string')
+
+        # Check that the columns exist in the dataframe
+        if nodes not in df:
+            raise Exception(f'Nodes column {nodes} does not exist')
+        if names not in df:
+            raise Exception(f'Names column {names} does not exist')
+        if values not in df:
+            raise Exception(f'Values column {values} does not exist')
+
+        # Remove any duplicate rows, coping with lists
+        df = df.loc[df.astype(str).drop_duplicates().index]
+
+        aliases = self.get_aliases()
+        # Create any new aliases
+        for alias_name in np.unique(df[names]):
+            if alias_name not in aliases:
+                self.add_alias(alias_name)
+
+        # Add aliases
+        return self.set_node_aliases(
+            [
+                {
+                    'node': row[nodes],
+                    'alias': row[names],
+                    'value': row[values]
+                } for index, row in df.iterrows()
+            ]
+        )
 
     # noinspection PyUnusedLocal
     def load_properties_from_dataframe(self, df, nodes, names, values):
-        """load_properties_from_dataframe(self, df, nodes, names, values)
-        Bulk loads properties from a Dataframe
+        """Bulk loads properties from a Dataframe
+
         Args:
-            df (Dataframe): Datafame with P/C nodes
+            df (Dataframe): Dataframe with P/C nodes
             nodes (str): Column with node names
             names (str): Column with property names
             values (str): Column with property values
         Returns:
             None
         """
-        json_df = self._encode_dataframe(df)
-        self.dim.load_properties_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
-                                                nodes=nodes, names=names, values=values)
+        # Basic error checking
+        if not isinstance(df, pd.DataFrame):
+            raise Exception('df parameter is not a valid dataframe')
+        if not isinstance(nodes, str):
+            raise Exception('nodes parameter is not a valid string')
+        if not isinstance(names, str):
+            raise Exception('names parameter is not a valid string')
+        if not isinstance(values, str):
+            raise Exception('values parameter is not a valid string')
+
+        # Check that the columns exist in the dataframe
+        if nodes not in df:
+            raise Exception(f'Nodes column {nodes} does not exist')
+        if names not in df:
+            raise Exception(f'Names column {names} does not exist')
+        if values not in df:
+            raise Exception(f'Values column {values} does not exist')
+
+        # Remove any duplicate rows, coping with lists
+        df = df.loc[df.astype(str).drop_duplicates().index]
+
+        # Create any new properties
+        properties = self.get_properties()
+        for prop_name in np.unique(df[names]):
+            if prop_name not in properties:
+                self.add_property(prop_name)
+
+        # Add properties
+        return self.set_node_properties(
+            [
+                {
+                    'node': row[nodes],
+                    'property': row[names],
+                    'value': row[values]
+                } for index, row in df.iterrows()
+            ]
+        )
 
     # noinspection PyUnusedLocal
     def load_values_from_dataframe(self, df, nodes, names, values):
-        """load_values_from_dataframe(self, df, nodes, names, values)
-        Bulk loads values from a Dataframe
+        """Bulk loads values from a Dataframe
+
         Args:
-            df (Dataframe): Datafame with P/C nodes
+            df (Dataframe): Dataframe with P/C nodes
             nodes (str): Column with node names
             names (str): Column with value names
             values (str): Column with value values
         Returns:
             None
         """
-        json_df = self._encode_dataframe(df)
-        self.dim.load_values_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
-                                            nodes=nodes, names=names, values=values)
+        # Basic error checking
+        if not isinstance(df, pd.DataFrame):
+            raise Exception('df parameter is not a valid dataframe')
+        if not isinstance(nodes, str):
+            raise Exception('nodes parameter is not a valid string')
+        if not isinstance(names, str):
+            raise Exception('names parameter is not a valid string')
+        if not isinstance(values, str):
+            raise Exception('values parameter is not a valid string')
+
+        # Check that the columns exist in the dataframe
+        if nodes not in df:
+            raise Exception(f'Nodes column {nodes} does not exist')
+        if names not in df:
+            raise Exception(f'Names column {names} does not exist')
+        if values not in df:
+            raise Exception(f'Values column {values} does not exist')
+
+        # Remove any duplicate rows, coping with lists
+        df = df.loc[df.astype(str).drop_duplicates().index]
+
+        all_values = self.get_values()
+        # Create any new values
+        for val_name in np.unique(df[names]):
+            if val_name not in all_values:
+                self.add_value(val_name)
+
+        # Add values
+        return self.set_node_values(
+            [
+                {
+                    'node': row[nodes],
+                    'value_name': row[names],
+                    'value': row[values]
+                } for index, row in df.iterrows()
+            ]
+        )
 
     # noinspection PyUnusedLocal
     def load_from_table_flat(self, table, columns, top=None, consolidations=None, consol_default='+',
@@ -2035,6 +2270,14 @@ class Dimension:
 
     def save_parent_child_to_db(self, hierarchy: str, table_id: str):
         self.dim.save_parent_child_to_db(project_id=self.project_id, name=self.name, hierarchy=hierarchy, table_id=table_id)
+
+    def save_node_leaves_to_db(self, hierarchy: str, table_id: str):
+        self.dim.save_node_leaves_to_db(
+            project_id=self.project_id,
+            name=self.name,
+            hierarchy=hierarchy,
+            table_id=table_id,
+        )
 
     # --------------------------------------------------------------------------------------------------
     # ==== GET DATAFRAME METHODS =======================================================================
@@ -2171,7 +2414,7 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     @staticmethod
     def _decode_dataframe(json_df):
-        return pd.read_json(json_df, orient='table')
+        return pd.read_json(json_df, orient='table', precise_float=True)
 
     @staticmethod
     def _encode_dataframe(df):
