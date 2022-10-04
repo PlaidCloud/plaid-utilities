@@ -257,8 +257,10 @@ def compile_sql_metric_multiply(element, compiler, **kw):
         'T': 10**12,  #tera/trillion
         'P': 10**15,  #peta
         'E': 10**18,  #exa
-        'Z': 10**21,  #zetta
-        'Y': 10**24,  #yotta
+
+        # JSON can't encode integers larger than 64-bits, so we caN't send queries between machines with this many zeroes
+        # 'Z': 10**21,  #zetta
+        # 'Y': 10**24,  #yotta
     }
 
     arg, = list(element.clauses)
