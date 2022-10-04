@@ -265,14 +265,14 @@ def compile_sql_metric_multiply(element, compiler, **kw):
 
     arg, = list(element.clauses)
 
-    exp = func.trim(arg)
+    exp = func.trim(func.cast(arg, sqlalchemy.Text))
 
     def apply_multiplier(text, multiplier):
         # This takes the string, converts it to a numeric, applies the multiplier, then casts it back to string
         # Needs to get cast back as string in case it is nested inside the integerize or numericize operations
         return func.cast(
             _squash_to_numeric(text) * multiplier,
-            sqlalchemy.UnicodeText
+            sqlalchemy.Text
         )
 
     exp = sqlalchemy.case(*[
