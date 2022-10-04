@@ -27,19 +27,19 @@ class elapsed_seconds(FunctionElement):
 @compiles(elapsed_seconds)
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(end_date), compiler.process(start_date))
+    return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
 
 @compiles(elapsed_seconds, 'hana')
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(start_date), compiler.process(end_date))
+    return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
 
 @compiles(elapsed_seconds, 'mssql')
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(start_date), compiler.process(end_date))
+    return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
 
 class avg(ReturnTypeFromArgs):
@@ -231,6 +231,12 @@ def _squash_to_numeric(text):
         sqlalchemy.Numeric
     )
 
+def _squash_if_text(arg):
+    if isinstance(arg.type, sqlalchemy.Text):
+        return _squash_to_numeric(arg)
+
+    return arg
+
 
 class sql_metric_multiply(GenericFunction):
     name = 'metric_multiply'
@@ -288,7 +294,6 @@ def compile_sql_numericize(element, compiler, **kw):
 
     def sql_only_numeric(text):
         # Returns substring of numeric values only (-, ., numbers, scientific notation)
-        # return func.nullif(func.substring(text, r'([+\-]?(\d\.?\d*[Ee][+\-]?\d+|(\d+\.\d*|\d*\.\d+)|\d+))'), '')
         cast_text = func.cast(text, sqlalchemy.Text)
         return func.coalesce(
             func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
@@ -336,15 +341,22 @@ class sql_left(GenericFunction):
 @compiles(sql_left)
 def compile_sql_left(element, compiler, **kw):
     # TODO: add docstring. Figure out what this does.
+    # seems to find a substring from 1 to count. I'm not sure why or what that's used for.
+
     # Postgres supports negative numbers, while this doesn't.
     # This MIGHT be an issue in the future, but for now, this works
     # well enough.
-    args = list(element.clauses)
+    text, count, = list(element.clauses)
 
-    return compiler.process(
-        sqlalchemy.cast(func.substring(args[0], 1, args[1]), sqlalchemy.Text),
-        **kw
-    )
+    def sql_left(text, count):
+        cast_text = func.cast(text, sqlalchemy.Text)
+        cast_count = func.cast(count, sqlalchemy.Integer)
+        return sqlalchemy.cast(
+            func.substring(cast_text, 1, cast_count),
+            sqlalchemy.Text,
+        )
+
+    return compiler.process(sql_left(text, count), **kw)
 
 
 class safe_to_date(GenericFunction):
@@ -362,7 +374,7 @@ def compile_safe_to_date(element, compiler, **kw):
     # PJM Can we use func.nullif(text) instead??
     # return "CASE WHEN (%s = '') THEN NULL ELSE %s END" % (compiler.process(text), compiler.visit_function(element))
 
-    return f"""to_date({compiler.process(func.nullif(func.trim(text), ''), **kw)}, {compiler.process(date_format)})"""
+    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
 
 class sql_only_ascii(GenericFunction):
@@ -374,7 +386,7 @@ def compile_sql_only_ascii(element, compiler, **kw):
     # Remove non-ascii characters
     args = list(element.clauses)
     return compiler.process(
-        func.regexp_replace(args[0], r'[^[:ascii:]]+', '', 'g'),
+        func.regexp_replace(func.cast(args[0], sqlalchemy.Text), r'[^[:ascii:]]+', '', 'g'),
         **kw
     )
 
@@ -385,15 +397,15 @@ class sql_set_null(GenericFunction):
 
 @compiles(sql_set_null)
 def compile_sql_set_null(element, compiler, **kw):
-    args = list(element.clauses)
-    val = args.pop(0)
-    # Turn args into null
+    val, *null_values = list(element.clauses)
+
+    # Turn val into null if it's in null_values
     return compiler.process(
         sqlalchemy.case(*[
-            (val == arg, None)
-            for arg in args
+            (val == nv, None)
+            for nv in null_values
         ], else_=val),
-        **kw
+        **kw,
     )
 
 
@@ -406,6 +418,8 @@ def compile_safe_divide(element, compiler, **kw):
     """Divides numerator by denominator, returning NULL if the denominator is 0.
     """
     numerator, denominator, divide_by_zero_value = list(element.clauses)
+    numerator = _squash_if_text(numerator)
+    denominator = _squash_if_text(denominator)
 
     basic_safe_divide = numerator / func.nullif(denominator, 0)
     # NOTE: in SQL, x/NULL = NULL, for all x.
