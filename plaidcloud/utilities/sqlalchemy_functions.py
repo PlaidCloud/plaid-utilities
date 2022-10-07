@@ -379,6 +379,24 @@ def compile_safe_to_date(element, compiler, **kw):
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
 
+class safe_round(GenericFunction):
+    name = 'round'
+
+@compiles(safe_round)
+def compile_safe_round(element, compiler, **kw):
+    # This exists to cast text to numeric prior to rounding
+
+    number, digits, *args = list(element.clauses)
+    number = _squash_if_text(number)
+    digits = _squash_if_text(digits)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"round({compiler.process(number)}, {compiler.process(digits), compiled_args})"
+
+    return f"round({compiler.process(number)}, {compiler.process(digits)})"
+
+
 class sql_only_ascii(GenericFunction):
     name = 'ascii'
 
