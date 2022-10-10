@@ -21,20 +21,15 @@ class elapsed_seconds(FunctionElement):
     type = Numeric()
     name = 'elapsed_seconds'
 
-
-# @compiles(elapsed_seconds, 'postgresql')
-# @compiles(elapsed_seconds, 'greenplum')
 @compiles(elapsed_seconds)
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
-
 @compiles(elapsed_seconds, 'hana')
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
-
 
 @compiles(elapsed_seconds, 'mssql')
 def compile(element, compiler, **kw):
@@ -45,11 +40,9 @@ def compile(element, compiler, **kw):
 class avg(ReturnTypeFromArgs):
     pass
 
-
 @compiles(avg)
 def compile(element, compiler, **kw):
     return compiler.visit_function(element)
-
 
 @compiles(avg, 'hana')
 def compile(element, compiler, **kw):
@@ -58,7 +51,6 @@ def compile(element, compiler, **kw):
         return 'avg(cast({} AS BIGINT))'.format(compiler.process(element.clauses))
     else:
         return compiler.visit_function(element)
-
 
 @compiles(sum, 'hana')
 def compile(element, compiler, **kwargs):
@@ -72,11 +64,9 @@ def compile(element, compiler, **kwargs):
 class variance(ReturnTypeFromArgs):
     pass
 
-
 @compiles(variance)
 def compile(element, compiler, **kw):
     return compiler.visit_function(element)
-
 
 @compiles(variance, 'hana')
 def compile(element, compiler, **kw):
@@ -105,7 +95,6 @@ class custom_values(FromClause):
     @property
     def _from_objects(self):
         return [self]
-
 
 @compiles(custom_values)
 def compile_custom_values(element, compiler, asfrom=False, **kw):
@@ -137,12 +126,6 @@ def compile_custom_values(element, compiler, asfrom=False, **kw):
 class import_col(GenericFunction):
     name = 'import_col'
 
-
-# @compiles(import_col)
-# def compile_import_col(element, compiler, **kw):
-#     col, cast_expr, null_expr = list(element.clauses)
-#     return compiler.process(case((func.regexp_replace(col, '\s*', '') == '', null_expr), else_=cast_expr), **kw)
-
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
@@ -161,7 +144,6 @@ def compile_import_col(element, compiler, **kw):
 
 class import_cast(GenericFunction):
     name = 'import_cast'
-
 
 @compiles(import_cast)
 def compile_import_cast(element, compiler, **kw):
@@ -187,7 +169,6 @@ def compile_import_cast(element, compiler, **kw):
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
-
 
 @compiles(import_cast, 'hana')
 def compile_import_cast_hana(element, compiler, **kw):
@@ -231,16 +212,9 @@ def _squash_to_numeric(text):
         sqlalchemy.Numeric
     )
 
-def _squash_if_text(arg):
-    if isinstance(arg.type, sqlalchemy.Text):
-        return _squash_to_numeric(arg)
-
-    return arg
-
 
 class sql_metric_multiply(GenericFunction):
     name = 'metric_multiply'
-
 
 @compiles(sql_metric_multiply)
 def compile_sql_metric_multiply(element, compiler, **kw):
@@ -286,7 +260,6 @@ def compile_sql_metric_multiply(element, compiler, **kw):
 class sql_numericize(GenericFunction):
     name = 'numericize'
 
-
 @compiles(sql_numericize)
 def compile_sql_numericize(element, compiler, **kw):
     """
@@ -311,7 +284,6 @@ def compile_sql_numericize(element, compiler, **kw):
 class sql_integerize_round(GenericFunction):
     name = 'integerize_round'
 
-
 @compiles(sql_integerize_round)
 def compile_sql_integerize_round(element, compiler, **kw):
     """
@@ -325,7 +297,6 @@ def compile_sql_integerize_round(element, compiler, **kw):
 class sql_integerize_truncate(GenericFunction):
     name = 'integerize_truncate'
 
-
 @compiles(sql_integerize_truncate)
 def compile_sql_integerize_truncate(element, compiler, **kw):
     """
@@ -338,7 +309,6 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
 
 class sql_left(GenericFunction):
     name = 'left'
-
 
 @compiles(sql_left)
 def compile_sql_left(element, compiler, **kw):
@@ -363,7 +333,6 @@ def compile_sql_left(element, compiler, **kw):
 
 class safe_to_date(GenericFunction):
     name = 'to_date'
-
 
 @compiles(safe_to_date)
 def compile_safe_to_date(element, compiler, **kw):
@@ -490,7 +459,6 @@ def compile_safe_lower(element, compiler, **kw):
 class sql_set_null(GenericFunction):
     name = 'null_values'
 
-
 @compiles(sql_set_null)
 def compile_sql_set_null(element, compiler, **kw):
     val, *null_values = list(element.clauses)
@@ -507,7 +475,6 @@ def compile_sql_set_null(element, compiler, **kw):
 
 class sql_safe_divide(GenericFunction):
     name = 'safe_divide'
-
 
 @compiles(sql_safe_divide)
 def compile_safe_divide(element, compiler, **kw):
