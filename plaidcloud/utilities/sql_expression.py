@@ -817,8 +817,9 @@ def import_data_query(
                 tc,
                 'expression',
                 tc.get('expression')
-                or f"""func.import_col(get_column(table, '{tc['source']}'), '{tc['dtype']}', '{date_format}', {trailing_negatives or False})""",
+                or f"""func.import_col(get_column(table, {repr(tc['source'])}), {repr(tc['dtype'])}, '{date_format}', {trailing_negatives or False})""",
             )
+
         def add_magic_column_source(tc):
             return assoc(
                 tc, 'source', MAGIC_COLUMN_MAPPING.get(tc['dtype'], tc.get('source'))
