@@ -387,16 +387,59 @@ def compile_safe_round(element, compiler, **kw):
     # This exists to cast text to numeric prior to rounding
 
     number, digits, *args = list(element.clauses)
-    # number = _squash_if_text(number)
-    # digits = _squash_if_text(digits)
     number = func.cast(number, sqlalchemy.Numeric)
     digits = func.cast(digits, sqlalchemy.Integer)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"round({compiler.process(number)}, {compiler.process(digits), compiled_args})"
+        return f"round({compiler.process(number)}, {compiler.process(digits)}, {compiled_args})"
 
     return f"round({compiler.process(number)}, {compiler.process(digits)})"
+
+
+class safe_ltrim(GenericFunction):
+    name = 'ltrim'
+
+@compiles(safe_ltrim)
+def compile_safe_ltrim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"ltrim({compiler.process(text)}, {compiled_args})"
+
+    return f"ltrim({compiler.process(text)})"
+
+
+class safe_rtrim(GenericFunction):
+    name = 'rtrim'
+
+@compiles(safe_rtrim)
+def compile_safe_rtrim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"rtrim({compiler.process(text)}, {compiled_args})"
+
+    return f"rtrim({compiler.process(text)})"
+
+
+class safe_trim(GenericFunction):
+    name = 'trim'
+
+@compiles(safe_trim)
+def compile_safe_trim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"trim({compiler.process(text)}, {compiled_args})"
+
+    return f"trim({compiler.process(text)})"
 
 
 class sql_only_ascii(GenericFunction):
@@ -440,8 +483,8 @@ def compile_safe_divide(element, compiler, **kw):
     """Divides numerator by denominator, returning NULL if the denominator is 0.
     """
     numerator, denominator, divide_by_zero_value = list(element.clauses)
-    numerator = _squash_if_text(numerator)
-    denominator = _squash_if_text(denominator)
+    numerator = func.cast(number, sqlalchemy.Numeric)
+    denominator = func.cast(digits, sqlalchemy.Integer)
 
     basic_safe_divide = numerator / func.nullif(denominator, 0)
     # NOTE: in SQL, x/NULL = NULL, for all x.
