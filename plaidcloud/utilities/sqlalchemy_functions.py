@@ -209,7 +209,7 @@ class safe_to_timestamp(GenericFunction):
 @compiles(safe_to_timestamp)
 def compile_safe_to_timestamp(element, compiler, **kw):
     text, *args = list(element.clauses)
-    text = func.to_nvarchar(text)
+    text = func.cast(text, sqlalchemy.Text)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
