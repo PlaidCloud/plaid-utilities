@@ -203,6 +203,21 @@ def compile_import_cast_hana(element, compiler, **kw):
         return compiler.process(func.to_decimal(func.to_nvarchar(col), 34, 10))
 
 
+class safe_to_timestamp(GenericFunction):
+    name = 'to_timestamp'
+
+@compiles(safe_to_timestamp)
+def compile_safe_to_timestamp(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.to_nvarchar(text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"to_timestamp({text}, {compiled_args})"
+
+    return f"to_timestamp({text})"
+
+
 def _squash_to_numeric(text):
     return func.cast(
         func.nullif(
