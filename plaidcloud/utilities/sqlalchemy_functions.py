@@ -387,8 +387,10 @@ def compile_safe_round(element, compiler, **kw):
     # This exists to cast text to numeric prior to rounding
 
     number, digits, *args = list(element.clauses)
-    number = _squash_if_text(number)
-    digits = _squash_if_text(digits)
+    # number = _squash_if_text(number)
+    # digits = _squash_if_text(digits)
+    number = cast(number, sqlalchemy.Numeric)
+    digits = cast(digits, sqlalchemy.Integer)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
