@@ -445,15 +445,46 @@ def compile_safe_trim(element, compiler, **kw):
 class sql_only_ascii(GenericFunction):
     name = 'ascii'
 
-
 @compiles(sql_only_ascii)
 def compile_sql_only_ascii(element, compiler, **kw):
     # Remove non-ascii characters
-    args = list(element.clauses)
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
     return compiler.process(
-        func.regexp_replace(func.cast(args[0], sqlalchemy.Text), r'[^[:ascii:]]+', '', 'g'),
+        func.regexp_replace(text, r'[^[:ascii:]]+', '', 'g'),
         **kw
     )
+
+
+class safe_upper(GenericFunction):
+    name = 'upper'
+
+@compiles(safe_upper)
+def compile_safe_upper(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"upper({compiler.process(text)}, {compiled_args})"
+
+    return f"upper({compiler.process(text)})"
+
+
+class safe_lower(GenericFunction):
+    name = 'lower'
+
+@compiles(safe_lower)
+def compile_safe_lower(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"lower({compiler.process(text)}, {compiled_args})"
+
+    return f"lower({compiler.process(text)})"
 
 
 class sql_set_null(GenericFunction):
