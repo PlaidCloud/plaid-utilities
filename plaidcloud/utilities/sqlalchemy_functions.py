@@ -252,7 +252,7 @@ def compile_safe_extract(element, compiler, **kw):
     field, text, *args = list(element.clauses)
 
     field = func.cast(field, sqlalchemy.Text)
-    text = func.cast(field, sqlalchemy.Text)
+    text = func.cast(text, sqlalchemy.Text)
 
     return compiler.process(sqlalchemy.sql.expression.extract(field, text, *args))
 
