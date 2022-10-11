@@ -233,7 +233,7 @@ class safe_to_char(GenericFunction):
 def compile_safe_to_char(element, compiler, **kw):
     timestamp, format, *args = list(element.clauses)
 
-    timestamp = func.cast(timestamp, sqlalchemy.Timestamp)
+    timestamp = func.cast(timestamp, sqlalchemy.DateTime)
     format = func.cast(format, sqlalchemy.Text)
 
     if args:
