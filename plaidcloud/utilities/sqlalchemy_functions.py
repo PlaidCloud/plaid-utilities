@@ -226,6 +226,23 @@ def compile_safe_to_timestamp(element, compiler, **kw):
     return f"to_timestamp({text}, {date_format})"
 
 
+class safe_to_char(GenericFunction):
+    name = 'to_char'
+
+@compiles(safe_to_char)
+def compile_safe_to_char(element, compiler, **kw):
+    number, format, *args = list(element.clauses)
+
+    number = func.cast(number, sqlalchemy.Numeric)
+    format = func.cast(format, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"to_char({number}, {format}, {compiled_args})"
+
+    return f"to_char({number}, {format})"
+
+
 def _squash_to_numeric(text):
     return func.cast(
         func.nullif(
