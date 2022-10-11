@@ -231,16 +231,16 @@ class safe_to_char(GenericFunction):
 
 @compiles(safe_to_char)
 def compile_safe_to_char(element, compiler, **kw):
-    number, format, *args = list(element.clauses)
+    interval, format, *args = list(element.clauses)
 
-    number = func.cast(number, sqlalchemy.Numeric)
+    interval = func.cast(interval, sqlalchemy.Interval)
     format = func.cast(format, sqlalchemy.Text)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"to_char({compiler.process(number)}, {compiler.process(format)}, {compiled_args})"
+        return f"to_char({compiler.process(interval)}, {compiler.process(format)}, {compiled_args})"
 
-    return f"to_char({compiler.process(number)}, {compiler.process(format)})"
+    return f"to_char({compiler.process(interval)}, {compiler.process(format)})"
 
 
 def _squash_to_numeric(text):
