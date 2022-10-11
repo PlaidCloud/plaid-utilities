@@ -221,9 +221,9 @@ def compile_safe_to_timestamp(element, compiler, **kw):
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"to_timestamp({text}, {date_format}, {compiled_args})"
+        return f"to_timestamp({compiler.process(text)}, {compiler.process(date_format)}, {compiled_args})"
 
-    return f"to_timestamp({text}, {date_format})"
+    return f"to_timestamp({compiler.process(text)}, {compiler.process(date_format)})"
 
 
 class safe_to_char(GenericFunction):
@@ -238,9 +238,9 @@ def compile_safe_to_char(element, compiler, **kw):
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"to_char({number}, {format}, {compiled_args})"
+        return f"to_char({compiler.process(number)}, {compiler.process(format)}, {compiled_args})"
 
-    return f"to_char({number}, {format})"
+    return f"to_char({compiler.process(number)}, {compiler.process(format)})"
 
 
 def _squash_to_numeric(text):
