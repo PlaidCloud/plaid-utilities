@@ -212,6 +212,7 @@ def compile_safe_to_timestamp(element, compiler, **kw):
     if len(full_args) == 1:
         date_format = 'HH24:MI:SS'
         text = full_args[0]
+        args = []
     else:
         text, date_format, *args = full_args
 
