@@ -252,7 +252,7 @@ def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
     # field = func.cast(field, sqlalchemy.Text)
-    # field = field.effective_value
+    field = field.effective_value
     # text = func.cast(text, sqlalchemy.DateTime)
     if not isinstance(timestamp.type, sqlalchemy.DateTime):
         timestamp = func.to_timestamp(timestamp)
