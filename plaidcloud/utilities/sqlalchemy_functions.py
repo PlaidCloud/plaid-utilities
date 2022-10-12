@@ -252,9 +252,10 @@ def compile_safe_extract(element, compiler, **kw):
     field, text, *args = list(element.clauses)
 
     # field = func.cast(field, sqlalchemy.Text)
+    field = field.effective_value
     text = func.cast(text, sqlalchemy.Text)
 
-    return compiler.process(sqlalchemy.sql.expression.extract(compiler.process(field), text, *args))
+    return compiler.process(sqlalchemy.sql.expression.extract(field, text, *args))
 
 
 def _squash_to_numeric(text):
