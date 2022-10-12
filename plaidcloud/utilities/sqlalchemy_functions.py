@@ -251,9 +251,7 @@ class safe_extract(GenericFunction):
 def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
-    # field = func.cast(field, sqlalchemy.Text)
     field = field.effective_value
-    # text = func.cast(text, sqlalchemy.DateTime)
     if not isinstance(timestamp.type, sqlalchemy.DateTime):
         timestamp = func.to_timestamp(timestamp)
 
@@ -398,9 +396,6 @@ def compile_safe_to_date(element, compiler, **kw):
     #
     # See ALYZ-2428
     text, date_format = list(element.clauses)
-
-    # PJM Can we use func.nullif(text) instead??
-    # return "CASE WHEN (%s = '') THEN NULL ELSE %s END" % (compiler.process(text), compiler.visit_function(element))
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
