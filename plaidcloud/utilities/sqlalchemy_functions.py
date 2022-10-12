@@ -251,10 +251,10 @@ class safe_extract(GenericFunction):
 def compile_safe_extract(element, compiler, **kw):
     field, text, *args = list(element.clauses)
 
-    field = func.cast(field, sqlalchemy.Text)
+    # field = func.cast(field, sqlalchemy.Text)
     text = func.cast(text, sqlalchemy.Text)
 
-    return compiler.process(sqlalchemy.sql.expression.extract(compiler.process(field), compiler.process(text), *args))
+    return compiler.process(sqlalchemy.sql.expression.extract(field, text, *args))
 
 
 def _squash_to_numeric(text):
