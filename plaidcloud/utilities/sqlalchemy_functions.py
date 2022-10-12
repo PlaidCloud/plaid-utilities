@@ -233,7 +233,7 @@ class safe_to_char(GenericFunction):
 def compile_safe_to_char(element, compiler, **kw):
     timestamp, format, *args = list(element.clauses)
 
-    if not isinstance(element.type, sqlalchemy.DateTime):
+    if not isinstance(timestamp.type, sqlalchemy.DateTime):
         timestamp = func.to_timestamp(timestamp)
     format = func.cast(format, sqlalchemy.Text)
 
@@ -249,13 +249,15 @@ class safe_extract(GenericFunction):
 
 @compiles(safe_extract)
 def compile_safe_extract(element, compiler, **kw):
-    field, text, *args = list(element.clauses)
+    field, timestamp, *args = list(element.clauses)
 
     # field = func.cast(field, sqlalchemy.Text)
     field = field.effective_value
-    text = func.cast(text, sqlalchemy.DateTime)
+    # text = func.cast(text, sqlalchemy.DateTime)
+    if not isinstance(timestamp.type, sqlalchemy.DateTime):
+        timestamp = func.to_timestamp(timestamp)
 
-    return compiler.process(sqlalchemy.sql.expression.extract(field, text, *args))
+    return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
 
 
 def _squash_to_numeric(text):
