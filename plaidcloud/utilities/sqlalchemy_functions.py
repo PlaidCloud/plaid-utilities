@@ -1,7 +1,6 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
-from __future__ import absolute_import
 from functools import reduce
 
 import sqlalchemy
@@ -22,35 +21,28 @@ class elapsed_seconds(FunctionElement):
     type = Numeric()
     name = 'elapsed_seconds'
 
-
-# @compiles(elapsed_seconds, 'postgresql')
-# @compiles(elapsed_seconds, 'greenplum')
 @compiles(elapsed_seconds)
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(end_date), compiler.process(start_date))
-
+    return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
 @compiles(elapsed_seconds, 'hana')
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(start_date), compiler.process(end_date))
-
+    return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
 @compiles(elapsed_seconds, 'mssql')
 def compile(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
-    return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(start_date), compiler.process(end_date))
+    return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
 
 class avg(ReturnTypeFromArgs):
     pass
 
-
 @compiles(avg)
 def compile(element, compiler, **kw):
     return compiler.visit_function(element)
-
 
 @compiles(avg, 'hana')
 def compile(element, compiler, **kw):
@@ -59,7 +51,6 @@ def compile(element, compiler, **kw):
         return 'avg(cast({} AS BIGINT))'.format(compiler.process(element.clauses))
     else:
         return compiler.visit_function(element)
-
 
 @compiles(sum, 'hana')
 def compile(element, compiler, **kwargs):
@@ -73,11 +64,9 @@ def compile(element, compiler, **kwargs):
 class variance(ReturnTypeFromArgs):
     pass
 
-
 @compiles(variance)
 def compile(element, compiler, **kw):
     return compiler.visit_function(element)
-
 
 @compiles(variance, 'hana')
 def compile(element, compiler, **kw):
@@ -106,7 +95,6 @@ class custom_values(FromClause):
     @property
     def _from_objects(self):
         return [self]
-
 
 @compiles(custom_values)
 def compile_custom_values(element, compiler, asfrom=False, **kw):
@@ -138,12 +126,6 @@ def compile_custom_values(element, compiler, asfrom=False, **kw):
 class import_col(GenericFunction):
     name = 'import_col'
 
-
-# @compiles(import_col)
-# def compile_import_col(element, compiler, **kw):
-#     col, cast_expr, null_expr = list(element.clauses)
-#     return compiler.process(case((func.regexp_replace(col, '\s*', '') == '', null_expr), else_=cast_expr), **kw)
-
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
@@ -162,7 +144,6 @@ def compile_import_col(element, compiler, **kw):
 
 class import_cast(GenericFunction):
     name = 'import_cast'
-
 
 @compiles(import_cast)
 def compile_import_cast(element, compiler, **kw):
@@ -188,7 +169,6 @@ def compile_import_cast(element, compiler, **kw):
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
-
 
 @compiles(import_cast, 'hana')
 def compile_import_cast_hana(element, compiler, **kw):
@@ -223,6 +203,61 @@ def compile_import_cast_hana(element, compiler, **kw):
         return compiler.process(func.to_decimal(func.to_nvarchar(col), 34, 10))
 
 
+class safe_to_timestamp(GenericFunction):
+    name = 'to_timestamp'
+
+@compiles(safe_to_timestamp)
+def compile_safe_to_timestamp(element, compiler, **kw):
+    full_args = list(element.clauses)
+    if len(full_args) == 1:
+        date_format = 'HH24:MI:SS'
+        text = full_args[0]
+        args = []
+    else:
+        text, date_format, *args = full_args
+
+    text = func.cast(text, sqlalchemy.Text)
+    date_format = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"to_timestamp({compiler.process(text)}, {compiler.process(date_format)}, {compiled_args})"
+
+    return f"to_timestamp({compiler.process(text)}, {compiler.process(date_format)})"
+
+
+class safe_to_char(GenericFunction):
+    name = 'to_char'
+
+@compiles(safe_to_char)
+def compile_safe_to_char(element, compiler, **kw):
+    timestamp, format, *args = list(element.clauses)
+
+    if not isinstance(timestamp.type, sqlalchemy.DateTime):
+        timestamp = func.to_timestamp(timestamp)
+    format = func.cast(format, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"to_char({compiler.process(timestamp)}, {compiler.process(format)}, {compiled_args})"
+
+    return f"to_char({compiler.process(timestamp)}, {compiler.process(format)})"
+
+
+class safe_extract(GenericFunction):
+    name = 'extract'
+
+@compiles(safe_extract)
+def compile_safe_extract(element, compiler, **kw):
+    field, timestamp, *args = list(element.clauses)
+
+    field = field.effective_value
+    if not isinstance(timestamp.type, sqlalchemy.DateTime):
+        timestamp = func.to_timestamp(timestamp)
+
+    return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
+
+
 def _squash_to_numeric(text):
     return func.cast(
         func.nullif(
@@ -235,7 +270,6 @@ def _squash_to_numeric(text):
 
 class sql_metric_multiply(GenericFunction):
     name = 'metric_multiply'
-
 
 @compiles(sql_metric_multiply)
 def compile_sql_metric_multiply(element, compiler, **kw):
@@ -252,20 +286,22 @@ def compile_sql_metric_multiply(element, compiler, **kw):
         'T': 10**12,  #tera/trillion
         'P': 10**15,  #peta
         'E': 10**18,  #exa
-        'Z': 10**21,  #zetta
-        'Y': 10**24,  #yotta
+
+        # JSON can't encode integers larger than 64-bits, so we caN't send queries between machines with this many zeroes
+        # 'Z': 10**21,  #zetta
+        # 'Y': 10**24,  #yotta
     }
 
     arg, = list(element.clauses)
 
-    exp = func.trim(arg)
+    exp = func.trim(func.cast(arg, sqlalchemy.Text))
 
     def apply_multiplier(text, multiplier):
         # This takes the string, converts it to a numeric, applies the multiplier, then casts it back to string
         # Needs to get cast back as string in case it is nested inside the integerize or numericize operations
         return func.cast(
             _squash_to_numeric(text) * multiplier,
-            sqlalchemy.UnicodeText
+            sqlalchemy.Text
         )
 
     exp = sqlalchemy.case(*[
@@ -279,7 +315,6 @@ def compile_sql_metric_multiply(element, compiler, **kw):
 class sql_numericize(GenericFunction):
     name = 'numericize'
 
-
 @compiles(sql_numericize)
 def compile_sql_numericize(element, compiler, **kw):
     """
@@ -289,11 +324,11 @@ def compile_sql_numericize(element, compiler, **kw):
 
     def sql_only_numeric(text):
         # Returns substring of numeric values only (-, ., numbers, scientific notation)
-        # return func.nullif(func.substring(text, r'([+\-]?(\d\.?\d*[Ee][+\-]?\d+|(\d+\.\d*|\d*\.\d+)|\d+))'), '')
+        cast_text = func.cast(text, sqlalchemy.Text)
         return func.coalesce(
-            func.substring(text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
             func.nullif(
-                func.regexp_replace(text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
+                func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
                 ''
             )
         )
@@ -303,7 +338,6 @@ def compile_sql_numericize(element, compiler, **kw):
 
 class sql_integerize_round(GenericFunction):
     name = 'integerize_round'
-
 
 @compiles(sql_integerize_round)
 def compile_sql_integerize_round(element, compiler, **kw):
@@ -318,7 +352,6 @@ def compile_sql_integerize_round(element, compiler, **kw):
 class sql_integerize_truncate(GenericFunction):
     name = 'integerize_truncate'
 
-
 @compiles(sql_integerize_truncate)
 def compile_sql_integerize_truncate(element, compiler, **kw):
     """
@@ -332,24 +365,29 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
 class sql_left(GenericFunction):
     name = 'left'
 
-
 @compiles(sql_left)
 def compile_sql_left(element, compiler, **kw):
     # TODO: add docstring. Figure out what this does.
+    # seems to find a substring from 1 to count. I'm not sure why or what that's used for.
+
     # Postgres supports negative numbers, while this doesn't.
     # This MIGHT be an issue in the future, but for now, this works
     # well enough.
-    args = list(element.clauses)
+    text, count, = list(element.clauses)
 
-    return compiler.process(
-        sqlalchemy.cast(func.substring(args[0], 1, args[1]), sqlalchemy.Text),
-        **kw
-    )
+    def sql_left(text, count):
+        cast_text = func.cast(text, sqlalchemy.Text)
+        cast_count = func.cast(count, sqlalchemy.Integer)
+        return sqlalchemy.cast(
+            func.substring(cast_text, 1, cast_count),
+            sqlalchemy.Text,
+        )
+
+    return compiler.process(sql_left(text, count), **kw)
 
 
 class safe_to_date(GenericFunction):
     name = 'to_date'
-
 
 @compiles(safe_to_date)
 def compile_safe_to_date(element, compiler, **kw):
@@ -359,53 +397,144 @@ def compile_safe_to_date(element, compiler, **kw):
     # See ALYZ-2428
     text, date_format = list(element.clauses)
 
-    # PJM Can we use func.nullif(text) instead??
-    # return "CASE WHEN (%s = '') THEN NULL ELSE %s END" % (compiler.process(text), compiler.visit_function(element))
+    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
-    return f"""to_date({compiler.process(func.nullif(func.trim(text), ''), **kw)}, {compiler.process(date_format)})"""
+
+class safe_round(GenericFunction):
+    name = 'round'
+
+@compiles(safe_round)
+def compile_safe_round(element, compiler, **kw):
+    # This exists to cast text to numeric prior to rounding
+
+    number, digits, *args = list(element.clauses)
+    number = func.cast(number, sqlalchemy.Numeric)
+    digits = func.cast(digits, sqlalchemy.Integer)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"round({compiler.process(number)}, {compiler.process(digits)}, {compiled_args})"
+
+    return f"round({compiler.process(number)}, {compiler.process(digits)})"
+
+
+class safe_ltrim(GenericFunction):
+    name = 'ltrim'
+
+@compiles(safe_ltrim)
+def compile_safe_ltrim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"ltrim({compiler.process(text)}, {compiled_args})"
+
+    return f"ltrim({compiler.process(text)})"
+
+
+class safe_rtrim(GenericFunction):
+    name = 'rtrim'
+
+@compiles(safe_rtrim)
+def compile_safe_rtrim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"rtrim({compiler.process(text)}, {compiled_args})"
+
+    return f"rtrim({compiler.process(text)})"
+
+
+class safe_trim(GenericFunction):
+    name = 'trim'
+
+@compiles(safe_trim)
+def compile_safe_trim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"trim({compiler.process(text)}, {compiled_args})"
+
+    return f"trim({compiler.process(text)})"
 
 
 class sql_only_ascii(GenericFunction):
     name = 'ascii'
 
-
 @compiles(sql_only_ascii)
 def compile_sql_only_ascii(element, compiler, **kw):
     # Remove non-ascii characters
-    args = list(element.clauses)
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
     return compiler.process(
-        func.regexp_replace(args[0], r'[^[:ascii:]]+', '', 'g'),
+        func.regexp_replace(text, r'[^[:ascii:]]+', '', 'g'),
         **kw
     )
+
+
+class safe_upper(GenericFunction):
+    name = 'upper'
+
+@compiles(safe_upper)
+def compile_safe_upper(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"upper({compiler.process(text)}, {compiled_args})"
+
+    return f"upper({compiler.process(text)})"
+
+
+class safe_lower(GenericFunction):
+    name = 'lower'
+
+@compiles(safe_lower)
+def compile_safe_lower(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"lower({compiler.process(text)}, {compiled_args})"
+
+    return f"lower({compiler.process(text)})"
 
 
 class sql_set_null(GenericFunction):
     name = 'null_values'
 
-
 @compiles(sql_set_null)
 def compile_sql_set_null(element, compiler, **kw):
-    args = list(element.clauses)
-    val = args.pop(0)
-    # Turn args into null
+    val, *null_values = list(element.clauses)
+
+    # Turn val into null if it's in null_values
     return compiler.process(
         sqlalchemy.case(*[
-            (val == arg, None)
-            for arg in args
+            (val == nv, None)
+            for nv in null_values
         ], else_=val),
-        **kw
+        **kw,
     )
 
 
 class sql_safe_divide(GenericFunction):
     name = 'safe_divide'
 
-
 @compiles(sql_safe_divide)
 def compile_safe_divide(element, compiler, **kw):
     """Divides numerator by denominator, returning NULL if the denominator is 0.
     """
     numerator, denominator, divide_by_zero_value = list(element.clauses)
+    numerator = func.cast(numerator, sqlalchemy.Numeric)
+    denominator = func.cast(denominator, sqlalchemy.Integer)
 
     basic_safe_divide = numerator / func.nullif(denominator, 0)
     # NOTE: in SQL, x/NULL = NULL, for all x.
