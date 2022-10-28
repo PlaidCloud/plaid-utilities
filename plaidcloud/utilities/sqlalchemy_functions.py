@@ -410,6 +410,7 @@ def compile_safe_round(element, compiler, **kw):
     if len(all_args) == 1:
         number, = all_args
         digits = None
+        args = []
     else:
         number, digits, *args = list(element.clauses)
     number = func.cast(number, sqlalchemy.Numeric)
