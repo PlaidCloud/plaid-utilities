@@ -412,7 +412,8 @@ def compile_safe_round(element, compiler, **kw):
         digits = None
         args = []
     else:
-        number, digits, *args = list(element.clauses)
+        number, digits, *args = all_args
+
     number = func.cast(number, sqlalchemy.Numeric)
     if digits is not None:
         digits = func.cast(digits, sqlalchemy.Integer)
