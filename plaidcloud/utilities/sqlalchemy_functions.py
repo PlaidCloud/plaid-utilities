@@ -406,16 +406,31 @@ class safe_round(GenericFunction):
 @compiles(safe_round)
 def compile_safe_round(element, compiler, **kw):
     # This exists to cast text to numeric prior to rounding
+    all_args = list(element.clauses)
+    if len(all_args) == 1:
+        number, = all_args
+        digits = None
+        args = []
+    else:
+        number, digits, *args = all_args
 
-    number, digits, *args = list(element.clauses)
     number = func.cast(number, sqlalchemy.Numeric)
-    digits = func.cast(digits, sqlalchemy.Integer)
+    if digits is not None:
+        digits = func.cast(digits, sqlalchemy.Integer)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"round({compiler.process(number)}, {compiler.process(digits)}, {compiled_args})"
+    else:
+        compiled_args = None
 
-    return f"round({compiler.process(number)}, {compiler.process(digits)})"
+    if digits is not None:
+        compiled_digits = compiler.process(digits)
+    else:
+        compiled_digits = None
+
+    compiled_number = compiler.process(number)
+    all_compiled_args = ', '.join(arg for arg in [compiled_number, compiled_digits, compiled_args] if arg is not None)
+    return f"round({all_compiled_args})"
 
 
 class safe_ltrim(GenericFunction):
