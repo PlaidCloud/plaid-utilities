@@ -227,22 +227,23 @@ def compile_safe_to_timestamp(element, compiler, **kw):
     return f"to_timestamp({compiler.process(text)}, {compiler.process(date_format)})"
 
 
-class safe_to_char(GenericFunction):
-    name = 'to_char'
-
-@compiles(safe_to_char)
-def compile_safe_to_char(element, compiler, **kw):
-    timestamp, format, *args = list(element.clauses)
-
-    if not isinstance(timestamp.type, sqlalchemy.DateTime):
-        timestamp = func.to_timestamp(timestamp)
-    format = func.cast(format, sqlalchemy.Text)
-
-    if args:
-        compiled_args = ', '.join([compiler.process(arg) for arg in args])
-        return f"to_char({compiler.process(timestamp)}, {compiler.process(format)}, {compiled_args})"
-
-    return f"to_char({compiler.process(timestamp)}, {compiler.process(format)})"
+# Disabling safe_to_char - input can be date, integer, float, interval (not just date)
+# class safe_to_char(GenericFunction):
+#     name = 'to_char'
+#
+# @compiles(safe_to_char)
+# def compile_safe_to_char(element, compiler, **kw):
+#     timestamp, format, *args = list(element.clauses)
+#
+#     if not isinstance(timestamp.type, sqlalchemy.DateTime):
+#         timestamp = func.to_timestamp(timestamp)
+#     format = func.cast(format, sqlalchemy.Text)
+#
+#     if args:
+#         compiled_args = ', '.join([compiler.process(arg) for arg in args])
+#         return f"to_char({compiler.process(timestamp)}, {compiler.process(format)}, {compiled_args})"
+#
+#     return f"to_char({compiler.process(timestamp)}, {compiler.process(format)})"
 
 
 class safe_extract(GenericFunction):
