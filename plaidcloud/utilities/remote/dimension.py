@@ -4,15 +4,13 @@
 A highly optimized class for fast dimensional hierarchy operations
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+import os
 import uuid
 import pandas as pd
 import numpy as np
 
 __author__ = 'Dave Parsons'
-__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
 __credits__ = ['Dave Parsons']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Dave Parsons'
@@ -23,7 +21,7 @@ ROOT = '!!root!!'
 MAIN = 'main'
 DEFAULT = '!!default!!'
 VALID_CONSOL = ['~', '+', '-', '|', '&']
-
+USE_DATAFRAME_LOADING = os.environ.get("USE_DATAFRAME_LOADING", "true") == "true"
 
 def validate_uuid4(uuid_string):
     # Check validity of UUID V4 string
@@ -1517,6 +1515,20 @@ class Dimension:
         """
         self.dim.set_node_alias(project_id=self.project_id, name=self.name, node=node, alias=alias, value=value)
 
+    def set_node_aliases(self, node_alias_values):
+        """Sets multiple node aliases at once
+
+        Args:
+            node_alias_values (list): List of dicts containing
+                node (str): Unique hierarchy node identifier
+                alias (str): Alias type
+                value (str): Alias of node
+
+        Returns:
+            None
+        """
+        self.dim.set_node_aliases(project_id=self.project_id, name=self.name, node_alias_values=node_alias_values)
+
     def which_aliases(self, node):
         """which_aliases(node)
         Returns the aliases used by the specified node
@@ -1875,6 +1887,21 @@ class Dimension:
         """
         self.dim.set_node_value(project_id=self.project_id, name=self.name, node=node, value=value, number=number)
 
+    def set_node_values(self, node_value_values):
+        """Sets multiple node values at once
+
+        Args:
+            node_value_values (list): List of dicts containing
+                node (str): Unique hierarchy node identifier
+                value_name (str): Value name
+                value (float): Value to set for value name
+
+
+        Returns:
+            None
+        """
+        self.dim.set_node_values(project_id=self.project_id, name=self.name, node_value_values=node_value_values)
+
     def which_values(self, node):
         """which_values(node)
         Returns the values used by the specified node
@@ -1949,6 +1976,15 @@ class Dimension:
             default_hier = True
             load_hiers = [hierarchy]
 
+        if USE_DATAFRAME_LOADING:
+            json_df = self._encode_dataframe(df)
+            results_df = self.dim.load_hierarchy_from_dataframe(project_id=self.project_id, name=self.name, df=json_df,
+                                                                parents=parents, children=children,
+                                                                consolidations=consolidations,
+                                                                consol_default=consol_default, hierarchy=hierarchy)
+            return_df = self._decode_dataframe(results_df)
+            return return_df
+
         # Add/clear any necessary hierarchies
         for load_hier in load_hiers:
             if not self.is_hierarchy(load_hier) and load_hier != '':
@@ -1979,7 +2015,7 @@ class Dimension:
             node = {
                 'parent': row[parents] or ROOT,
                 'child': row[children],
-                'consol': row[consolidations] if not consol_default and row[consolidations] in VALID_CONSOL else default_consol,
+                'consol': row[consolidations] if not default_consol and row[consolidations] in VALID_CONSOL else consol_default,
                 'hierarchy': row[hierarchy] if not default_hier else hierarchy
             }
             # only send nodes with a hierarchy set (unless defaulted)
@@ -1996,14 +2032,17 @@ class Dimension:
             elif node['parent'] in node_sets[MAIN] and node['parent'] != ROOT and node['hierarchy'] != MAIN:
                 results.append(_get_result(node, False, -16, 'Alt hierarchy cannot modify Main nodes'))
             else:
-                parent_added, node_added, node_moved = self.add_node(
+                node_added = False
+                node_moved = False
+                parent_added = False
+                add_result = self.add_node(
                     parent=node['parent'],
                     child=node['child'],
                     consolidation=node['consol'],
                     hierarchy=node['hierarchy'],
-                    before=node['before'],
-                    after=node['after'],
                 )
+                if add_result:  # In case None is returned
+                    parent_added, node_added, node_moved = add_result
                 if node_added:
                     results.append(_get_result(node, True, 2, 'Child added'))
                 elif node_moved:
@@ -2050,6 +2089,12 @@ class Dimension:
 
         # Remove any duplicate rows, coping with lists
         df = df.loc[df.astype(str).drop_duplicates().index]
+
+        if USE_DATAFRAME_LOADING:
+            json_df = self._encode_dataframe(df)
+            return self.dim.load_aliases_from_dataframe(
+                project_id=self.project_id, name=self.name, df=json_df, nodes=nodes, names=names, values=values
+            )
 
         aliases = self.get_aliases()
         # Create any new aliases
@@ -2101,6 +2146,12 @@ class Dimension:
         # Remove any duplicate rows, coping with lists
         df = df.loc[df.astype(str).drop_duplicates().index]
 
+        if USE_DATAFRAME_LOADING:
+            json_df = self._encode_dataframe(df)
+            return self.dim.load_properties_from_dataframe(
+                project_id=self.project_id, name=self.name, df=json_df, nodes=nodes, names=names, values=values
+            )
+
         # Create any new properties
         properties = self.get_properties()
         for prop_name in np.unique(df[names]):
@@ -2150,6 +2201,12 @@ class Dimension:
 
         # Remove any duplicate rows, coping with lists
         df = df.loc[df.astype(str).drop_duplicates().index]
+
+        if USE_DATAFRAME_LOADING:
+            json_df = self._encode_dataframe(df)
+            return self.dim.load_values_from_dataframe(
+                project_id=self.project_id, name=self.name, df=json_df, nodes=nodes, names=names, values=values
+            )
 
         all_values = self.get_values()
         # Create any new values
