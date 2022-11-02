@@ -124,6 +124,7 @@ def compile_custom_values(element, compiler, asfrom=False, **kw):
 
 class import_col(GenericFunction):
     name = 'import_col'
+    inherit_cache = False
 
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
@@ -143,6 +144,7 @@ def compile_import_col(element, compiler, **kw):
 
 class import_cast(GenericFunction):
     name = 'import_cast'
+    inherit_cache = False
 
 @compiles(import_cast)
 def compile_import_cast(element, compiler, **kw):
