@@ -1,8 +1,6 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
-from functools import reduce
-
 import sqlalchemy
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
@@ -11,11 +9,12 @@ from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
 __author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
+
 
 class elapsed_seconds(FunctionElement):
     type = Numeric()
@@ -217,7 +216,7 @@ def compile_safe_to_timestamp(element, compiler, **kw):
         text, date_format, *args = full_args
 
     text = func.cast(text, sqlalchemy.Text)
-    date_format = func.cast(text, sqlalchemy.Text)
+    date_format = func.cast(date_format, sqlalchemy.Text)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
