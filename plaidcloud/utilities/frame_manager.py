@@ -2,11 +2,6 @@
 # coding=utf-8
 # vim: set filetype=python:
 
-
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-
 import os
 import posixpath
 import sys
@@ -14,6 +9,7 @@ import math
 import datetime
 import string
 from functools import wraps
+from io import BytesIO
 import traceback
 import xlrd3 as xlrd
 import openpyxl
@@ -23,8 +19,6 @@ from math import log10, floor
 from pandas.api.types import is_string_dtype
 import pandas as pd
 import numpy as np
-import six
-import six.moves
 import orjson as json
 
 
@@ -166,13 +160,13 @@ def save_typed_psv(df, outfile, sep='|', **kwargs):
     #the only issue is we have to make sure the header stays consistent.
 
     def cleaned(name):
-        return six.text_type(name).replace(CSV_TYPE_DELIMITER, '')
+        return str(name).replace(CSV_TYPE_DELIMITER, '')
 
     column_names = [cleaned(n) for n in list(df)]
     column_types = [sql_from_dtype(d) for d in df.dtypes]
     header = [
         CSV_TYPE_DELIMITER.join((name, sqltype))
-        for name, sqltype in six.moves.zip(column_names, column_types)
+        for name, sqltype in zip(column_names, column_types)
     ]
 
     df.to_csv(outfile, header=header, index=False, sep=sep)
@@ -194,7 +188,7 @@ def list_of_dicts_to_typed_psv(lod, outfile, types, fieldnames=None, sep='|'):
     """
 
     def cleaned(name):
-        return six.text_type(name).replace(CSV_TYPE_DELIMITER, '')
+        return str(name).replace(CSV_TYPE_DELIMITER, '')
 
     header = {
         name: CSV_TYPE_DELIMITER.join((cleaned(name), sqltype))
@@ -205,7 +199,7 @@ def list_of_dicts_to_typed_psv(lod, outfile, types, fieldnames=None, sep='|'):
         # Caller doesn't care about the order
         fieldnames = list(types.keys())
 
-    if isinstance(outfile, six.string_types):
+    if isinstance(outfile, str):
         buf = open(outfile, 'wb')
     else:
         buf = outfile
@@ -216,7 +210,7 @@ def list_of_dicts_to_typed_psv(lod, outfile, types, fieldnames=None, sep='|'):
         for row in lod:
             writer.writerow(row)
     finally:
-        if isinstance(outfile, six.string_types):
+        if isinstance(outfile, str):
             buf.close()
             #Otherwise leave it open, since this function didn't open it.
 
@@ -311,7 +305,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                     if isinstance(df, pd.DataFrame):
                         logger.debug("Downloaded {0}...".format(table_path))
                         break
-                elif isinstance(query, six.string_types):
+                elif isinstance(query, str):
                     # query object passed in.  execute it
                     try:
                         df = conn.get_dataframe_by_querystring(query)
@@ -559,7 +553,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
     #should probably pass as many of them as possible on to to_csv/read_ccsv -
     #the only issue is we have to make sure the header stays consistent.
 
-    if isinstance(infile, six.string_types):
+    if isinstance(infile, str):
         if os.path.exists(infile):
             buf = open(infile, 'rb')
         else:
@@ -569,7 +563,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
         buf = infile
 
     try:
-        headerIO = six.BytesIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
+        headerIO = BytesIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
         header = next(csv.reader(headerIO, delimiter=sep))  # Just parse that first line as a csv row
         names_and_types = [h.split(CSV_TYPE_DELIMITER) for h in header]
         column_names = [n[0] for n in names_and_types]
@@ -629,7 +623,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
         parse_dates = []
 
         if dtypes is not None:
-            for k, v in six.iteritems(dtypes):
+            for k, v in dtypes.items():
                 dtypes[k] = v.lower()
                 #Handle inbound dates
                 #https://stackoverflow.com/questions/21269399/datetime-dtypes-in-pandas-read-csv
@@ -641,12 +635,12 @@ def load_typed_psv(infile, sep='|', **kwargs):
             df = pd.read_csv(buf, header=None, names=column_names, dtype=dtypes, sep=sep, na_values=na_values, keep_default_na=False, parse_dates=parse_dates, encoding='utf-8')
         except ValueError:
             #remove dtypes if we have converters instead:
-            for k in six.iterkeys(converters):
+            for k in converters.keys():
                 if k in list(dtypes.keys()):
                     dtypes.pop(k, None)
             na_values.append('')
             buf = open(infile, 'rb')
-            headerIO = six.BytesIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
+            headerIO = BytesIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
             header = next(csv.reader(headerIO, delimiter=sep))  # Just parse that first line as a csv row
             df = pd.read_csv(buf, header=None, names=column_names, dtype=dtypes, sep=sep, na_values=na_values, keep_default_na=False, parse_dates=parse_dates, converters=converters, encoding='utf-8')
         finally:
@@ -664,7 +658,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
 
 
     finally:
-        if isinstance(infile, six.string_types):
+        if isinstance(infile, str):
             buf.close()
             #Otherwise leave it open, since this function didn't open it.
 
@@ -817,7 +811,7 @@ def clean_uuid(id):
     if id is None:
         return None
 
-    name = six.text_type(id).lower()
+    name = str(id).lower()
     valid_chars = '0123456789abcdef-'
     cleaned_id = u''.join(n for n in name if n in valid_chars)
     if '-' in cleaned_id:
@@ -858,7 +852,7 @@ def clean_filename(name):
         return None
 
     # everything's fine except /
-    return six.text_type(name).translate({'/': None})
+    return str(name).translate({'/': None})
 
 
 def describe(df):
@@ -1648,7 +1642,7 @@ def column_info(df):
     """
 
     column_info = []
-    for column_name, data_type in six.iteritems(df.dtypes):
+    for column_name, data_type in df.dtypes.items():
         temp = {'id': column_name, 'dtype': str(data_type)}
         column_info.append(temp)
 
@@ -1804,7 +1798,7 @@ def has_data(df):
     """
     row_max = 0
     try:
-        for k, v in six.iteritems(df.count()):
+        for k, v in df.count().items():
             row_max = max(row_max, int(v))
     except:
         pass
@@ -2218,9 +2212,9 @@ def summarize(df, group_by_columns, summarize_columns):
         `pandas.DataFrame`: The results of the summarize
     """
 
-    if isinstance(group_by_columns, six.string_types):
+    if isinstance(group_by_columns, str):
         group_by_columns = [group_by_columns]
-    if isinstance(summarize_columns, six.string_types):
+    if isinstance(summarize_columns, str):
         summarize_columns = [summarize_columns]
     all_cols = list(group_by_columns) + list(summarize_columns)
     try:
@@ -2234,7 +2228,7 @@ def summarize(df, group_by_columns, summarize_columns):
     # NaN values, so replace them with '' or 0 depending on the dtype. This
     # includes both the groupby columns and the aggregation columns.
     agg_map = {}
-    for col, col_dtype in six.iteritems(df.dtypes):
+    for col, col_dtype in df.dtypes.items():
         if col_dtype == np.dtype(object):
             df[col] = df[col].fillna('')
             if col in summarize_columns:
@@ -2596,7 +2590,7 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
                 #   Remove carriage returns
                 #   Force to string
                 wr.writerow([
-                    six.text_type(cell).strip().replace('\n', '').replace('\r', '')
+                    str(cell).strip().replace('\n', '').replace('\r', '')
                     for cell in row
                 ])
                 header_done = True
@@ -2624,7 +2618,7 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
 
                 wr.writerow([
                     # _get_value(cell)  # if values_only=False
-                    six.text_type(cell) if cell is not None else ''
+                    str(cell) if cell is not None else ''
                     for cell in row
                 ])
 

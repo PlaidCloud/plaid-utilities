@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-from __future__ import absolute_import
-import six
-
 __author__ = "Paul Morel"
 __copyright__ = "© Copyright 2009-2019, Tartan Solutions, Inc"
 __credits__ = ["Paul Morel"]
@@ -64,7 +61,7 @@ def colorToHex(color_input):
         '#330000'
     """
     result = ""
-    if isinstance(color_input, six.string_types):
+    if isinstance(color_input, str):
         if color_input[0:1] == "#":
             result = color_input.lower()
         elif color_input in friendly_names:
@@ -98,7 +95,7 @@ def processColor(color_input):
         (1.0, 1.0, 0.0)
     """
     result = ""
-    if isinstance(color_input, six.string_types):
+    if isinstance(color_input, str):
         if color_input[0:1] == "#":
             result = RGBToFloat(HTMLColorToRGB(color_input))
         if color_input.lower() in friendly_names:

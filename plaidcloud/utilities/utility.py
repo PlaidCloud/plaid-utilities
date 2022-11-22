@@ -2,7 +2,6 @@
 Model Utility
 Utility functions common repository for use by multiple model jobs.
 """
-from __future__ import absolute_import
 import datetime
 import errno
 import glob
@@ -12,7 +11,6 @@ import os
 import shutil
 import time
 import uuid
-import six
 
 from numpy import NaN
 import pandas as pd
@@ -342,8 +340,8 @@ def get_patterns_for_sync(paths_dict=None):
     def get_short_name(path):
         return os.path.normpath(path).rsplit(os.sep, 1)[-1] if path else ''
 
-    for key, value in six.iteritems(paths_dict):
-        if isinstance(value, six.string_types):
+    for key, value in paths_dict.items():
+        if isinstance(value, str):
             paths.append(get_short_name(value))
         elif isinstance(value, list):
             paths.extend(get_short_name(path) for path in value)
@@ -454,7 +452,7 @@ def iter_dataframes(data_source, pd_read_csv_kwargs={'sep': '|'}):
             the data in `data_source`
     """
 
-    if isinstance(data_source, six.string_types):
+    if isinstance(data_source, str):
         paths_or_buffers = glob.glob(data_source)
     else:
         paths_or_buffers = data_source

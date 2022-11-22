@@ -3,9 +3,6 @@
 
 """Data manipulation and cost allocation helpers."""
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import division
 import os
 import re
 import math
@@ -15,7 +12,6 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import numpy as np
 import texttable
-import six
 from IPython.core.display import HTML
 import functools
 
@@ -639,7 +635,7 @@ def to_xl(df_source,
         #         df[col] = str_df[col]
 
         def force_text(item):
-            return u"'{}".format(six.text_type(item))
+            return u"'{}".format(str(item))
 
         for col in df.columns:
             cur_type = df[col].dtype
@@ -943,7 +939,7 @@ def safe_divide(numerator, denominator, error_return_value=0):
         False
     """
     try:
-        if isinstance(numerator, six.integer_types) and isinstance(denominator, six.integer_types):
+        if isinstance(numerator, int) and isinstance(denominator, int):
             result = numerator//denominator
         else:
             result = numerator/denominator

@@ -2470,11 +2470,11 @@ class Dimension:
     # ==== DATAFRAME RPC METHODS  ======================================================================
     # --------------------------------------------------------------------------------------------------
     @staticmethod
-    def _decode_dataframe(json_df):
+    def _decode_dataframe(json_df) -> pd.DataFrame:
         return pd.read_json(json_df, orient='table', precise_float=True)
 
     @staticmethod
-    def _encode_dataframe(df):
+    def _encode_dataframe(df: pd.DataFrame):
         return df.to_json(orient='table', index=False)
 
     # --------------------------------------------------------------------------------------------------

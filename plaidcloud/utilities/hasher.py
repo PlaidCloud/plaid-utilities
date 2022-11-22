@@ -4,14 +4,10 @@
 Creates a unique SHA1 hash
 """
 
-from __future__ import absolute_import
 import hashlib
 import random
 import string
 import time
-from six import string_types, text_type, b
-from six.moves import xrange
-from six.moves import range
 
 __author__ = "Paul Morel"
 __copyright__ = "© Copyright 2010-2011, Tartan Solutions, Inc"
@@ -37,12 +33,12 @@ def get_random(prefix="", length=15, sequence=string.printable[:62], not_used=No
     Examples:
         >>> from minimock import mock
         >>> mock('random.SystemRandom.choice', tracker=None, returns=u'x')
-        >>> get_random('test', 15, 'somestring') == u'testxxxxxxxxxxxxxxx'
+        >>> get_random('test', 15, 'somestring') == 'testxxxxxxxxxxxxxxx'
         True
     """
     rng = random.SystemRandom()
     random_hash = ''.join(rng.choice(sequence) for _ in range(length))
-    return text_type(''.join((prefix, random_hash)))
+    return str(''.join((prefix, random_hash)))
 
 
 class Hasher(object):
@@ -68,7 +64,7 @@ class Hasher(object):
             ['another_thing', 'thing', 'yet_another']
         """
         final_data = []
-        if isinstance(data, string_types):
+        if isinstance(data, str):
             final_data.append(data)
 
         for d in data:
@@ -87,7 +83,7 @@ class Hasher(object):
 
         Examples:
             >>> h = Hasher()
-            >>> isinstance(h.get('blah'), string_types)
+            >>> isinstance(h.get('blah'), str)
             True
         """
 
@@ -96,7 +92,7 @@ class Hasher(object):
         final_data.append(self.__string_padding)
 
         string_to_hash = "".join(final_data)
-        return hashlib.sha1(b(string_to_hash)).hexdigest()
+        return hashlib.sha1(string_to_hash.encode("latin-1")).hexdigest()
 
     def get_consistent(self, data=[]):
         """Creates a new hash based on the input data and some string padding.
@@ -115,7 +111,7 @@ class Hasher(object):
         final_data = self._prepare_data(data)
         final_data.append(self.__string_padding)
         string_to_hash = "".join(final_data)
-        return hashlib.sha1(b(string_to_hash)).hexdigest()
+        return hashlib.sha1(string_to_hash.encode("latin-1")).hexdigest()
 
     def get_clean(self, data=[]):
         """Creates a new hash based on the input data only.
@@ -133,4 +129,4 @@ class Hasher(object):
         """
         final_data = self._prepare_data(data)
         string_to_hash = "".join(final_data)
-        return hashlib.sha1(b(string_to_hash)).hexdigest()
+        return hashlib.sha1(string_to_hash.encode("latin-1")).hexdigest()

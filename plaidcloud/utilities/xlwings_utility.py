@@ -1,4 +1,3 @@
-from __future__ import absolute_import
 import xlwings as xw  # pylint: disable=import-error
 
 __author__ = 'Paul Morel'
