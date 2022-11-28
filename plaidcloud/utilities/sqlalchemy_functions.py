@@ -207,6 +207,7 @@ def compile_import_cast_hana(element, compiler, **kw):
 class safe_to_timestamp(GenericFunction):
     name = 'to_timestamp'
 
+
 @compiles(safe_to_timestamp)
 def compile_safe_to_timestamp(element, compiler, **kw):
     full_args = list(element.clauses)
@@ -249,12 +250,13 @@ def compile_safe_to_timestamp(element, compiler, **kw):
 class safe_extract(GenericFunction):
     name = 'extract'
 
+
 @compiles(safe_extract)
 def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
     field = field.effective_value
-    if not isinstance(timestamp.type, sqlalchemy.DateTime):
+    if not isinstance(timestamp.type, (sqlalchemy.DateTime, sqlalchemy.Interval)):
         timestamp = func.to_timestamp(timestamp)
 
     return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
