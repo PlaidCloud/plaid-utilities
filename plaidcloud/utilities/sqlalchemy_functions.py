@@ -553,7 +553,7 @@ def compile_safe_divide(element, compiler, **kw):
     """
     numerator, denominator, divide_by_zero_value = list(element.clauses)
     numerator = func.cast(numerator, sqlalchemy.Numeric)
-    denominator = func.cast(denominator, sqlalchemy.Integer)
+    denominator = func.cast(denominator, sqlalchemy.Numeric)
 
     basic_safe_divide = numerator / func.nullif(denominator, 0)
     # NOTE: in SQL, x/NULL = NULL, for all x.
