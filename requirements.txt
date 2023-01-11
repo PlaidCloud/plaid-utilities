@@ -5,7 +5,7 @@ minimock
 numpy;python_version>="3.5"
 numpy<=1.16.5;python_version<"3.5"
 pandas
-plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.1.7#egg=plaidcloud-rpc
+plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.1.8#egg=plaidcloud-rpc
 pytest
 pytest-cov
 pyyaml
