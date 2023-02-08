@@ -14,7 +14,7 @@ setuptools
 orjson
 openpyxl
 six
-sqlalchemy
+sqlalchemy~=1.4
 sqlalchemy-greenplum
 sqlalchemy-hana
 texttable
