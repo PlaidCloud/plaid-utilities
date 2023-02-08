@@ -571,14 +571,14 @@ class Connection(object):
         # use the upsert method to add the data
         insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
         self.rpc.analyze.query.upsert(
-                project_id=self._project_id,
-                table_id=table.id,
-                update_query=None,
-                update_params=None,
-                insert_query=insert_query,
-                insert_params=insert_params,
-                recreate=True
-            )
+            project_id=self._project_id,
+            table_id=table.id,
+            update_query=None,
+            update_params=None,
+            insert_query=insert_query,
+            insert_params=insert_params,
+            recreate=True
+        )
 
     @property
     def project_id(self):
