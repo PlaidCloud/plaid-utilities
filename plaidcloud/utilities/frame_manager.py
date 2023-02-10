@@ -1327,12 +1327,17 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                     if show_rules is True:
                         if include_once is True:
                             df.loc[list(df_subset.index), 'rule_number'] = list(map(write_rule_numbers, df.loc[list(df_subset.index), 'rule_number']))
-                            df.loc[list(df_subset.index), 'rule'] = list(map(write_rule_conditions, df.loc[list(df_subset.index), 'rule']))
+                            # df.loc[list(df_subset.index), 'rule'] = list(map(write_rule_conditions, df.loc[list(df_subset.index), 'rule']))
+                            # Set this to empty string.  Waaaaaay to much data being generated.
+                            df.loc[list(df_subset.index), 'rule'] = ''
                             if rule_id_column:
                                 df.loc[list(df_subset.index), 'rule_id'] = list(map(write_rule_id, df.loc[list(df_subset.index), 'rule_id']))
                         else:
                             df_subset['rule_number'] = df_subset.index
-                            df_subset['rule'] = rule[condition_column]
+                            # df_subset['rule'] = rule[condition_column]
+                            # Set this to empty string.  Waaaaaay to much data being generated.
+                            df_subset['rule'] = = ''
+
                             if rule_id_column:
                                 df_subset['rule_id'] = rule[rule_id_column]
                 except Exception as e:
