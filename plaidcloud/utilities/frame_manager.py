@@ -1336,7 +1336,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                             df_subset['rule_number'] = df_subset.index
                             # df_subset['rule'] = rule[condition_column]
                             # Set this to empty string.  Waaaaaay to much data being generated.
-                            df_subset['rule'] = = ''
+                            df_subset['rule'] = ''
 
                             if rule_id_column:
                                 df_subset['rule_id'] = rule[rule_id_column]
