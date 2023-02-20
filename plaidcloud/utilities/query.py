@@ -560,20 +560,14 @@ class Connection(object):
                 for col in query.selected_columns
             ]
 
-        if isinstance(table, str):
-            table = Table(
-                self,
-                table=table,
-                metadata=_table_meta(),
-                overwrite=True
-            )
-        else:
-            # ensure the table exists as per the metadata
-            self.rpc.analyze.table.touch(
-                project_id=self._project_id,
-                table_id=table.id,
-                meta=_table_meta()
-            )
+        # ensure the table exists as per the metadata
+        table = Table(
+            self,
+            table=table if isinstance(table, str) else table.id,
+            columns=_table_meta(),
+            overwrite=True
+        )
+        
         # use the upsert method to add the data
         insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
         self.rpc.analyze.query.upsert(
