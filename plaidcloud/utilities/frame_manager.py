@@ -129,10 +129,10 @@ def sql_from_dtype(dtype):
         'bytea': 'largebinary',
         'largebinary': 'largebinary',
         'xml': 'text',
-        'uuid': 'text',
+        'uuid': 'uuid',
         'money': 'numeric',
         'real': 'numeric',
-        'json': 'text',
+        'json': 'json',
         'cidr': 'text',
         'inet': 'text',
         'macaddr': 'text',
@@ -1740,6 +1740,11 @@ def set_column_types(df, type_dict):
         'text': 256,
     }
 
+    no_convert_types = [
+        'uuid',
+        'json',
+    ]
+
     category_column_types = (
         'category',
     )
@@ -1758,6 +1763,10 @@ def set_column_types(df, type_dict):
 
             elif dtype in timedelta_column_types:
                 df[td] = pd.to_timedelta(df[td])
+
+            elif dtype in no_convert_types:
+                # Do not convert.  Keep as is.
+                pass
 
             elif dtype in list(string_column_types.keys()):
                 # Keep whatever text is there
