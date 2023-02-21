@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
-from plaidcloud.rpc.database import PlaidDate
+from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
@@ -286,6 +286,8 @@ class Connection(object):
                     isinstance(c.type, sqlalchemy.types.Date),
                     isinstance(c.type, sqlalchemy.types.Time),
                     isinstance(c.type, sqlalchemy.types.DateTime),
+                    isinstance(c.type, sqlalchemy.types.TIMESTAMP),
+                    isinstance(c.type, PlaidTimestamp),
                     isinstance(c.type, PlaidDate),
                 )):
                     # https://stackoverflow.com/a/37453925
