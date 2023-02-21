@@ -82,7 +82,7 @@ def processColor(color_input):
         color_input (str, tuple): The name or hex code or RGB tuple of a color
 
     Returns:
-        float: The float representation of the RGB value of the color
+        tuple(float, float, float): The float representation of the RGB value of the color
 
     Examples:
         >>> processColor('yellow')

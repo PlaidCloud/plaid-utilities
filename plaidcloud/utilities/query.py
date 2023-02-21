@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy_hana.dialect import HANABaseDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
-from plaidcloud.rpc.database import PlaidDate
+from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
@@ -286,6 +286,8 @@ class Connection(object):
                     isinstance(c.type, sqlalchemy.types.Date),
                     isinstance(c.type, sqlalchemy.types.Time),
                     isinstance(c.type, sqlalchemy.types.DateTime),
+                    isinstance(c.type, sqlalchemy.types.TIMESTAMP),
+                    isinstance(c.type, PlaidTimestamp),
                     isinstance(c.type, PlaidDate),
                 )):
                     # https://stackoverflow.com/a/37453925
@@ -560,20 +562,14 @@ class Connection(object):
                 for col in query.selected_columns
             ]
 
-        if isinstance(table, str):
-            table = Table(
-                self,
-                table=table,
-                metadata=_table_meta(),
-                overwrite=True
-            )
-        else:
-            # ensure the table exists as per the metadata
-            self.rpc.analyze.table.touch(
-                project_id=self._project_id,
-                table_id=table.id,
-                meta=_table_meta()
-            )
+        # ensure the table exists as per the metadata
+        table = Table(
+            self,
+            table=table if isinstance(table, str) else table.id,
+            columns=_table_meta(),
+            overwrite=True
+        )
+        
         # use the upsert method to add the data
         insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
         self.rpc.analyze.query.upsert(

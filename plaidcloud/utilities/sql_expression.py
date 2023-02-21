@@ -31,6 +31,7 @@ MAGIC_COLUMN_MAPPING = {
     'file_name': u':::FILE_NAME:::',
     'tab_name': u':::TAB_NAME:::',
     'last_modified': u':::LAST_MODIFIED:::',
+    'source_row_number': u':::SOURCE_ROW_NUMBER:::'
 }
 
 CSV_TYPE_DELIMITER = '::'
@@ -381,6 +382,12 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
         'Largebinary': sqlalchemy.LargeBinary,
         'LargeBinary': sqlalchemy.LargeBinary,
         'LARGEBINARY': sqlalchemy.LargeBinary,
+        'uuid': sqlalchemy.dialects.postgresql.UUID,
+        'Uuid': sqlalchemy.dialects.postgresql.UUID,
+        'UUID': sqlalchemy.dialects.postgresql.UUID,
+        'json': sqlalchemy.JSON,
+        'Json': sqlalchemy.JSON,
+        'JSON': sqlalchemy.JSON,
     }
 
     # Only put in the table key if we have a table

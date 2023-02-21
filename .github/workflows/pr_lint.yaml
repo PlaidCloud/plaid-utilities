@@ -8,14 +8,14 @@ jobs:
     name: Lint PlaidCloud Utilities w ReviewDog
     runs-on: ubuntu-latest
     steps:
-      - name: Ensure python 3.9
-        uses: actions/setup-python@v2
+      - name: Ensure python 3.11
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11'
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install dependencies
-        run: pip install -r requirements.txt; pip install -q pylint==2.13.5; pip install -q liccheck;
+        run: pip install -r requirements.txt; pip install -q pylint==2.15.5; pip install -q liccheck;
       - name: License Checker
         uses: andersy005/gh-action-py-liccheck@main
         with:
