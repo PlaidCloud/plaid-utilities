@@ -7,11 +7,8 @@
    Primarily used in UDFs
    """
 
-from __future__ import absolute_import
-
 import os
 import shutil
-import six
 
 from plaidcloud.rpc.logger import Logger
 from plaidcloud.rpc.rpc_connect import Connect
@@ -60,9 +57,9 @@ class PlaidConnection(Connect, Connection):
             self._wb = self.get_workbook(kwargs.get('xl_path'))
         else:
             self._wb = None
-        if isinstance(self._project_id, six.string_types) and self._project_id != '':
+        if isinstance(self._project_id, str) and self._project_id != '':
             self._logger.debug('Project ID: {0}'.format(self.project_id))
-        if isinstance(self._workflow_id, six.string_types) and self._workflow_id != '':
+        if isinstance(self._workflow_id, str) and self._workflow_id != '':
             self._logger.debug('Workflow ID: {0}'.format(self.workflow_id))
 
     def get_table(self, table_name):

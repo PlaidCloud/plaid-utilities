@@ -4,8 +4,6 @@
 Clean Files
 Scrub input files to fix issues where some come with unexpected encoding/characters.
 """
-from __future__ import absolute_import
-from __future__ import print_function
 import argparse
 import csv
 import errno
@@ -19,7 +17,6 @@ import unicodedata
 
 from plaidcloud.rpc import config
 from plaidcloud.utilities import utility
-from six.moves import map
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2020, Tartan Solutions, Inc'

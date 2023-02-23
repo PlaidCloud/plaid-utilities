@@ -3,10 +3,7 @@
 """
 A highly optimized class for bill of materials consolidation and costing
 """
-from __future__ import absolute_import
-
 from pandas import DataFrame
-from six import iteritems
 import os
 import sys
 
@@ -482,7 +479,7 @@ class BOM(object):
         if df is not None:
 
             column_info = []
-            for column_name, data_type in iteritems(df.dtypes):
+            for column_name, data_type in df.dtypes.items():
                 column_info.append(column_name)
 
             # Check to make sure all required columns are present

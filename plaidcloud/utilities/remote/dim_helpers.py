@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from plaidcloud.utilities.remote.dimension import Dimensions
 from plaidcloud.utilities.remote.dimension import Dimension
 

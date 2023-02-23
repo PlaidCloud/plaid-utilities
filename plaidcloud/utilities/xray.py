@@ -5,8 +5,6 @@
 For development and debugging purposes
 """
 
-from __future__ import absolute_import
-
 __author__ = "Michael Rea"
 __copyright__ = "© Copyright 2010-2011, Tartan Solutions, Inc"
 __credits__ = ["Michael Rea, Paul Morel"]
@@ -37,8 +35,7 @@ def Xray(input_object, id_list=[], level=1, printout=False, show_private=False, 
     >>> test_a.set_b(test_b)
     >>> test_b.set_a(test_a)
     >>> xray_a = Xray(test_a)
-    >>> from six import string_types
-    >>> isinstance(xray_a, string_types)
+    >>> isinstance(xray_a, str)
     True
     """
     #MWR 20101124 Next 4 lines block looping recursion

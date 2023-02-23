@@ -2,8 +2,7 @@ argparse
 chardet
 ipython
 minimock
-numpy;python_version>="3.5"
-numpy<=1.16.5;python_version<"3.5"
+numpy
 pandas
 plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.1.9#egg=plaidcloud-rpc
 pytest
@@ -13,7 +12,6 @@ requests
 setuptools
 orjson
 openpyxl
-six
 sqlalchemy~=1.4
 sqlalchemy-greenplum
 sqlalchemy-hana
