@@ -1408,10 +1408,10 @@ class TestImportDataQuery(TestSQLExpression):
             {'source': 'Column1', 'dtype': 'text'},
             {'source': 'Column2', 'dtype': 'text'},
             {'source': 'Column3', 'dtype': 'text'},
-            {'source': u':::DOCUMENT_PATH:::', 'dtype': 'path'},
-            {'source': u':::FILE_NAME:::', 'dtype': 'file_name'},
-            {'source': u':::TAB_NAME:::', 'dtype': 'tab_name'},
-            {'source': u':::LAST_MODIFIED:::', 'dtype': 'last_modified'},
+            {'source': ':::DOCUMENT_PATH:::', 'dtype': 'path'},
+            {'source': ':::FILE_NAME:::', 'dtype': 'file_name'},
+            {'source': ':::TAB_NAME:::', 'dtype': 'tab_name'},
+            {'source': ':::LAST_MODIFIED:::', 'dtype': 'last_modified'},
         ]
         self.expected_temp_table = se.get_table_rep(
             'temp_table',
@@ -1527,25 +1527,25 @@ class TestImportDataQuery(TestSQLExpression):
         magic_expected_target_columns = [
             {
                 'target': 'Path',
-                'source': u':::DOCUMENT_PATH:::',
+                'source': ':::DOCUMENT_PATH:::',
                 'dtype': 'path',
                 'expression': """func.import_col(get_column(table, ':::DOCUMENT_PATH:::'), 'path', '', False)""",
             },
             {
                 'target': 'FileName',
-                'source': u':::FILE_NAME:::',
+                'source': ':::FILE_NAME:::',
                 'dtype': 'file_name',
                 'expression': """func.import_col(get_column(table, ':::FILE_NAME:::'), 'file_name', '', False)""",
             },
             {
                 'target': 'TabName',
-                'source': u':::TAB_NAME:::',
+                'source': ':::TAB_NAME:::',
                 'dtype': 'tab_name',
                 'expression': """func.import_col(get_column(table, ':::TAB_NAME:::'), 'tab_name', '', False)""",
             },
             {
                 'target': 'LastModified',
-                'source': u':::LAST_MODIFIED:::',
+                'source': ':::LAST_MODIFIED:::',
                 'dtype': 'last_modified',
                 'expression': """func.import_col(get_column(table, ':::LAST_MODIFIED:::'), 'last_modified', '', False)""",
             },

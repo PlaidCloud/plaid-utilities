@@ -32,7 +32,7 @@ def get_random(prefix="", length=15, sequence=string.printable[:62], not_used=No
 
     Examples:
         >>> from minimock import mock
-        >>> mock('random.SystemRandom.choice', tracker=None, returns=u'x')
+        >>> mock('random.SystemRandom.choice', tracker=None, returns='x')
         >>> get_random('test', 15, 'somestring') == 'testxxxxxxxxxxxxxxx'
         True
     """

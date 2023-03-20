@@ -27,11 +27,11 @@ __license__ = 'Apache 2.0'
 # TODO: move transform functions here, document them, and refactor their api
 
 MAGIC_COLUMN_MAPPING = {
-    'path': u':::DOCUMENT_PATH:::',
-    'file_name': u':::FILE_NAME:::',
-    'tab_name': u':::TAB_NAME:::',
-    'last_modified': u':::LAST_MODIFIED:::',
-    'source_row_number': u':::SOURCE_ROW_NUMBER:::'
+    'path': ':::DOCUMENT_PATH:::',
+    'file_name': ':::FILE_NAME:::',
+    'tab_name': ':::TAB_NAME:::',
+    'last_modified': ':::LAST_MODIFIED:::',
+    'source_row_number': ':::SOURCE_ROW_NUMBER:::'
 }
 
 CSV_TYPE_DELIMITER = '::'

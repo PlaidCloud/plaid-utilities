@@ -695,11 +695,11 @@ def table_result_to_df(result):
         """
         typed_df = df
         for col in typed_df.columns:
-            if dtypes[col] == u'object':
+            if dtypes[col] == 'object':
                 typed_df[col] = list(map(dh.cast_as_str, typed_df[col]))
-            elif dtypes[col].startswith(u'float'):
+            elif dtypes[col].startswith('float'):
                 typed_df[col] = list(map(dh.cast_as_float, typed_df[col]))
-            elif dtypes[col].startswith(u'int'): #detect any flavor of int and cast it as int.
+            elif dtypes[col].startswith('int'): #detect any flavor of int and cast it as int.
                 typed_df[col] = list(map(dh.cast_as_int, typed_df[col]))
 
     return typed_df

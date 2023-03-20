@@ -635,7 +635,7 @@ def to_xl(df_source,
         #         df[col] = str_df[col]
 
         def force_text(item):
-            return u"'{}".format(str(item))
+            return "'{}".format(str(item))
 
         for col in df.columns:
             cur_type = df[col].dtype
