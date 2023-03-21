@@ -119,11 +119,9 @@ class Dimensions:
             path = '/'
         # Recreate the dimension if replace is true
         if self.dims.is_dimension(project_id=self.project_id, name=name):
+            dim = Dimension(conn=self.conn, name=name)
             if replace:
-                self.delete_dimension(name=name)
-                dim = self.add_dimension(name=name, path=path)
-            else:
-                dim = Dimension(conn=self.conn, name=name)
+                dim.clear()
         else:
             dim = self.add_dimension(name=name, path=path)
         return dim
