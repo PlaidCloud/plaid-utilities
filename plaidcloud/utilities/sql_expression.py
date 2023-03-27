@@ -31,7 +31,8 @@ MAGIC_COLUMN_MAPPING = {
     'file_name': ':::FILE_NAME:::',
     'tab_name': ':::TAB_NAME:::',
     'last_modified': ':::LAST_MODIFIED:::',
-    'source_row_number': ':::SOURCE_ROW_NUMBER:::'
+    'source_row_number': ':::SOURCE_ROW_NUMBER:::',
+    'generated_uuid': ':::GENERATED_UUID:::',
 }
 
 CSV_TYPE_DELIMITER = '::'
