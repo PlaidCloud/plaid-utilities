@@ -4,7 +4,7 @@ ipython
 minimock
 numpy
 pandas
-plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.2.0#egg=plaidcloud-rpc
+plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@fc57e6c12f0261690491f651e89959d239db7c69#egg=plaidcloud-rpc
 pytest
 pytest-cov
 pyyaml
