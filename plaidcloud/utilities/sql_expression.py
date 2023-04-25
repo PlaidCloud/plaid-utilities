@@ -156,7 +156,14 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
 
 
 def process_fn(sort_type, cast_type, agg_type, name):
-    "Returns a function to apply to the source/constant/expression of a target column. sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is. cast_type should be a sqlalchemy dtype, sort_type should be True (for ascending) or False (for descending), agg_type should be a string from the 'agg' param of the column. Processing will always include applying the label in the param 'name'"
+    """Returns a function to apply to the source/constant/expression of a target column.
+    sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is.
+    cast_type should be a sqlalchemy dtype,
+    sort_type should be True (for ascending) or False (for descending),
+    agg_type should be a string from the 'agg' param of the column.
+
+    Processing will always include applying the label in the param 'name'
+    """
     if cast_type:
         cast_fn = curry(sqlalchemy.cast, type_=cast_type)
     else:
@@ -179,7 +186,7 @@ def process_fn(sort_type, cast_type, agg_type, name):
 
 #TODO: write tests, though TestGetFromClause already covers this
 def constant_from_clause(constant, sort_type, cast_type, name, variables=None, disable_variables=False):
-    "Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"
+    """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
     if disable_variables:
         var_fn = ident
     else:
@@ -191,7 +198,7 @@ def constant_from_clause(constant, sort_type, cast_type, name, variables=None, d
 
 #TODO: write tests, though TestGetFromClause already covers this
 def expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables=None, disable_variables=False, table_numbering_start=1):
-    "Get a representation of a target column based on an expression."
+    """Get a representation of a target column based on an expression."""
     expr = eval_expression(
         expression.strip(),
         variables,
@@ -203,7 +210,7 @@ def expression_from_clause(expression, tables, sort_type, cast_type, agg_type, n
 
 #TODO: write tests, though TestGetFromClause already covers this
 def source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start=1):
-    "Get a representation of a target column based on a source column."
+    """Get a representation of a target column based on a source column."""
     table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
 
     if '.' in source:
@@ -289,7 +296,7 @@ def get_agg_fn(agg_str):
 
 
 class Result(object):
-    "This lets a user refer to the columns of the result of the initial query from within a HAVING clause"
+    """This lets a user refer to the columns of the result of the initial query from within a HAVING clause"""
 
     def __init__(
         self, tables, target_columns, source_column_configs,
