@@ -240,6 +240,7 @@ def source_from_clause(source, tables, target_column_config, source_column_confi
 def get_from_clause(
     tables, target_column_config, source_column_configs, aggregate=False,
     sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
+    sort_columns=None, use_row_number_for_serial: bool = True,
 ):
     """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
@@ -266,7 +267,12 @@ def get_from_clause(
         return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start)
     if source:
         return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start)
-    if target_column_config.get('dtype') in {'serial', 'bigserial'}.union(set(MAGIC_COLUMN_MAPPING.keys())):
+    if target_column_config.get('dtype') in {'serial', 'bigserial'}:
+        if use_row_number_for_serial:
+            return process_fn(sort_type, cast_type, agg_type, name)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
+        return None
+
+    if target_column_config.get('dtype') in set(MAGIC_COLUMN_MAPPING.keys()):
         return None
 
     # If we get here...
@@ -535,6 +541,7 @@ def get_select_query(
     variables=None, aggregate=None, having=None, use_target_slicer=None,
     limit_target_start=None, limit_target_end=None, distinct=None,
     count=None, disable_variables=None, table_numbering_start=1,
+    use_row_number_for_serial: bool = True,
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -575,6 +582,35 @@ def get_select_query(
     count = fill_in(count, 'count', False)
     disable_variables = fill_in(disable_variables, 'disable_variables', False)
 
+    # Find any columns for sorting, find these up front such that they may be used if a serial column is present
+    columns_to_sort_on = [
+        stc
+        for stc in target_columns
+        if (
+            stc.get('dtype') not in ('serial', 'bigserial')
+            and stc.get('sort')
+            and stc['sort'].get('ascending') is not None
+        )
+    ]
+    sort_columns = None
+    if columns_to_sort_on:
+        columns_with_order = [tc for tc in columns_to_sort_on if 'order' in tc['sort']]
+        columns_without_order = [tc for tc in columns_to_sort_on if 'order' not in tc['sort']]
+        sort_order = sorted(columns_with_order, key=lambda tc: tc['sort']['order']) + columns_without_order
+        sort_columns = [
+            get_from_clause(
+                tables,
+                tc,
+                source_columns,
+                aggregate,
+                sort=True,
+                variables=variables,
+                disable_variables=disable_variables,
+                table_numbering_start=table_numbering_start,
+            )
+            for tc in sort_order
+        ]
+
     # Build SELECT x FROM y section of our select query
     if count:
         # Much simpler for one table.
@@ -590,9 +626,11 @@ def get_select_query(
                 variables=variables,
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
+                sort_columns=sort_columns,
+                use_row_number_for_serial=use_row_number_for_serial,
             )
             for tc in target_columns
-            if tc['dtype'] not in ('serial', 'bigserial')
+            if (use_row_number_for_serial or tc['dtype'] not in ('serial', 'bigserial'))
         ]
 
         select_query = sqlalchemy.select(*column_select)
@@ -605,35 +643,8 @@ def get_select_query(
     if combined_wheres:
         select_query = select_query.where(*combined_wheres)
 
-    # Find any columns for sorting
-    columns_to_sort_on = [
-        stc
-        for stc in target_columns
-        if (
-            stc.get('dtype') not in ('serial', 'bigserial')
-            and stc.get('sort')
-            and stc['sort'].get('ascending') is not None
-        )
-    ]
-
     # If there are any, build ORDER BY section of our select query
-    if columns_to_sort_on:
-        columns_with_order = [tc for tc in columns_to_sort_on if 'order' in tc['sort']]
-        columns_without_order = [tc for tc in columns_to_sort_on if 'order' not in tc['sort']]
-        sort_order = sorted(columns_with_order, key=lambda tc:tc['sort']['order']) + columns_without_order
-        sort_columns = [
-            get_from_clause(
-                tables,
-                tc,
-                source_columns,
-                aggregate,
-                sort=True,
-                variables=variables,
-                disable_variables=disable_variables,
-                table_numbering_start=table_numbering_start,
-            )
-            for tc in sort_order
-        ]
+    if sort_columns:
         select_query = select_query.order_by(*sort_columns)
 
     # Build GROUP BY section of our select query.
@@ -649,12 +660,13 @@ def get_select_query(
                     cast=False,
                     disable_variables=disable_variables,
                     table_numbering_start=table_numbering_start,
+                    use_row_number_for_serial=use_row_number_for_serial,
                 )
                 for tc in target_columns
                 if (
                     tc.get('agg') in ('group', 'group_null')
                     and not tc.get('constant')
-                    and not tc.get('dtype') in ('serial', 'bigserial')
+                    and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
                 )
             ]
         )
@@ -671,10 +683,12 @@ def get_select_query(
                     variables=variables,
                     disable_variables=disable_variables,
                     table_numbering_start=table_numbering_start,
+                    use_row_number_for_serial=use_row_number_for_serial,
                 )
                 for tc in target_columns
-                if not tc.get('constant') and
-                tc.get('distinct') and not tc.get('dtype') in ('serial', 'bigserial')
+                if not tc.get('constant')
+                and tc.get('distinct')
+                and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
             ]
         )
 
@@ -693,22 +707,23 @@ def get_select_query(
     return select_query
 
 
-def get_insert_query(target_table, target_columns, select_query):
+def get_insert_query(target_table, target_columns, select_query, use_row_number_for_serial: bool = True):
     """Returns a sqlalchemy insert query, given a table object, target_columns
     config, and a sqlalchemy select query."""
     return target_table.insert().from_select(
-        [tc['target'] for tc in target_columns if tc.get('dtype') not in ('serial', 'bigserial')],
+        [tc['target'] for tc in target_columns if tc.get('dtype') not in ('serial', 'bigserial') or use_row_number_for_serial],
         select_query,
     )
+
 
 def get_update_value(tc, table, dtype_map, variables):
     """returns (include, val) where val should be used in the query if include is True, but filtered out if not"""
     dtype = dtype_map.get(tc['source'], 'text')
     if dtype == 'text':
         def conditional_empty_string_fn(val):
-            # Transforms None into u'', but only if dtype is 'text'
+            # Transforms None into '', but only if dtype is 'text'
             if val is None:
-                return u''
+                return ''
             return val
     else:
         conditional_empty_string_fn = ident
@@ -722,10 +737,11 @@ def get_update_value(tc, table, dtype_map, variables):
     if dtype == 'text':
         # Special condition for empty string
         # It works this way because it's impossible to type 'constant': '' in the UI
-        return (True, u'')
+        return True, ''
 
     # If none of our conditions are true, then this column shouldn't be included in the values dict
-    return (False, None)
+    return False, None
+
 
 def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     update_query = sqlalchemy.update(table)

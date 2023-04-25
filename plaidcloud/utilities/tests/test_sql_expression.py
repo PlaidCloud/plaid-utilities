@@ -736,7 +736,20 @@ class TestGetFromClause(TestSQLExpression):
                 [self.table],
                 {'target': 'TargetColumn', 'dtype': 'serial'},
                 self.source_column_configs,
+                use_row_number_for_serial=False,
             )
+        )
+
+    def test_serial_is_row_number(self):
+        # If a column doesn't have source, expression or constant, but is serial, return None
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'target': 'TargetColumn', 'dtype': 'serial'},
+                self.source_column_configs,
+                use_row_number_for_serial=True,
+            ),
+            sqlalchemy.cast(sqlalchemy.func.row_number().over(), sqlalchemy.Integer).label('TargetColumn')
         )
 
     def test_bigserial_is_none(self):
@@ -745,7 +758,19 @@ class TestGetFromClause(TestSQLExpression):
                 [self.table],
                 {'target': 'TargetColumn', 'dtype': 'bigserial'},
                 self.source_column_configs,
+                use_row_number_for_serial=False,
             )
+        )
+
+    def test_bigserial_is_row_number(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'target': 'TargetColumn', 'dtype': 'bigserial'},
+                self.source_column_configs,
+                use_row_number_for_serial=True,
+            ),
+            sqlalchemy.cast(sqlalchemy.func.row_number().over(), sqlalchemy.BigInteger).label('TargetColumn')
         )
 
     def test_magic_columns_is_none(self):
@@ -869,9 +894,17 @@ class TestGetSelectQuery(TestSQLExpression):
         # serial are ignored
         row_number_tc = {'target': 'RowNumber', 'dtype': 'serial'}
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, row_number_tc], []),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], []),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column, row_number_tc], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_row_number_for_serial=False),
         )
+
+    # def test_serial_row_number(self):
+    #     # serial are ignored
+    #     row_number_tc = {'target': 'RowNumber', 'dtype': 'serial'}
+    #     self.assertEquivalent(
+    #         se.get_select_query([self.table], [self.source_columns], [self.target_column, row_number_tc], [], use_row_number_for_serial=True),
+    #         se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_row_number_for_serial=True),
+    #     )
 
     def test_wheres(self):
         # wheres section
@@ -903,8 +936,8 @@ class TestGetSelectQuery(TestSQLExpression):
         # neither select nor sort should include serial columns
         serial_ascending = {'target': 'RowCount', 'dtype': 'serial', 'sort': {'ascending': True, 'order': 3}}
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending, serial_ascending], []),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending], []),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending, serial_ascending], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending], [], use_row_number_for_serial=False),
         )
 
     def test_dont_sort_without_ascending_param(self):
@@ -986,11 +1019,34 @@ class TestGetSelectQuery(TestSQLExpression):
                 [self.groupby_column_1, groupby_serial, self.sum_column_2],
                 [],
                 aggregate=True,
+                use_row_number_for_serial=False,
             ),
             sqlalchemy.select(
                 self.from_clause(self.groupby_column_1, aggregate=True),
                 self.from_clause(self.sum_column_2, aggregate=True),
             ).group_by(self.from_clause(self.groupby_column_1, aggregate=False, cast=False)),
+        )
+
+    def test_groupby_serial_row_number(self):
+        # serials aren't included in groupby
+        groupby_serial = {'target': 'RowCount', 'dtype': 'serial', 'agg': 'group'}
+        self.assertEquivalent(
+            sqlalchemy.select(
+                self.from_clause(self.groupby_column_1, aggregate=True),
+                self.from_clause(groupby_serial, aggregate=True),
+                self.from_clause(self.sum_column_2, aggregate=True),
+            ).group_by(
+                self.from_clause(self.groupby_column_1, aggregate=False, cast=False),
+                self.from_clause(groupby_serial, aggregate=False, cast=False),
+            ),
+            se.get_select_query(
+                [self.table],
+                [self.source_columns],
+                [self.groupby_column_1, groupby_serial, self.sum_column_2],
+                [],
+                aggregate=True,
+                use_row_number_for_serial=True,
+            ),
         )
 
     def test_aggregate_false(self):
@@ -1053,11 +1109,34 @@ class TestGetSelectQuery(TestSQLExpression):
                 [self.distinct_column_1, distinct_serial, self.column_2],
                 [],
                 distinct=True,
+                use_row_number_for_serial=False,
             ),
             sqlalchemy.select(
+                self.from_clause(self.distinct_column_1, use_row_number_for_serial=False),
+                self.from_clause(self.column_2, use_row_number_for_serial=False),
+            ).distinct(self.from_clause(self.distinct_column_1, use_row_number_for_serial=False)),
+        )
+
+    def test_distinct_on_serial_row_number(self):
+        # serials row number is included in distinct
+        distinct_serial = {'target': 'RowCount', 'dtype': 'serial', 'distinct': True}
+        self.assertEquivalent(
+            sqlalchemy.select(
                 self.from_clause(self.distinct_column_1),
+                self.from_clause(distinct_serial),
                 self.from_clause(self.column_2),
-            ).distinct(self.from_clause(self.distinct_column_1)),
+            ).distinct(
+                self.from_clause(self.distinct_column_1),
+                self.from_clause(distinct_serial),
+            ),
+            se.get_select_query(
+                [self.table],
+                [self.source_columns],
+                [self.distinct_column_1, distinct_serial, self.column_2],
+                [],
+                distinct=True,
+                use_row_number_for_serial=True,
+            ),
         )
 
     def test_distinct_false(self):
@@ -1358,9 +1437,35 @@ class TestGetInsertQuery(TestSQLExpression):
         )
         serial_select = sqlalchemy.select(self.from_clause(self.target_column), self.from_clause(serial_column))
         self.assertEquivalent(
-            se.get_insert_query(serial_target_table, [self.target_column, serial_column], serial_select),
-            serial_target_table.insert().from_select(['TargetColumn'], serial_select)
+            serial_target_table.insert().from_select(['TargetColumn'], serial_select),
+            se.get_insert_query(
+                serial_target_table,
+                [self.target_column, serial_column],
+                serial_select,
+                use_row_number_for_serial=False,
+            ),
         )
+
+    def test_serial_row_number(self):
+        # Include serial columns as row_number
+        serial_column = {'target': 'RowNumber', 'dtype': 'serial'}
+        serial_target_table_columns = [{'source': 'TargetColumn', 'dtype': 'text'}, {'source': 'RowNumber', 'dtype': 'serial'}]
+        serial_target_table = se.get_table_rep(
+            'table_54321',
+            serial_target_table_columns,
+            'anlz_schema',
+        )
+        serial_select = sqlalchemy.select(self.from_clause(self.target_column), self.from_clause(serial_column))
+        self.assertEquivalent(
+            serial_target_table.insert().from_select(['TargetColumn', 'RowNumber'], serial_select),
+            se.get_insert_query(
+                serial_target_table,
+                [self.target_column, serial_column],
+                serial_select,
+                use_row_number_for_serial=True,
+            ),
+        )
+
 
 class TestGetDeleteQuery(TestSQLExpression):
     def setUp(self):
