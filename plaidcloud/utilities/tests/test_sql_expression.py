@@ -10,11 +10,12 @@ from plaidcloud.utilities import sql_expression as se
 from plaidcloud.utilities.analyze_table import compiled
 
 __author__ = "Adams Tower"
-__copyright__ = "© Copyright 2009-2021, Tartan Solutions, Inc"
+__copyright__ = "© Copyright 2009-2023, Tartan Solutions, Inc"
 __credits__ = ["Adams Tower"]
 __license__ = "Apache 2.0"
 __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
+
 
 #TODO: test allocate
 class TestSQLExpression(unittest.TestCase):
@@ -32,6 +33,7 @@ class TestGetProjectSchema(TestSQLExpression):
     def test_doesnt_add_anlz_when_already_there(self):
         self.assertEqual(se.get_project_schema('anlz12345'), 'anlz12345')
 
+
 class TestGetAggFn(TestSQLExpression):
     def test_agg_none(self):
         self.assertEqual(se.get_agg_fn(None), ident)
@@ -47,6 +49,10 @@ class TestGetAggFn(TestSQLExpression):
 
     def test_agg_func_null(self):
         self.assertEquivalent(se.get_agg_fn('count_null')(), sqlalchemy.func.count())
+
+    def test_agg_count_distinct(self):
+        self.assertEquivalent(se.get_agg_fn('count_distinct')(), sqlalchemy.func.count(sqlalchemy.func.distinct()))
+
 
 class TestGetTableRep(TestSQLExpression):
     def setUp(self):
