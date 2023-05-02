@@ -13,6 +13,7 @@ from toolz.dicttoolz import merge, valfilter, assoc
 
 import sqlalchemy
 import sqlalchemy.orm
+import sqlalchemy.dialects
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
@@ -21,7 +22,7 @@ from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import
 
 __author__ = 'Adams Tower'
 __maintainer__ = 'Adams Tower <adams.tower@tartansolutions.com>'
-__copyright__ = '© Copyright 2017-2021, Tartan Solutions, Inc'
+__copyright__ = '© Copyright 2017-2023, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
 # TODO: move transform functions here, document them, and refactor their api
@@ -155,7 +156,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
-def process_fn(sort_type, cast_type, agg_type, name):
+def process_fn(sort_type, cast_type, agg_type: [str, None], name):
     """Returns a function to apply to the source/constant/expression of a target column.
     sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is.
     cast_type should be a sqlalchemy dtype,
@@ -297,6 +298,9 @@ def get_agg_fn(agg_str):
 
     if agg_str.endswith('_null'):
         return get_agg_fn(agg_str[:-5])
+
+    if agg_str == 'count_distinct':
+        return compose(sqlalchemy.func.count, sqlalchemy.func.distinct)
 
     return getattr(sqlalchemy.func, agg_str)
 
