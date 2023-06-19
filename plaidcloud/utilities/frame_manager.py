@@ -1276,6 +1276,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             df[column] = ''
 
     summary = []
+    row_num = 0
     iterations = list(set(df_rules[iteration_column]))
     iterations.sort()
     for iteration in iterations:
@@ -1303,7 +1304,6 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                 return '{}, {}'.format(rule_id, str(rule[rule_id_column]))
 
         matches = []  # for use when include_once is False
-        index = 0
         for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
             # Find subset based on condition
             df_subset = df[df['include'] == True]
@@ -1368,13 +1368,14 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                     matches.append(df_subset)
 
             summary_record = {
-                'row_num': index,
+                'row_num': row_num,
                 iteration_column: iteration,
                 'input_records': input_length,
                 'matched_records': matched_length,
             }
             summary_record.update(rule)
             summary.append(summary_record)
+            row_num += 1
 
         if include_once is False:
             if len(matches) > 0:
@@ -1384,12 +1385,13 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         # unmatched record:
         unmatched_length = len(df[df['include'] == True])
         summary.append({
-            'row_num': index+1,
+            'row_num': row_num,
             iteration_column: iteration,
             'input_records': unmatched_length,
             'matched_records': unmatched_length,
             'rule': unmatched_rule
         })
+        row_num += 1
 
     df_summary = pd.DataFrame.from_records(summary)
     if show_rules is True:
