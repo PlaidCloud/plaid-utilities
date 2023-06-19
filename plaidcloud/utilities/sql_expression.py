@@ -53,10 +53,13 @@ filter_nulls = curry(valfilter, lambda v: v is not None)
 def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False, table_numbering_start=1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
 
-    if disable_variables:
-        expression_with_variables = expression
-    else:
+    try:
         expression_with_variables = apply_variables(expression, variables)
+    except:
+        if disable_variables:
+            expression_with_variables = expression
+        else:
+            raise
 
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
