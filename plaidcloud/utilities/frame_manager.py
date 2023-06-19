@@ -1804,12 +1804,13 @@ def has_data(df):
         bool: If `df` has any data
     """
     try:
-        counts = [int(v) for v in df.count().values()]
+        counts = [int(v) for v in df.count().values]
         if not counts:
             return False
         return max(counts) > 0
     except:
         return False
+
 
 def convert_currency(
     df_data,
