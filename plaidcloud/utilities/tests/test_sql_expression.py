@@ -336,10 +336,18 @@ class TestEvalExpression(TestSQLExpression):
     def test_variables(self):
         self.assertEqual(se.eval_expression("'{var}'", {'var': 'foobar'}, []), 'foobar')
 
-    def test_disable_variables(self):
+    def test_disable_variables_var_exists(self):
         self.assertEqual(
             se.eval_expression(
                 "'{var}'", {'var': 'foobar'}, [], disable_variables=True
+            ),
+            'foobar',
+        )
+
+    def test_disable_variables_var_not_exists(self):
+        self.assertEqual(
+            se.eval_expression(
+                "'{var}'", {'var2': 'foobar'}, [], disable_variables=True
             ),
             '{var}',
         )
@@ -586,7 +594,7 @@ class TestGetFromClause(TestSQLExpression):
             ),
             sqlalchemy.cast(
                 sqlalchemy.literal('foobar').label('TargetColumn'),
-                type_ = PlaidUnicode(length=5000)
+                type_=PlaidUnicode(length=5000)
             ),
         )
 
@@ -596,12 +604,12 @@ class TestGetFromClause(TestSQLExpression):
                 [self.table],
                 {'constant': '{var}', 'target': 'TargetColumn', 'dtype': 'text'},
                 self.source_column_configs,
-                variables={'var': 'foobar'},
+                variables={'var2': 'foobar'},
                 disable_variables=True,
             ),
             sqlalchemy.cast(
                 sqlalchemy.literal('{var}').label('TargetColumn'),
-                type_ = PlaidUnicode(length=5000)
+                type_=PlaidUnicode(length=5000)
             ),
         )
 
