@@ -390,6 +390,16 @@ def compile_sql_left(element, compiler, **kw):
     return compiler.process(sql_left(text, count), **kw)
 
 
+class safe_unix_to_timestamp(GenericFunction):
+    name = 'unix_to_timestamp'
+
+@compiles(safe_unix_to_timestamp)
+def compile_safe_unix_to_timestamp(element, compiler, **kw):
+    timestamp, *args = list(element.clauses)
+    timestamp = func.cast(timestamp, sqlalchemy.Integer)
+
+    return f"to_timestamp({compiler.process(timestamp)})"
+
 class safe_to_date(GenericFunction):
     name = 'to_date'
 
