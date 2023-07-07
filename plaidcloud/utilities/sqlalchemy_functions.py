@@ -158,7 +158,7 @@ def compile_import_cast(element, compiler, **kw):
     elif dtype == 'timestamp':
         return compiler.process(func.to_timestamp(col, date_format), **kw)
     elif dtype == 'time':
-        return compiler.process(func.to_timestamp(col, 'YYYY-MM-DD HH24:MI:SS'), **kw)
+        return compiler.process(func.to_timestamp(col, 'HH24:MI:SS'), **kw)
     elif dtype == 'interval':
         return compiler.process(col, **kw) + '::interval'
     elif dtype == 'boolean':
