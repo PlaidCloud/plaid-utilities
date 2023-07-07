@@ -158,7 +158,7 @@ def compile_import_cast(element, compiler, **kw):
     elif dtype == 'timestamp':
         return compiler.process(func.to_timestamp(col, date_format), **kw)
     elif dtype == 'time':
-        return compiler.process(func.to_timestamp(col, 'HH24:MI:SS'), **kw)
+        return compiler.process(func.to_timestamp(col, 'YYYY-MM-DD HH24:MI:SS'), **kw)
     elif dtype == 'interval':
         return compiler.process(col, **kw) + '::interval'
     elif dtype == 'boolean':
@@ -183,7 +183,7 @@ def compile_import_cast_hana(element, compiler, **kw):
     elif dtype == 'date':
         return compiler.process(func.to_date(func.to_nvarchar(col), date_format))
     elif dtype == 'timestamp':
-        return compiler.process(func.to_timestamp(func.to_nvarchar(col), 'HH24:MI:SS'))
+        return compiler.process(func.to_timestamp(func.to_nvarchar(col), 'YYYY-MM-DD HH24:MI:SS'))
     elif dtype == 'interval':
         return compiler.process(col) + '::interval'
     elif dtype == 'boolean':
@@ -212,7 +212,7 @@ class safe_to_timestamp(GenericFunction):
 def compile_safe_to_timestamp(element, compiler, **kw):
     full_args = list(element.clauses)
     if len(full_args) == 1:
-        date_format = 'HH24:MI:SS'
+        date_format = 'YYYY-MM-DD HH24:MI:SS'
         text = full_args[0]
         args = []
     else:
@@ -256,7 +256,7 @@ def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
     field = field.effective_value
-    if not isinstance(timestamp.type, (sqlalchemy.DateTime, sqlalchemy.Interval)):
+    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Interval)):
         timestamp = func.to_timestamp(timestamp)
 
     return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
