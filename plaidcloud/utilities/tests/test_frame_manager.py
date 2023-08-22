@@ -28,7 +28,7 @@ def assertFrameEqual(df1, df2, **kwargs):
         df2 (`pandas.DataFrame`): The DataFrame to compare against `df1`
         **kwargs (dict): A dict to pass to `pandas.util.testing.assert_frame_equal`
     """
-    from pandas.util.testing import assert_frame_equal
+    from pandas.testing import assert_frame_equal
     return assert_frame_equal(df1, df2, check_names=True, check_like=True, **kwargs)
 
 
