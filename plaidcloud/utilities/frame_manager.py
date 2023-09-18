@@ -2648,6 +2648,19 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
     )
 
 
+def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
+    df = pd.read_parquet(parquet_file_name)
+    if start_row:
+        df.iloc[start_row:]
+    df.to_csv(
+        csv_file_name,
+        index=False,
+        sep='\t',
+        quotechar='"',
+        escapechar='"',
+    )
+
+
 def allocate(
     logging,                     # pass in the logger we want to hit.
     df_input,                     # input data frame
