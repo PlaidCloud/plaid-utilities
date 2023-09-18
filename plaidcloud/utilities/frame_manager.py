@@ -12,6 +12,7 @@ from functools import wraps
 from io import BytesIO
 import traceback
 from math import log10, floor
+from fastparquet import ParquetFile
 
 import xlrd3 as xlrd
 import unicodecsv as csv
@@ -2649,7 +2650,8 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 
 
 def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
-    df = pd.read_parquet(parquet_file_name)
+    pf = ParquetFile(parquet_file_name)
+    df = pf.to_pandas()
     if start_row:
         df.iloc[start_row:]
     df.to_csv(
