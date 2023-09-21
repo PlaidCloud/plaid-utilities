@@ -12,7 +12,7 @@ from functools import wraps
 from io import BytesIO
 import traceback
 from math import log10, floor
-from fastparquet import ParquetFile
+import fastavro
 
 import xlrd3 as xlrd
 import unicodecsv as csv
@@ -2640,6 +2640,36 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
         colspecs (list): List of the column widths
     """
     df = pd.read_fwf(fixed_width_file_name, colspecs=colspecs)
+    df.to_csv(
+        csv_file_name,
+        index=False,
+        sep='\t',
+        quotechar='"',
+        escapechar='"',
+    )
+
+
+def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
+    with open(avro_file_name, 'rb') as infile:
+        with open(csv_file_name, 'w') as outfile:
+            writer = csv.writer(outfile)
+            reader = fastavro.reader(infile)
+            if start_row:
+                # Somewhat ugly since fastavro doesn't have a clean way to do this.
+                lines = 0
+                for row in reader:
+                    lines += 1
+                    if lines >= start_row:
+                        break
+            # write header
+            write_header = True
+            for row in reader:
+                if write_header:
+                    writer.writerow(row.keys())
+                    write_header = False
+                writer.writerow(row)
+    if start_row:
+        df = df.iloc[start_row:]
     df.to_csv(
         csv_file_name,
         index=False,

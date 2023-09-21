@@ -1,5 +1,6 @@
 argparse
 chardet
+fastavro
 fastparquet
 ipython
 minimock
