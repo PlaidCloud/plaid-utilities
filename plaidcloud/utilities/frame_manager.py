@@ -458,6 +458,31 @@ def load_new(source_tables, sep='|', fetch=True, cache_locally=False, configurat
     return dfs
 
 
+def avro_from_sql(sql, default=None):
+    """Gets an avro dtype from a SQL data type
+    Args:
+        sql (str): SQL data type
+        
+    Returns:
+        str: the Avro data type equivalent"""
+    
+    mapping = {
+        'null': 'null',
+        'text': 'string',
+        'boolean': 'boolean',
+        'smallint': 'int',
+        'bigint': 'int',
+        'integer': 'int',
+        'numeric': 'double',
+        'timestamp': 'int',
+        'interval': 'float',
+        'date': 'float',
+        'time': 'float'
+    }
+
+    return mapping.get(sql, default)
+
+
 
 def dtype_from_sql(sql):
     """Gets a pandas dtype from a SQL data type
