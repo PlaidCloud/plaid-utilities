@@ -2668,15 +2668,6 @@ def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
                     writer.writerow(row.keys())
                     write_header = False
                 writer.writerow(row)
-    if start_row:
-        df = df.iloc[start_row:]
-    df.to_csv(
-        csv_file_name,
-        index=False,
-        sep='\t',
-        quotechar='"',
-        escapechar='"',
-    )
 
 
 def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
