@@ -2651,7 +2651,7 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 
 def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
     with open(avro_file_name, 'rb') as infile:
-        with open(csv_file_name, 'w') as outfile:
+        with open(csv_file_name, 'wb') as outfile:
             writer = csv.writer(outfile)
             reader = fastavro.reader(infile)
             if start_row:
