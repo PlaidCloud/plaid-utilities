@@ -2651,29 +2651,26 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 
 def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
     with open(avro_file_name, 'rb') as infile:
-        with open(csv_file_name, 'wb') as outfile:
-            writer = csv.writer(
-                outfile,
-                delimiter='\t',
-                quotechar='"',
-                escapechar='"'
-            )
+        with open(csv_file_name, 'w') as outfile:
             reader = fastavro.reader(infile)
             if start_row:
                 # Somewhat ugly since fastavro doesn't have a clean way to do this.
                 lines = 0
-                for row in reader:
+                for _ in reader:
                     lines += 1
                     if lines >= start_row:
                         break
             # write header
-            write_header = True
-            for row in reader:
-                logger.info(f'Read row {row}')
-                if write_header:
-                    writer.writerow(row.keys())
-                    write_header = False
-                writer.writerow(row)
+            header = [field['name'] for field in json.loads(reader.metadata['avro.schema'])['fields']]
+            writer = csv.DictWriter(
+                outfile,
+                fieldnames=header,
+                delimiter='\t',
+                quotechar='"',
+                escapechar='"',
+            )
+            writer.writeheader()
+            writer.writerows(reader)
 
 
 def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
