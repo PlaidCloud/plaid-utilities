@@ -2652,7 +2652,12 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
     with open(avro_file_name, 'rb') as infile:
         with open(csv_file_name, 'wb') as outfile:
-            writer = csv.writer(outfile)
+            writer = csv.writer(
+                outfile,
+                delimiter='\t',
+                quotechar='"',
+                escapechar='"'
+            )
             reader = fastavro.reader(infile)
             if start_row:
                 # Somewhat ugly since fastavro doesn't have a clean way to do this.
@@ -2664,6 +2669,7 @@ def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
             # write header
             write_header = True
             for row in reader:
+                logger.info(f'Read row {row}')
                 if write_header:
                     writer.writerow(row.keys())
                     write_header = False
