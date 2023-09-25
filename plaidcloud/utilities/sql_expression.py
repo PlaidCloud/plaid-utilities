@@ -33,6 +33,7 @@ MAGIC_COLUMN_MAPPING = {
     'tab_name': ':::TAB_NAME:::',
     'last_modified': ':::LAST_MODIFIED:::',
     'source_row_number': ':::SOURCE_ROW_NUMBER:::',
+    'source_table_name': ':::SOURCE_TABLE_NAME:::',
 }
 
 CSV_TYPE_DELIMITER = '::'
@@ -277,6 +278,9 @@ def get_from_clause(
         return None
 
     if target_column_config.get('dtype') in set(MAGIC_COLUMN_MAPPING.keys()):
+        if target_column_config.get('dtype') == 'source_table_name':
+            # never aggregate
+            return process_fn(sort_type, cast_type, None, name)(sqlalchemy.literal(tables[0].name, type_=cast_type))
         return None
 
     # If we get here...

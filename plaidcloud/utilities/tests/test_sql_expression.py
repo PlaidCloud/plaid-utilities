@@ -789,6 +789,8 @@ class TestGetFromClause(TestSQLExpression):
 
     def test_magic_columns_is_none(self):
         for dtype in se.MAGIC_COLUMN_MAPPING.keys():
+            if dtype == "source_table_name":
+                continue
             self.assertIsNone(
                 se.get_from_clause(
                     [self.table],
@@ -796,6 +798,33 @@ class TestGetFromClause(TestSQLExpression):
                     self.source_column_configs,
                 )
             )
+
+    def test_magic_source_table_name(self):
+        aliased_table = sqlalchemy.orm.aliased(self.table, name='table_alias')
+        self.assertEquivalent(
+            se.get_from_clause(
+                [aliased_table],
+                {'target': 'TargetColumn', 'dtype': 'source_table_name'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(
+                sqlalchemy.literal('table_alias').label('TargetColumn'),
+                type_=PlaidUnicode(length=5000)
+            )
+        )
+
+    def test_magic_source_table_name_no_alias(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'target': 'TargetColumn', 'dtype': 'source_table_name'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(
+                sqlalchemy.literal('table_12345').label('TargetColumn'),
+                type_=PlaidUnicode(length=5000)
+            )
+        )
 
     def test_errors_when_no_source_expression_or_constant(self):
         # If a column doesn't have source, expression or constant, but is any type other than serial/bigserial, raise error
