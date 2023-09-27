@@ -12,7 +12,7 @@ from functools import wraps
 from io import BytesIO
 import traceback
 from math import log10, floor
-from fastparquet import ParquetFile
+import fastavro
 
 import xlrd3 as xlrd
 import unicodecsv as csv
@@ -456,6 +456,31 @@ def load_new(source_tables, sep='|', fetch=True, cache_locally=False, configurat
         df = load_typed_psv(source_path)
         dfs.append(df)
     return dfs
+
+
+def avro_from_sql(sql, default=None):
+    """Gets an avro dtype from a SQL data type
+    Args:
+        sql (str): SQL data type
+        
+    Returns:
+        str: the Avro data type equivalent"""
+    
+    mapping = {
+        'null': 'null',
+        'text': 'string',
+        'boolean': 'boolean',
+        'smallint': 'int',
+        'bigint': 'int',
+        'integer': 'int',
+        'numeric': 'double',
+        'timestamp': 'int',
+        'interval': 'float',
+        'date': 'float',
+        'time': 'float'
+    }
+
+    return mapping.get(sql, default)
 
 
 
@@ -2647,6 +2672,30 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
         quotechar='"',
         escapechar='"',
     )
+
+
+def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
+    with open(avro_file_name, 'rb') as infile:
+        with open(csv_file_name, 'wb') as outfile:
+            reader = fastavro.reader(infile)
+            if start_row:
+                # Somewhat ugly since fastavro doesn't have a clean way to do this.
+                lines = 0
+                for _ in reader:
+                    lines += 1
+                    if lines >= start_row:
+                        break
+            # write header
+            header = [field['name'] for field in json.loads(reader.metadata['avro.schema'])['fields']]
+            writer = csv.DictWriter(
+                outfile,
+                fieldnames=header,
+                delimiter='\t',
+                quotechar='"',
+                escapechar='"',
+            )
+            writer.writeheader()
+            writer.writerows(reader)
 
 
 def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
