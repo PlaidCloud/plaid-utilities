@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import sqlalchemy
 from sqlalchemy.dialects.postgresql.base import PGDialect
-from sqlalchemy_hana.dialect import HANABaseDialect
+from sqlalchemy_hana.dialect import HANAHDBCLIDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
@@ -72,7 +72,7 @@ class Connection(object):
         if _dialect_kind == 'greenplum':
             self.dialect = GreenplumDialect()
         elif _dialect_kind == 'hana':
-            self.dialect = HANABaseDialect()
+            self.dialect = HANAHDBCLIDialect()
         elif _dialect_kind == 'hive':
             raise Exception('Hive currently not supported from plaidcloud utilities.')
         elif _dialect_kind == 'spark':
