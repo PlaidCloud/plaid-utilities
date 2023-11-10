@@ -21,17 +21,17 @@ class elapsed_seconds(FunctionElement):
     name = 'elapsed_seconds'
 
 @compiles(elapsed_seconds)
-def compile(element, compiler, **kw):
+def compile_es(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return 'EXTRACT(EPOCH FROM COALESCE(%s, NOW())-%s)' % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
 @compiles(elapsed_seconds, 'hana')
-def compile(element, compiler, **kw):
+def compile_es_hana(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return "Seconds_between(%s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
 @compiles(elapsed_seconds, 'mssql')
-def compile(element, compiler, **kw):
+def compile_es_mssql(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
@@ -40,11 +40,11 @@ class avg(ReturnTypeFromArgs):
     pass
 
 @compiles(avg)
-def compile(element, compiler, **kw):
+def compile_avg(element, compiler, **kw):
     return compiler.visit_function(element)
 
 @compiles(avg, 'hana')
-def compile(element, compiler, **kw):
+def compile_avg_hana(element, compiler, **kw):
     # Upscale Integer Types, otherwise it blows the calculation
     if isinstance(element.type, sqlalchemy.Integer) or isinstance(element.type, sqlalchemy.SmallInteger):
         return 'avg(cast({} AS BIGINT))'.format(compiler.process(element.clauses))
@@ -52,7 +52,7 @@ def compile(element, compiler, **kw):
         return compiler.visit_function(element)
 
 @compiles(sum, 'hana')
-def compile(element, compiler, **kwargs):
+def compile_sum_hana(element, compiler, **kwargs):
     # Upscale Integer Types, otherwise it blows the calculation
     if isinstance(element.type, sqlalchemy.Integer) or isinstance(element.type, sqlalchemy.SmallInteger):
         return 'sum(cast({} AS BIGINT))'.format(compiler.process(element.clauses))
@@ -64,11 +64,11 @@ class variance(ReturnTypeFromArgs):
     pass
 
 @compiles(variance)
-def compile(element, compiler, **kw):
+def compile_variance(element, compiler, **kw):
     return compiler.visit_function(element)
 
 @compiles(variance, 'hana')
-def compile(element, compiler, **kw):
+def compile_variance_hana(element, compiler, **kw):
     # Upscale Integer Types, otherwise it blows the calculation
     if isinstance(element.type, sqlalchemy.Integer) or isinstance(element.type, sqlalchemy.SmallInteger):
         return 'var(cast({} AS BIGINT))'.format(compiler.process(element.clauses))
