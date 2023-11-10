@@ -365,29 +365,104 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
 
     return compiler.process(func.cast(func.trunc(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
 
+#
+# class sql_left(GenericFunction):
+#     name = 'left'
+#
+# @compiles(sql_left)
+# def compile_sql_left(element, compiler, **kw):
+#     # TODO: add docstring. Figure out what this does.
+#     # seems to find a substring from 1 to count. I'm not sure why or what that's used for.
+#
+#     # Postgres supports negative numbers, while this doesn't.
+#     # This MIGHT be an issue in the future, but for now, this works
+#     # well enough.
+#     text, count, = list(element.clauses)
+#
+#     def sql_left(text, count):
+#         cast_text = func.cast(text, sqlalchemy.Text)
+#         cast_count = func.cast(count, sqlalchemy.Integer)
+#         return sqlalchemy.cast(
+#             func.substring(cast_text, 1, cast_count),
+#             sqlalchemy.Text,
+#         )
+#
+#     return compiler.process(sql_left(text, count), **kw)
+#
 
-class sql_left(GenericFunction):
-    name = 'left'
+class sql_slice_string(GenericFunction):
+    name = 'slice_string'
+    inherit_cache = False
 
-@compiles(sql_left)
-def compile_sql_left(element, compiler, **kw):
-    # TODO: add docstring. Figure out what this does.
-    # seems to find a substring from 1 to count. I'm not sure why or what that's used for.
+@compiles(sql_slice_string)
+def compile_sql_slice_string(element, compiler, **kw):
+    """Provides string slicing functionality similar to that in python
 
-    # Postgres supports negative numbers, while this doesn't.
-    # This MIGHT be an issue in the future, but for now, this works
-    # well enough.
-    text, count, = list(element.clauses)
+    """
+    text, *args = list(element.clauses)
+    cast_text = func.cast(text, sqlalchemy.Text)
+    start = 0
+    count = None
 
-    def sql_left(text, count):
-        cast_text = func.cast(text, sqlalchemy.Text)
-        cast_count = func.cast(count, sqlalchemy.Integer)
-        return sqlalchemy.cast(
-            func.substring(cast_text, 1, cast_count),
-            sqlalchemy.Text,
-        )
+    if len(args) > 0:
+        start = args[0]
+        if isinstance(start, sqlalchemy.sql.elements.Null):
+            start = 0
+        else:
+            start = start.value
 
-    return compiler.process(sql_left(text, count), **kw)
+        if len(args) > 1:
+            if not isinstance(args[1], sqlalchemy.sql.elements.Null):
+                count = args[1].value
+
+    if start >= 0:
+        start = start + 1  # if python zero-based???
+        if not count:
+            return compiler.process(
+                sqlalchemy.cast(
+                    func.substring(cast_text, start),
+                    sqlalchemy.Text,
+                )
+            )
+        # count = count.value
+        if count > 0:
+            return compiler.process(
+                sqlalchemy.cast(
+                    func.substring(cast_text, start, count),
+                    sqlalchemy.Text,
+                )
+            )
+        else:
+            return compiler.process(
+                func.left(
+                    sqlalchemy.cast(
+                        func.substring(cast_text, start),
+                        sqlalchemy.Text,
+                    ),
+                    count,
+                )
+            )
+
+    else:
+        if not count:
+            return compiler.process(
+                func.right(
+                    cast_text,
+                    -start,
+                )
+            )
+        # count = count.value
+        if count < 0:
+            return compiler.process(
+                func.left(
+                    func.right(
+                        cast_text,
+                        -start,
+                    ),
+                -count,
+                )
+            )
+        raise NotImplementedError
 
 
 class safe_unix_to_timestamp(GenericFunction):
