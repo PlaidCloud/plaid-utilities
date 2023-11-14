@@ -482,6 +482,31 @@ def compile_sql_zfill(element, compiler, **kw):
         func.lpad(field, true_width, char)
     )
 
+class sql_normalize_whitespace(GenericFunction):
+    name = 'normalize_whitespace'
+
+@compiles(sql_normalize_whitespace)
+def compile_sql_normalize_whitespace(element, compiler, **kw):
+    field, *args = list(element.clauses)
+    field = func.cast(field, sqlalchemy.Text)
+
+    weird_whitespace_chars = [
+        'n',     # newline
+        'r',     # carriage return
+        'f',     # form feed
+        'u000B', # line tabulation
+        'u0085', # next line
+        'u2028', # line separator
+        'u2029', # paragraph separator
+        'u00A0', # non-breaking space
+    ]
+
+    ww_re = '[' + ''.join([r'\\' + c for c in weird_whitespace_chars]) + ']+'
+
+    return compiler.process(
+        func.regexp_replace(field, ww_re, ' ', 'g')
+    )
+
 
 class safe_unix_to_timestamp(GenericFunction):
     name = 'unix_to_timestamp'
