@@ -501,7 +501,7 @@ def compile_sql_normalize_whitespace(element, compiler, **kw):
         'u00A0', # non-breaking space
     ]
 
-    ww_re = '[' + ''.join([r'\\' + c for c in weird_whitespace_chars]) + ']+'
+    ww_re = '[' + ''.join(['\\' + c for c in weird_whitespace_chars]) + ']+'
 
     return compiler.process(
         func.regexp_replace(field, ww_re, ' ', 'g')
