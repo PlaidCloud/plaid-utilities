@@ -61,7 +61,7 @@ class TestZfill(BaseTest):
         expr = sqlalchemy.func.zfill('foobar', 2)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'lpad(CAST(%(zfill_1)s AS TEXT), greatest(CAST(%(zfill_2)s AS INTEGER, length(CAST(%zfill_1)s AS TEXT))), %(lpad_1)s)',
+            'lpad(CAST(%(zfill_1)s AS TEXT), greatest(CAST(%(zfill_2)s AS INTEGER), length(CAST((%zfill_1)s AS TEXT))), %(lpad_1)s)',
             str(compiled),
         )
         self.assertEqual('foobar', compiled.params['zfill_1'])
