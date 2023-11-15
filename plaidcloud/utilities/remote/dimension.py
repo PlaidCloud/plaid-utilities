@@ -5,6 +5,7 @@ A highly optimized class for fast dimensional hierarchy operations
 """
 
 import os
+import io
 import uuid
 import pandas as pd
 import numpy as np
@@ -2469,7 +2470,7 @@ class Dimension:
     # --------------------------------------------------------------------------------------------------
     @staticmethod
     def _decode_dataframe(json_df) -> pd.DataFrame:
-        return pd.read_json(json_df, orient='table', precise_float=True)
+        return pd.read_json(io.StringIO(json_df), orient='table', precise_float=True)
 
     @staticmethod
     def _encode_dataframe(df: pd.DataFrame):
