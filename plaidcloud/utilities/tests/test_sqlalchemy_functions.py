@@ -56,6 +56,45 @@ class TestImportCol(BaseTest):
 #         self.assertEqual(5, compiled.params['left_2'])
 
 
+class TestZfill(BaseTest):
+    def test_zfill(self):
+        expr = sqlalchemy.func.zfill('foobar', 2)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'lpad(CAST(%(zfill_1)s AS TEXT), greatest(CAST(%(zfill_2)s AS INTEGER, length(CAST(%zfill_1)s AS TEXT))), %(lpad_1)s)',
+            str(compiled),
+        )
+        self.assertEqual('foobar', compiled.params['zfill_1'])
+        self.assertEqual(2, compiled.params['zfill_2'])
+        self.assertEqual('0', compiled.params['lpad_1'])
+
+    def test_zfill_char(self):
+        expr = sqlalchemy.func.zfill('foobar', 2, '#')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'lpad(CAST(%(zfill_1)s AS TEXT), greatest(CAST(%(zfill_2)s AS INTEGER), length(CAST(%(zfill_1)s AS TEXT))), CAST(%(zfill_3)s AS TEXT))',
+            str(compiled),
+        )
+        self.assertEqual('foobar', compiled.params['zfill_1'])
+        self.assertEqual(2, compiled.params['zfill_2'])
+        self.assertEqual('#', compiled.params['zfill_3'])
+
+
+class TestNormalizeWhitespace(BaseTest):
+    def test_normalize_whitespace(self):
+        expr = sqlalchemy.func.normalize_whitespace('foobar')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'regexp_replace(CAST(%(normalize_whitespace_1)s AS TEXT), %(regexp_replace_1)s, %(regexp_replace_2)s, %(regexp_replace_3)s)',
+            str(compiled),
+        )
+        self.assertEqual('foobar', compiled.params['normalize_whitespace_1'])
+        ww_re = '[' + ''.join(['\\' + c for c in sf.WEIRD_WHITESPACE_CHARS]) + ']+'
+        self.assertEqual(ww_re, compiled.params['regexp_replace_1']) # TODO
+        self.assertEqual(' ', compiled.params['regexp_replace_2'])
+        self.assertEqual('g', compiled.params['regexp_replace_3'])
+
+
 class TestLeft(BaseTest):
     def test_left(self):
         expr = sqlalchemy.func.left('somestring', 5)
