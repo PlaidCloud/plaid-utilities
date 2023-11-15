@@ -464,6 +464,49 @@ def compile_sql_slice_string(element, compiler, **kw):
             )
         raise NotImplementedError
 
+class sql_zfill(GenericFunction):
+    name = 'zfill'
+
+@compiles(sql_zfill)
+def compile_sql_zfill(element, compiler, **kw):
+    field, width, *args = list(element.clauses)
+    field = func.cast(field, sqlalchemy.Text)
+    width = func.cast(width, sqlalchemy.Integer)
+    if args:
+        char = func.cast(args[0], sqlalchemy.Text)
+    else:
+        char = '0'
+
+    true_width = func.greatest(width, func.length(field))
+    return compiler.process(
+        func.lpad(field, true_width, char)
+    )
+
+class sql_normalize_whitespace(GenericFunction):
+    name = 'normalize_whitespace'
+
+WEIRD_WHITESPACE_CHARS = [
+    'n',     # newline
+    'r',     # carriage return
+    'f',     # form feed
+    'u000B', # line tabulation
+    'u0085', # next line
+    'u2028', # line separator
+    'u2029', # paragraph separator
+    'u00A0', # non-breaking space
+]
+
+@compiles(sql_normalize_whitespace)
+def compile_sql_normalize_whitespace(element, compiler, **kw):
+    field, *args = list(element.clauses)
+    field = func.cast(field, sqlalchemy.Text)
+
+    ww_re = '[' + ''.join(['\\' + c for c in WEIRD_WHITESPACE_CHARS]) + ']+'
+
+    return compiler.process(
+        func.regexp_replace(field, ww_re, ' ', 'g')
+    )
+
 
 class safe_unix_to_timestamp(GenericFunction):
     name = 'unix_to_timestamp'
