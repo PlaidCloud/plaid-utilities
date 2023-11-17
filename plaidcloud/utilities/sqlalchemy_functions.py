@@ -713,7 +713,7 @@ def compile_sql_date_add(element, compiler, **kw):
     dt, *args = list(element.clauses)
     a = {
         unit: func.cast(val, sqlalchemy.Integer)
-        for unit, val in element.additions.values()
+        for unit, val in element.additions.items()
     }
 
     dt = func.cast(dt, sqlalchemy.DateTime)
