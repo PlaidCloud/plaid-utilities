@@ -718,6 +718,7 @@ def compile_sql_date_add(element, compiler, **kw):
 
     dt = func.cast(dt, sqlalchemy.DateTime)
     # interval = func.make_interval(a['years'], a['months'], a['weeks'], a['days'], a['hours'], a['minutes'], a['seconds'])
-    interval = func.make_interval(**a)
+    interval = func.make_interval(*[a[unit] for unit in DATE_ADD_UNITS])
+    # interval = func.make_interval(**a)
 
     return compiler.process(dt + interval)
