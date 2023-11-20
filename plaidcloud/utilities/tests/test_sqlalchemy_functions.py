@@ -1,6 +1,8 @@
 # coding=utf-8
 import unittest
 
+import datetime
+
 import sqlalchemy
 # from toolz.functoolz import curry
 # from toolz.functoolz import identity as ident
@@ -199,3 +201,39 @@ class TestSliceString(BaseTest):
         self.assertEqual('abcdefghijk', compiled.params['slice_string_1'])
         self.assertEqual(1, compiled.params['substring_1'])
         self.assertEqual(-2, compiled.params['left_1'])
+
+
+class TestDateAdd(BaseTest):
+    def test_date_add(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt, years=1, months=2, weeks=3, days=4, hours=5, minutes=6, seconds=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'CAST(%(date_add_1)s AS TIMESTAMP WITHOUT TIME ZONE) + make_interval(CAST(%(param_1)s AS INTEGER), CAST(%(param_2)s AS INTEGER), CAST(%(param_3)s AS INTEGER), CAST(%(param_4)s AS INTEGER), CAST(%(param_5)s AS INTEGER), CAST(%(param_6)s AS INTEGER), CAST(%(param_7)s AS INTEGER))',
+            str(compiled),
+        )
+        self.assertEqual(dt, compiled.params['date_add_1'])
+        self.assertEqual(1, compiled.params['param_1'])
+        self.assertEqual(2, compiled.params['param_2'])
+        self.assertEqual(3, compiled.params['param_3'])
+        self.assertEqual(4, compiled.params['param_4'])
+        self.assertEqual(5, compiled.params['param_5'])
+        self.assertEqual(6, compiled.params['param_6'])
+        self.assertEqual(7, compiled.params['param_7'])
+
+    def test_date_add_no_params(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'CAST(%(date_add_1)s AS TIMESTAMP WITHOUT TIME ZONE) + make_interval(CAST(%(param_1)s AS INTEGER), CAST(%(param_2)s AS INTEGER), CAST(%(param_3)s AS INTEGER), CAST(%(param_4)s AS INTEGER), CAST(%(param_5)s AS INTEGER), CAST(%(param_6)s AS INTEGER), CAST(%(param_7)s AS INTEGER))',
+            str(compiled)
+        )
+        self.assertEqual(dt, compiled.params['date_add_1'])
+        self.assertEqual(0, compiled.params['param_1'])
+        self.assertEqual(0, compiled.params['param_2'])
+        self.assertEqual(0, compiled.params['param_3'])
+        self.assertEqual(0, compiled.params['param_4'])
+        self.assertEqual(0, compiled.params['param_5'])
+        self.assertEqual(0, compiled.params['param_6'])
+        self.assertEqual(0, compiled.params['param_7'])
