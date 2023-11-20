@@ -227,7 +227,7 @@ class TestDateAdd(BaseTest):
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
             'CAST(%(date_add_1)s AS TIMESTAMP WITHOUT TIME ZONE) + make_interval(CAST(%(param_1)s AS INTEGER), CAST(%(param_2)s AS INTEGER), CAST(%(param_3)s AS INTEGER), CAST(%(param_4)s AS INTEGER), CAST(%(param_5)s AS INTEGER), CAST(%(param_6)s AS INTEGER), CAST(%(param_7)s AS INTEGER))',
-            str(compiled)
+            str(compiled),
         )
         self.assertEqual(dt, compiled.params['date_add_1'])
         self.assertEqual(0, compiled.params['param_1'])
