@@ -8,6 +8,8 @@ from sqlalchemy.types import Numeric
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
+from toolz.dicttoolz import dissoc
+
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
@@ -690,3 +692,31 @@ def compile_safe_divide(element, compiler, **kw):
     return compiler.process(
         basic_safe_divide if divide_by_zero_value is None else func.coalesce(basic_safe_divide, divide_by_zero_value)
     )
+
+DATE_ADD_UNITS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds']
+
+class sql_date_add(GenericFunction):
+    name = 'date_add'
+
+    def __init__(self, *clauses, **kwargs):
+        self.additions = {
+            unit: kwargs.get(unit, 0)
+            for unit in DATE_ADD_UNITS
+        }
+
+        kwargs = dissoc(kwargs, *DATE_ADD_UNITS)
+
+        super().__init__(*clauses, **kwargs)
+
+@compiles(sql_date_add)
+def compile_sql_date_add(element, compiler, **kw):
+    dt, *args = list(element.clauses)
+    a = {
+        unit: func.cast(val, sqlalchemy.Integer)
+        for unit, val in element.additions.items()
+    }
+
+    dt = func.cast(dt, sqlalchemy.DateTime)
+    interval = func.make_interval(*[a[unit] for unit in DATE_ADD_UNITS])
+
+    return compiler.process(dt + interval)
