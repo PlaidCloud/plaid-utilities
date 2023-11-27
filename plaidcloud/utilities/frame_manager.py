@@ -2699,7 +2699,7 @@ def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
 
 
 def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
-    df = pd.read_parquet(parquet_file_name, enginge='fastparquet')
+    df = pd.read_parquet(parquet_file_name, engine='fastparquet')
     if start_row:
         df = df.iloc[start_row:]
     df.to_csv(
