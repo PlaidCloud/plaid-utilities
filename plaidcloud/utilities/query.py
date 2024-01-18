@@ -14,7 +14,7 @@ from sqlalchemy_hana.dialect import HANAHDBCLIDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
-from plaidcloud.rpc.rpc_connect import Connect
+from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
 
@@ -38,14 +38,14 @@ _NA_VALUES = {'-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
               '-nan', ''}
 
 
-class Connection(object):
+class Connection:
 
-    def __init__(self, project: str = None, rpc: Connect = None):
+    def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None):
         """
 
         Args:
             project (str, optional): A Project Identifier
-            rpc (Connect, optional): An RPC Connection object
+            rpc (Connect, PlaidXLConnect, optional): An RPC Connection object
         """
         if rpc:
             self.rpc = rpc
