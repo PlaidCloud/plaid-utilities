@@ -120,13 +120,9 @@ class PlaidConnection(Connect, Connection):
 
 class PlaidXLConnection(PlaidXLConnect, Connection):
 
-    def __init__(self, *, rpc_uri: str, auth_token: str, workspace_id: str='', project_id: str=''):
+    def __init__(self, *, rpc_uri: str, auth_token: str, workspace_id: str = '', project_id: str = ''):
         PlaidXLConnect.__init__(self, rpc_uri=rpc_uri, auth_token=auth_token, workspace_id=workspace_id, project_id=project_id)
         Connection.__init__(self, rpc=self)
-        self._logger = Logger(rpc=self)
-        self._logger.debug(f'Connected to host "{self.hostname}"')
-        if isinstance(self._project_id, str) and self._project_id != '':
-            self._logger.debug('Project ID: {0}'.format(self.project_id))
 
     def get_table(self, table_name):
         return Table(self, table_name)
