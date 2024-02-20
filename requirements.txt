@@ -3,12 +3,9 @@ chardet
 fastavro
 fastparquet
 ipython
-minimock
 numpy
 pandas
 plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.3.2#egg=plaidcloud-rpc
-pytest
-pytest-cov
 pyyaml
 requests
 setuptools
