@@ -9,6 +9,7 @@ from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
 from toolz.dicttoolz import dissoc
+from plaidcloud.rpc.type_conversion import python_date_from_sql
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
@@ -190,10 +191,10 @@ def compile_import_cast_hana(element, compiler, **kw):
         return compiler.process(col) + '::interval'
     elif dtype == 'boolean':
         return compiler.process(
-            func.case(
-                (func.to_nvarchar(col) == 'True', 1),
-                (func.to_nvarchar(col) == 'False', 0),
-                else_=None
+            sqlalchemy.case(
+                (func.to_nvarchar(col) == 'True', sqlalchemy.literal(1, sqlalchemy.Integer)),
+                (func.to_nvarchar(col) == 'False', sqlalchemy.literal(0, sqlalchemy.Integer)),
+                else_=col
             )
         )
     elif dtype == 'integer':
@@ -203,7 +204,54 @@ def compile_import_cast_hana(element, compiler, **kw):
     elif dtype == 'smallint':
         return compiler.process(func.to_smallint(func.to_nvarchar(col)))
     elif dtype == 'numeric':
-        return compiler.process(func.to_decimal(func.to_nvarchar(col), 34, 10))
+        return compiler.process(func.to_decimal(func.to_nvarchar(col), 38, 10))
+
+
+@compiles(import_cast, 'databend')
+def compile_import_cast_databend(element, compiler, **kw):
+    col, dtype, date_format, trailing_negs = list(element.clauses)
+    dtype = dtype.value
+    datetime_format = python_date_from_sql(date_format.value) + ' %z'
+    date_format = python_date_from_sql(date_format.value, True)
+    trailing_negs = trailing_negs.value
+
+    if dtype == 'date':
+        return compiler.process(func.to_date(col, date_format), **kw)
+    elif dtype == 'timestamp':
+        return compiler.process(func.to_timestamp(func.concat(col, ' +0000'), datetime_format), **kw)
+    elif dtype == 'time':
+        return compiler.process(func.to_timestamp(col, '%H:%M:%S'), **kw)
+    elif dtype == 'interval':
+        # ToDo - Databend doesn't have an interval data type
+        return compiler.process(col, **kw) + '::interval'
+    elif dtype == 'boolean':
+        return compiler.process(
+            func.to_boolean(
+                func.cast(
+                    sqlalchemy.case(
+                        (func.to_string(col) == 't', sqlalchemy.literal('TRUE', sqlalchemy.String)),
+                        (func.to_string(col) == '1', sqlalchemy.literal('TRUE', sqlalchemy.String)),
+                        (func.to_string(col) == 'f', sqlalchemy.literal('FALSE', sqlalchemy.String)),
+                        (func.to_string(col) == '0', sqlalchemy.literal('FALSE', sqlalchemy.String)),
+                        else_=col
+                    ),
+                    sqlalchemy.String,
+                )
+            ),
+            **kw
+        )
+    # ToDo - Databend can't handle sending a format to parse number that I can see so trailing_negs is a tough parse
+    elif dtype == 'integer':
+        return compiler.process(func.to_int32(col))
+    elif dtype == 'bigint':
+        return compiler.process(func.to_int64(col))
+    elif dtype == 'smallint':
+        return compiler.process(func.to_int16(col))
+    elif dtype == 'numeric':
+        return compiler.process(func.cast(col, sqlalchemy.Numeric(38, 10)))
+    else:
+        #if dtype == 'text':
+        return compiler.process(col, **kw)
 
 
 class safe_to_timestamp(GenericFunction):
