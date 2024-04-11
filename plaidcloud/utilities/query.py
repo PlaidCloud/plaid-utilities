@@ -4,7 +4,6 @@ import os
 import tempfile
 import uuid
 import unicodecsv as csv
-from io import StringIO
 
 import pandas as pd
 import numpy as np
@@ -12,6 +11,7 @@ import sqlalchemy
 from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlalchemy_hana.dialect import HANAHDBCLIDialect
 from sqlalchemy_greenplum.dialect import GreenplumDialect
+from databend_sqlalchemy.databend_dialect import DatabendDialect
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
@@ -69,6 +69,8 @@ class Connection:
 
         _dialect_kind = self.rpc.analyze.query.dialect()
 
+        if _dialect_kind == 'databend':
+            self.dialect = DatabendDialect()
         if _dialect_kind == 'greenplum':
             self.dialect = GreenplumDialect()
         elif _dialect_kind == 'hana':
