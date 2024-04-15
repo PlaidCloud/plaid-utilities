@@ -22,6 +22,7 @@ import numpy as np
 import orjson as json
 
 from plaidcloud.rpc import utc
+from plaidcloud.rpc.type_conversion import analyze_type
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.utilities.query import Connection, Table
@@ -3053,6 +3054,12 @@ def save(frame, name, conn=None, append=False, chunk_size=500000):
 
     #logger.debug('Project ID: {0}'.format(conn.project_id))
 
-    t = Table(conn, name)
+    t = Table(conn, name, columns=[
+        {
+            'id': col,
+            'dtype': analyze_type(dtype)
+        }
+        for col, dtype in zip(frame.columns, frame.dtypes)
+    ])
     logger.debug('Table ID is: {0}'.format(t.id))
     conn.bulk_insert_dataframe(t, frame, append=append, chunk_size=chunk_size)
