@@ -367,7 +367,7 @@ class Connection:
 
     def _load_csv(
         self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\',
-        date_format='YYYY-MM-DD', source_columns=None, append=False, update_table_shape=True, compressed=True
+        date_format='YYYY-MM-DD"T"HH24:MI:SS', source_columns=None, append=False, update_table_shape=True, compressed=True
     ):
         return self.rpc.analyze.table.load_csv(
             project_id=project_id,

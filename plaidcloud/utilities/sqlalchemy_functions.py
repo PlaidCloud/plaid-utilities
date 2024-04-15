@@ -38,6 +38,11 @@ def compile_es_mssql(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return "datediff(ss, %s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
+@compiles(elapsed_seconds, 'databend')
+def compile_es_databend(element, compiler, **kw):
+    start_date, end_date = list(element.clauses)
+    return "(CAST(COALESCE(%s, NOW()) AS INT64 - CAST(%s AS INT64)) / 1000000" % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
+
 
 class avg(ReturnTypeFromArgs):
     pass
@@ -211,14 +216,21 @@ def compile_import_cast_hana(element, compiler, **kw):
 def compile_import_cast_databend(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
-    datetime_format = python_date_from_sql(date_format.value) + ' %z'
+    datetime_format = python_date_from_sql(date_format.value)
     date_format = python_date_from_sql(date_format.value, True)
     trailing_negs = trailing_negs.value
 
     if dtype == 'date':
-        return compiler.process(func.to_date(col, date_format), **kw)
+        return compiler.process(
+            func.coalesce(
+                func.to_date(func.to_timestamp(col, datetime_format)),
+                func.to_date(func.to_timestamp(col, date_format)),
+                func.to_timestamp(col),
+            ),
+            **kw
+        )
     elif dtype == 'timestamp':
-        return compiler.process(func.to_timestamp(func.concat(col, ' +0000'), datetime_format), **kw)
+        return compiler.process(func.to_timestamp(col, datetime_format), **kw)
     elif dtype == 'time':
         return compiler.process(func.to_timestamp(col, '%H:%M:%S'), **kw)
     elif dtype == 'interval':
@@ -368,6 +380,7 @@ def compile_sql_metric_multiply(element, compiler, **kw):
 
 class sql_numericize(GenericFunction):
     name = 'numericize'
+    inherit_cache = False
 
 @compiles(sql_numericize)
 def compile_sql_numericize(element, compiler, **kw):
@@ -383,6 +396,27 @@ def compile_sql_numericize(element, compiler, **kw):
             func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
             func.nullif(
                 func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
+                ''
+            )
+        )
+
+    return compiler.process(sql_only_numeric(arg), **kw)
+
+
+@compiles(sql_numericize, 'databend')
+def compile_sql_numericize_databend(element, compiler, **kw):
+    """
+    Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
+    """
+    arg, = list(element.clauses)
+
+    def sql_only_numeric(text):
+        # Returns substring of numeric values only (-, ., numbers, scientific notation)
+        cast_text = func.cast(text, sqlalchemy.Text)
+        return func.coalesce(
+            func.regexp_substr(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.nullif(
+                func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 1, 0),  # remove all the non-numeric characters
                 ''
             )
         )
@@ -414,6 +448,16 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
     arg, = list(element.clauses)
 
     return compiler.process(func.cast(func.trunc(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
+
+
+@compiles(sql_integerize_truncate, 'databend')
+def compile_sql_integerize_truncate_databend(element, compiler, **kw):
+    """
+    Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
+    """
+    arg, = list(element.clauses)
+
+    return compiler.process(func.cast(func.truncate(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
 
 #
 # class sql_left(GenericFunction):
@@ -514,6 +558,7 @@ def compile_sql_slice_string(element, compiler, **kw):
             )
         raise NotImplementedError
 
+
 class sql_zfill(GenericFunction):
     name = 'zfill'
 
@@ -557,6 +602,16 @@ def compile_sql_normalize_whitespace(element, compiler, **kw):
         func.regexp_replace(field, ww_re, ' ', 'g')
     )
 
+@compiles(sql_normalize_whitespace, 'databend')
+def compile_sql_normalize_whitespace(element, compiler, **kw):
+    field, *args = list(element.clauses)
+    field = func.cast(field, sqlalchemy.Text)
+
+    ww_re = '[' + ''.join(['\\' + c for c in WEIRD_WHITESPACE_CHARS]) + ']+'
+
+    return compiler.process(
+        func.regexp_replace(field, ww_re, ' ', 1, 0)
+    )
 
 class safe_unix_to_timestamp(GenericFunction):
     name = 'unix_to_timestamp'
@@ -568,6 +623,7 @@ def compile_safe_unix_to_timestamp(element, compiler, **kw):
 
     return f"to_timestamp({compiler.process(timestamp)})"
 
+
 class safe_to_date(GenericFunction):
     name = 'to_date'
 
@@ -577,9 +633,12 @@ def compile_safe_to_date(element, compiler, **kw):
     # date strings.
     #
     # See ALYZ-2428
-    text, date_format = list(element.clauses)
+    text, *args = list(element.clauses)
+    if len(args):
+        date_format = args[0]
+        return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
-    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
+    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
 
 
 class safe_round(GenericFunction):
@@ -629,6 +688,17 @@ def compile_safe_ltrim(element, compiler, **kw):
 
     return f"ltrim({compiler.process(text)})"
 
+@compiles(safe_ltrim, 'databend')
+def compile_safe_ltrim_databend(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"TRIM(LEADING {compiled_args} FROM {compiler.process(text)})"
+
+    return f"TRIM(LEADING FROM {compiler.process(text)})"
+
 
 class safe_rtrim(GenericFunction):
     name = 'rtrim'
@@ -643,6 +713,18 @@ def compile_safe_rtrim(element, compiler, **kw):
         return f"rtrim({compiler.process(text)}, {compiled_args})"
 
     return f"rtrim({compiler.process(text)})"
+
+
+@compiles(safe_rtrim, 'databend')
+def compile_safe_rtrim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"TRIM(TRAILING {compiled_args} FROM {compiler.process(text)})"
+
+    return f"TRIM(TRAILING FROM {compiler.process(text)})"
 
 
 class safe_trim(GenericFunction):
@@ -671,6 +753,17 @@ def compile_sql_only_ascii(element, compiler, **kw):
 
     return compiler.process(
         func.regexp_replace(text, r'[^[:ascii:]]+', '', 'g'),
+        **kw
+    )
+
+@compiles(sql_only_ascii, 'databend')
+def compile_sql_only_ascii_databend(element, compiler, **kw):
+    # Remove non-ascii characters
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    return compiler.process(
+        func.regexp_replace(text, r'[^[:ascii:]]+', '', 1, 0),
         **kw
     )
 
