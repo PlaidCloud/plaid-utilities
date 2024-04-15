@@ -2303,7 +2303,7 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
                 extrasaction='ignore',
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"'
+                escapechar='\\'
             )
             if writeheader:
                 wr.writeheader()
@@ -2413,7 +2413,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
             csv_file,
             delimiter='\t',
             quotechar='"',
-            escapechar='"',
+            escapechar='\\',
         )
         skipped_rows = 0
         # Do some cleaning to account for common human errors
@@ -2602,7 +2602,7 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
             csv_file,
             delimiter='\t',
             quotechar='"',
-            escapechar='"',
+            escapechar='\\',
         )
 
         skipped_rows = 0
@@ -2670,7 +2670,7 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
+        escapechar='\\',
     )
 
 
@@ -2692,7 +2692,7 @@ def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
                 fieldnames=header,
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"',
+                escapechar='\\',
             )
             writer.writeheader()
             writer.writerows(reader)
@@ -2707,7 +2707,7 @@ def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
+        escapechar='\\',
     )
 
 
