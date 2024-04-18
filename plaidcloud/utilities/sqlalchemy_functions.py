@@ -217,18 +217,19 @@ def compile_import_cast_databend(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
     datetime_format = python_date_from_sql(date_format.value)
-    date_format = python_date_from_sql(date_format.value, True)
+    # date_format = python_date_from_sql(date_format.value, True)
     trailing_negs = trailing_negs.value
 
     if dtype == 'date':
-        return compiler.process(
-            func.coalesce(
-                func.to_date(func.to_timestamp(col, datetime_format)),
-                func.to_date(func.to_timestamp(col, date_format)),
-                func.to_timestamp(col),
-            ),
-            **kw
-        )
+        return compiler.process(func.to_date(func.to_timestamp(col, datetime_format)))
+        # return compiler.process(
+        #     func.coalesce(
+        #         func.to_date(func.to_timestamp(col, datetime_format)),
+        #         func.to_date(func.to_timestamp(col, date_format)),
+        #         func.to_timestamp(col),
+        #     ),
+        #     **kw
+        # )
     elif dtype == 'timestamp':
         return compiler.process(func.to_timestamp(col, datetime_format), **kw)
     elif dtype == 'time':
