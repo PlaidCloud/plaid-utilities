@@ -9,10 +9,6 @@ import pandas as pd
 import numpy as np
 import sqlalchemy
 from sqlalchemy.dialects import registry
-# from sqlalchemy.dialects.postgresql.base import PGDialect
-# from sqlalchemy_hana.dialect import HANAHDBCLIDialect
-# from sqlalchemy_greenplum.dialect import GreenplumDialect
-# from databend_sqlalchemy.databend_dialect import DatabendDialect
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
@@ -75,23 +71,6 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls()
-
-        # if _dialect_kind == 'databend':
-        #     self.dialect = DatabendDialect()
-        # if _dialect_kind == 'greenplum':
-        #     self.dialect = GreenplumDialect()
-        # elif _dialect_kind == 'hana':
-        #     self.dialect = HANAHDBCLIDialect()
-        # elif _dialect_kind == 'hive':
-        #     raise Exception('Hive currently not supported from plaidcloud utilities.')
-        # elif _dialect_kind == 'spark':
-        #     raise Exception('Spark currently not supported from plaidcloud utilities.')
-        # elif _dialect_kind == 'oracle':
-        #     raise Exception('Oracle currently not supported from plaidcloud utilities.')
-        # elif _dialect_kind == 'mssql':
-        #     raise Exception('MS SQL Server currently not supported from plaidcloud utilities.')
-        # else:
-        #     self.dialect = PGDialect()
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
