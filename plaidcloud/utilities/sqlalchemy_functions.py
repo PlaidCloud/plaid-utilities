@@ -611,6 +611,18 @@ def compile_safe_trim(element, compiler, **kw):
 
     return f"trim({compiler.process(text)})"
 
+class to_char(GenericFunction):
+    name = 'to_char'
+
+@compiles(to_char)
+def compile_to_char(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    return compiler.process(
+        func.to_string(text),
+        **kw
+    )
 
 class sql_only_ascii(GenericFunction):
     name = 'ascii'
