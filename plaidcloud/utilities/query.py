@@ -499,7 +499,7 @@ class Connection:
                     delimiter='\t',
                     null_as='NaN',
                     quote='"',
-                    escape='\\',
+                    escape='"',
                     append=append or row > 0,
                     compressed=True,
                 )
