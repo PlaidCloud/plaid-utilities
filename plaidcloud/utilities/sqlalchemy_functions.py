@@ -868,6 +868,7 @@ def compile_sql_date_add(element, compiler, **kw):
 
 ### Databend
 
+# Still need to check this one
 class sql_to_char(GenericFunction):
     name = 'to_char'
 
@@ -957,25 +958,28 @@ def compile_to_char(element, compiler, **kw):
 class sql_to_number(GenericFunction):
     name = 'to_number'
 
+# Need to come back to this one
 @compiles(sql_to_number, 'databend')
 def compile_to_number(element, compiler, **kw):
     # It seems like all the uses of this in expressions are using the format string '999999'
     string, format_ = list(element.clauses)
-    if any([c == '9' for c in format_]):
+    if any([c != '9' for c in format_]):
         raise Exception('to_number is only provided for backwards compatibility for existing expressions. Please use databend functions instead.')
     return compiler.process(
         func.to_int64(string)
     )
 
-class sql_current_date(GenericFunction):
-    name = 'current_date'
+# This one worked even without importing, so it's not necessary
+# class sql_current_date(GenericFunction):
+#     name = 'current_date'
 
-@compiles(sql_current_date, 'databend')
-def compile_current_date(element, compiler, **kw):
-    return compiler.process(
-        func.today()
-    )
+# @compiles(sql_current_date, 'databend')
+# def compile_current_date(element, compiler, **kw):
+#     return compiler.process(
+#         func.today()
+#     )
 
+#Why didn't this work?
 class sql_transaction_timestamp(GenericFunction):
     name = 'transaction_timestamp'
 
@@ -1014,7 +1018,7 @@ def compile_string_to_array(element, compiler, **kw):
 
     split_array =  sqlalchemy.case(
         ((delimiter == ''), [string]),
-        ((delimiter is None), func.split(string, '')),
+        ((delimiter == None), func.split(string, '')),
         else_=func.split(string, delimiter),
     )
 
