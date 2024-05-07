@@ -961,7 +961,7 @@ class sql_to_number(GenericFunction):
 def compile_to_number(element, compiler, **kw):
     # It seems like all the uses of this in expressions are using the format string '999999'
     string, format_ = list(element.clauses)
-    if any([c='9' for c in format_]):
+    if any([c == '9' for c in format_]):
         raise Exception('to_number is only provided for backwards compatibility for existing expressions. Please use databend functions instead.')
     return compiler.process(
         func.to_int64(string)
