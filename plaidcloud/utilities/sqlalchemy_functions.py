@@ -314,6 +314,7 @@ class safe_extract(GenericFunction):
     name = 'extract'
 
 
+# This one should work with databend, assuming timestamp types are the same
 @compiles(safe_extract)
 def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
@@ -560,6 +561,7 @@ def compile_sql_slice_string(element, compiler, **kw):
         raise NotImplementedError
 
 
+# This should work with databend, assuming types are fine. length and lpad are available
 class sql_zfill(GenericFunction):
     name = 'zfill'
 
@@ -816,6 +818,7 @@ def compile_sql_set_null(element, compiler, **kw):
     )
 
 
+# I think this one works with databend if sqlalchemy.Numeric is a reasonable thing. Nullif is available. Coalesce is available.
 class sql_safe_divide(GenericFunction):
     name = 'safe_divide'
 
@@ -862,3 +865,172 @@ def compile_sql_date_add(element, compiler, **kw):
     interval = func.make_interval(*[a[unit] for unit in DATE_ADD_UNITS])
 
     return compiler.process(dt + interval)
+
+### Databend
+
+class sql_to_char(GenericFunction):
+    name = 'to_char'
+
+@compiles(sql_to_char, 'databend')
+def compile_to_char(element, compiler, **kw):
+    # These already in use format strings are supported*
+    # 'YYYYMMDD'
+    # 'YYYY-MM-DD'
+    # 'LFM999,999,999,999D00'
+    # '999,999,999'
+    # '999,999,999.9'
+    # '000000'
+    # 'FM9999999999999.00'
+    # '999,999,999.999999999'
+    # ''
+    # 'IYYY-IW'
+    # 'YYYYMM'
+    #
+    # *except commas and FMs will be ignored. L and D will be replaced by $ and . respectively, regardless of locale
+    source, *args = list(element.clauses)
+    if args:
+        format_, *args = args
+    else:
+        format_ = None
+
+    if not format_:
+        return compiler.process(
+            func.to_string(source)
+        )
+    elif '0' in format_ or '9' in format_:
+        # This is a format for formatting a number
+        expr = source
+        if '.' in format_:
+            left, right = format_.split('.', 1)
+        elif 'D' in format_:
+            left, right = format_.split('D', 1)
+        else:
+            left = format_
+            right = None
+
+        if right is None:
+            truncated_source = func.truncate(source, 0)
+        else:
+            decimal_places = len([ch for ch in right if ch in ['0', '9']])
+            truncated_source = func.truncate(source, decimal_places)
+
+        integer_part = func.truncate(truncated_source, 0)
+        integer_non_drop_digits = len([ch for ch in left if ch == '0'])
+        integer_str = func.to_string(integer_part)
+        if integer_non_drop_digits:
+            integer_str = func.lpad(integer_str, integer_non_drop_digits)
+        if ',' in left:
+            #TODO - insert commas into integer_str every three spaces
+            # If we could split into groups of three, starting from the right, then func.concat_ws(',', *groups of three) could maybe do it. Not sure how to do *args in sql either though.
+            pass
+        if left.startswith('L') or left.startswith('$'):
+            integer_str = func.concat('$', integer_str)
+
+        if right is None:
+            final_str = integer_str
+        else:
+            decimal_part = truncated_source - integer_part
+            decimal_non_drop_digits = len([ch for ch in right if ch == '0'])
+            decimal_str = func.to_string(decimal_part)
+            if decimal_non_drop_digits:
+                decimal_str = func.rpad(decimal_str, decimal_non_drop_digits)
+            final_str = func.concat(integer_str, '.', decimal_str)
+
+        return compiler.process(final_str)
+
+    else:
+        # This is probably a format for formatting a date, or it's empty
+        # long string of conversions on format_ go here
+        final_format = (
+            format_
+            .replace('YYYY', '%Y')
+            .replace('MM', '%m')
+            .replace('DD', '%d')
+            .replace('IYYY', '%G')
+            .replace('IW', '%V')
+        )
+        return compiler.process(
+            func.to_string(source, final_format)
+        )
+
+
+class sql_to_number(GenericFunction):
+    name = 'to_number'
+
+@compiles(sql_to_number, 'databend')
+def compile_to_number(element, compiler, **kw):
+    # It seems like all the uses of this in expressions are using the format string '999999'
+    string, format_ = list(element.clauses)
+    if any([c='9' for c in format_]):
+        raise Exception('to_number is only provided for backwards compatibility for existing expressions. Please use databend functions instead.')
+    return compiler.process(
+        func.to_int64(string)
+    )
+
+class sql_current_date(GenericFunction):
+    name = 'current_date'
+
+@compiles(sql_current_date, 'databend')
+def compile_current_date(element, compiler, **kw):
+    return compiler.process(
+        func.today()
+    )
+
+class sql_transaction_timestamp(GenericFunction):
+    name = 'transaction_timestamp'
+
+@compiles(sql_transaction_timestamp, 'databend')
+def compile_transaction_timestamp(element, compiler, **kw):
+    #TODO
+    # this doesn't seem to be available in databend. Maybe we could add it in rust?
+    # For now, something that's incorrect but might work as a placeholder depending on how it's being used
+    # It seemss like all the uses of this in expressions are just putting it in a column. I'd need more details about how they're actually being used to say more.
+    return compiler.process(
+        func.now()
+    )
+
+class sql_strpos(GenericFunction):
+    name = 'strpos'
+
+@compiles(sql_strpos, 'databend')
+def compile_strpos(element, compiler, **kw):
+    string, substring = list(element.clauses)
+    return compiler.process(
+        func.locate(substring, string)
+    )
+
+class sql_string_to_array(GenericFunction):
+    name = 'string_to_array'
+
+@compiles(sql_string_to_array, 'databend')
+def compile_string_to_array(element, compiler, **kw):
+    string, delimiter, *args = list(element.clauses)
+    if args:
+        no_null_string = False
+        null_string, *args = args
+    else:
+        no_null_string = True
+        null_string = None
+
+    split_array =  sqlalchemy.case(
+        ((delimiter == ''), [string]),
+        ((delimiter is None), func.split(string, '')),
+        else_=func.split(string, delimiter),
+    )
+
+    if no_null_string:
+        return compiler.process(
+            split_array
+        )
+
+    return compiler.process(
+        func.array_transform(
+            split_array,
+            sqlalchemy.lambda_stmt(
+                lambda element: sqlalchemy.case(
+                    ((element == null_string), None),
+                    else_=element
+                )
+            ),
+        )
+    )
