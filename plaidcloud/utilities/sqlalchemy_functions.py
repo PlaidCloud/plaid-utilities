@@ -893,7 +893,7 @@ def compile_to_char(element, compiler, **kw):
         format_, *args = args
         print(format_)
         print(type(format_))
-        format_ = str(format_)
+        print(str(format_))
     else:
         format_ = None
 
