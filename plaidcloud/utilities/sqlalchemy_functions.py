@@ -891,10 +891,13 @@ def compile_to_char(element, compiler, **kw):
     source, *args = list(element.clauses)
     if args:
         format_, *args = args
+        print(format_)
+        print(type(format_))
+        format_ = str(format_)
     else:
         format_ = None
 
-    if not format_:
+    if format_ is None:
         return compiler.process(
             func.to_string(source)
         )
