@@ -894,6 +894,8 @@ def compile_to_char(element, compiler, **kw):
         print(format_)
         print(type(format_))
         print(str(format_))
+        print(format_.effective_value)
+        format_ = format_.effective_value
     else:
         format_ = None
 
