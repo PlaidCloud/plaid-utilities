@@ -963,8 +963,6 @@ class sql_to_number(GenericFunction):
 def compile_to_number(element, compiler, **kw):
     # It seems like all the uses of this in expressions are using the format string '999999'
     string, format_ = list(element.clauses)
-    if any([c != '9' for c in format_]):
-        raise Exception('to_number is only provided for backwards compatibility for existing expressions. Please use databend functions instead.')
     return compiler.process(
         func.to_int64(string)
     )
@@ -979,7 +977,6 @@ def compile_to_number(element, compiler, **kw):
 #         func.today()
 #     )
 
-#Why didn't this work?
 class sql_transaction_timestamp(GenericFunction):
     name = 'transaction_timestamp'
 
@@ -1009,12 +1006,7 @@ class sql_string_to_array(GenericFunction):
 @compiles(sql_string_to_array, 'databend')
 def compile_string_to_array(element, compiler, **kw):
     string, delimiter, *args = list(element.clauses)
-    if args:
-        no_null_string = False
-        null_string, *args = args
-    else:
-        no_null_string = True
-        null_string = None
+    # null_string is not supported
 
     split_array =  sqlalchemy.case(
         ((delimiter == ''), [string]),
@@ -1022,19 +1014,4 @@ def compile_string_to_array(element, compiler, **kw):
         else_=func.split(string, delimiter),
     )
 
-    if no_null_string:
-        return compiler.process(
-            split_array
-        )
-
-    return compiler.process(
-        func.array_transform(
-            split_array,
-            sqlalchemy.lambda_stmt(
-                lambda element: sqlalchemy.case(
-                    ((element == null_string), None),
-                    else_=element
-                )
-            ),
-        )
-    )
+    return compiler.process(split_array)
