@@ -818,7 +818,6 @@ def compile_sql_set_null(element, compiler, **kw):
     )
 
 
-# I think this one works with databend if sqlalchemy.Numeric is a reasonable thing. Nullif is available. Coalesce is available.
 class sql_safe_divide(GenericFunction):
     name = 'safe_divide'
 
@@ -899,15 +898,18 @@ def compile_to_char(element, compiler, **kw):
         return compiler.process(
             func.to_string(source)
         )
-    elif '0' in format_ or '9' in format_:
+
+    if '0' in format_ or '9' in format_:
         # This is a format for formatting a number
-        expr = source
         if '.' in format_:
             left, right = format_.split('.', 1)
         elif 'D' in format_:
             left, right = format_.split('D', 1)
         else:
-            left = format_
+               # this doesn't seem to be available in databend. Maybe we could add it in rust?
+    # For now, something that's incorrect but might work as a placeholder depending on how it's being used
+    # It seems like all the uses of this in expressions are just putting it in a column. I'd need more details about how they're actually being used to say more.
+ left = format_
             right = None
 
         if right is None:
@@ -921,10 +923,6 @@ def compile_to_char(element, compiler, **kw):
         integer_str = func.to_string(integer_part)
         if integer_non_drop_digits:
             integer_str = func.lpad(integer_str, integer_non_drop_digits)
-        if ',' in left:
-            #TODO - insert commas into integer_str every three spaces
-            # If we could split into groups of three, starting from the right, then func.concat_ws(',', *groups of three) could maybe do it. Not sure how to do *args in sql either though.
-            pass
         if left.startswith('L') or left.startswith('$'):
             integer_str = func.concat('$', integer_str)
 
@@ -963,29 +961,17 @@ class sql_to_number(GenericFunction):
 @compiles(sql_to_number, 'databend')
 def compile_to_number(element, compiler, **kw):
     # It seems like all the uses of this in expressions are using the format string '999999'
-    string, format_ = list(element.clauses)
+    string, _ = list(element.clauses)
     return compiler.process(
         func.to_int64(string)
     )
-
-# This one worked even without importing, so it's not necessary
-# class sql_current_date(GenericFunction):
-#     name = 'current_date'
-
-# @compiles(sql_current_date, 'databend')
-# def compile_current_date(element, compiler, **kw):
-#     return compiler.process(
-#         func.today()
-#     )
 
 class sql_transaction_timestamp(GenericFunction):
     name = 'transaction_timestamp'
 
 @compiles(sql_transaction_timestamp, 'databend')
 def compile_transaction_timestamp(element, compiler, **kw):
-    # this doesn't seem to be available in databend. Maybe we could add it in rust?
-    # For now, something that's incorrect but might work as a placeholder depending on how it's being used
-    # It seems like all the uses of this in expressions are just putting it in a column. I'd need more details about how they're actually being used to say more.
+    # Not available in databend
     return compiler.process(
         func.now()
     )
