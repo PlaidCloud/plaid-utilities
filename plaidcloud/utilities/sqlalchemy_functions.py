@@ -906,10 +906,7 @@ def compile_to_char(element, compiler, **kw):
         elif 'D' in format_:
             left, right = format_.split('D', 1)
         else:
-               # this doesn't seem to be available in databend. Maybe we could add it in rust?
-    # For now, something that's incorrect but might work as a placeholder depending on how it's being used
-    # It seems like all the uses of this in expressions are just putting it in a column. I'd need more details about how they're actually being used to say more.
- left = format_
+            left = format_
             right = None
 
         if right is None:
