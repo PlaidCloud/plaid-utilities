@@ -1064,6 +1064,13 @@ def allocate(
     def _is_source_col(col):
         return col not in set(reassignment_columns + (allocate_columns if overwrite_cols_for_allocated else []))
 
+    ratio_cols = [
+        dt
+        for dt in numerator_columns + denominator_columns + [driver_value_column]
+        if dt in all_driver_columns
+        and dt not in set(all_target_columns + reassignment_columns)
+    ]
+
     allocation_select = sqlalchemy.select(
         * [cte_source.columns[tc] for tc in all_target_columns if _is_source_col(tc)]
         + [cte_source.columns[tc].label(f'{tc}_source') for tc in all_target_columns if tc in include_source_columns]
@@ -1079,8 +1086,7 @@ def allocate(
         ]
         + [
             cte_ratios.columns[dt]
-            for dt in all_driver_columns
-            if dt not in set(all_target_columns + reassignment_columns)
+            for dt in ratio_cols
         ]
         + [
             sqlalchemy.case(
@@ -1121,8 +1127,7 @@ def allocate(
             + [cte_source.columns[rc] for rc in reassignment_columns]
             + [
                 cte_ratios.columns[dt]
-                for dt in all_driver_columns
-                if dt not in set(all_target_columns + reassignment_columns)
+                for dt in ratio_cols
             ]
             + [sqlalchemy.literal(0, type_=sqlalchemy.Integer).label('alloc_status')]
             + [
