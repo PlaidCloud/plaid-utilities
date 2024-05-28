@@ -27,6 +27,9 @@ class BaseTest(unittest.TestCase):
     def setUp(self) -> None:
         self.eng = sqlalchemy.create_engine(f'{self.dialect}://127.0.0.1/')
 
+class DatabendTest(BaseTest):
+
+    dialect = 'databend'
 
 
 class TestImportCol(BaseTest):
@@ -237,3 +240,70 @@ class TestDateAdd(BaseTest):
         self.assertEqual(0, compiled.params['param_5'])
         self.assertEqual(0, compiled.params['param_6'])
         self.assertEqual(0, compiled.params['param_7'])
+
+
+class TestTransactionTimestamp(DatabendTest):
+    def test_transaction_timestamp(self):
+        expr = sqlalchemy.func.transaction_timestamp()
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('now()', str(compiled))
+
+class TestStrpos(DatabendTest):
+    def test_strpos(self):
+        expr = sqlalchemy.func.strpos('databend', 'be')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('locate(%(strpos_1)s, %(strpos_2)s)', str(compiled))
+        self.assertEqual('be', compiled.params['strpos_1'])
+        self.assertEqual('databend', compiled.params['strpos_2'])
+
+class TestStringToArray(DatabendTest):
+    def test_string_to_array(self):
+        expr = sqlalchemy.func.string_to_array('1,2,3,4', ',')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'CASE WHEN (%(string_to_array_1)s = %(param_1)s) THEN %(param_2)s WHEN (%(string_to_array_1)s IS NULL) THEN split(%(string_to_array_2)s, %(split_1)s) ELSE split(%(string_to_array_2)s, %(string_to_array_1)s) END',
+            str(compiled)
+        )
+        self.assertEqual(',', compiled.params['string_to_array_1'])
+        self.assertEqual('', compiled.params['param_1'])
+        self.assertEqual('1,2,3,4', compiled.params['string_to_array_2'])
+        self.assertEqual('', compiled.params['split_1'])
+
+def TestToNumber(DatabendTest):
+    def test_to_number(self):
+        expr = func.to_number('12345', '999999')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_int64(%(to_number_1)s)', str(compiled))
+        self.assertEqual('12345', compiled.params['to_number_1'])
+
+class TestToChar(DatabendTest):
+    def test_to_char_number(self):
+        expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'concat(concat(%(concat_1)s, to_string(truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s))), %(concat_2)s, rpad(to_string(truncate(%(to_char_1)s, %(truncate_1)s) - truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s)), %(rpad_1)s))',
+            str(compiled),
+        )
+        self.assertEqual('$', compiled.params['concat_1'])
+        self.assertEqual(123456.789, compiled.params['to_char_1'])
+        self.assertEqual(2, compiled.params['truncate_1'])
+        self.assertEqual(0, compiled.params['truncate_2'])
+        self.assertEqual('.', compiled.params['concat_2'])
+        self.assertEqual(2, compiled.params['rpad_1'])
+
+    def test_to_char_date(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_string(%(to_char_1)s, %(to_string_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['to_char_1'])
+        self.assertEqual('%Y-%m-%d', compiled.params['to_string_1'])
+
+    def test_to_char_date_i(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'IYYY-IW')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_string(%(to_char_1)s, %(to_string_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['to_char_1'])
+        self.assertEqual('%G-%V', compiled.params['to_string_1'])
+
