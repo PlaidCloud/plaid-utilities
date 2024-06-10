@@ -394,10 +394,12 @@ def compile_sql_numericize(element, compiler, **kw):
     def sql_only_numeric(text):
         # Returns substring of numeric values only (-, ., numbers, scientific notation)
         cast_text = func.cast(text, sqlalchemy.Text)
+        trim_text = func.trim(cast_text)  # trim so that when we check for a sign at the beginning, we ignore spaces
         return func.coalesce(
             func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.substring(cast_text, r'(^[+\-])[^0-9\.]+)'),  # check for a number prefixed with a sign
             func.nullif(
-                func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 'g'),  # remove all the non-numeric characters
+                func.regexp_replace(cast_text, r'[^0-9\.]+', '', 'g'),  # remove all the non-numeric characters
                 ''
             )
         )
@@ -415,10 +417,12 @@ def compile_sql_numericize_databend(element, compiler, **kw):
     def sql_only_numeric(text):
         # Returns substring of numeric values only (-, ., numbers, scientific notation)
         cast_text = func.cast(text, sqlalchemy.Text)
+        trim_text = func.trim(cast_text)  # trim so that when we check for a sign at the beginning, we ignore spaces
         return func.coalesce(
-            func.regexp_substr(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.regexp_substr(trim_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
+            func.regexp_substr(trim_text, r'(^[+\-][^0-9\.]+)'),  # check for a number prefixed with a sign
             func.nullif(
-                func.regexp_replace(cast_text, r'[^0-9\.\+\-]+', '', 1, 0),  # remove all the non-numeric characters
+                func.regexp_replace(trim_text, r'[^0-9\.]+', '', 1, 0),  # remove all the non-numeric characters
                 ''
             )
         )
