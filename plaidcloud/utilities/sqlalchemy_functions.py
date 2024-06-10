@@ -397,7 +397,7 @@ def compile_sql_numericize(element, compiler, **kw):
         trim_text = func.trim(cast_text)  # trim so that when we check for a sign at the beginning, we ignore spaces
         return func.coalesce(
             func.substring(cast_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))'),  # check for valid scientific notation
-            func.substring(cast_text, r'(^[+\-])[^0-9\.]+)'),  # check for a number prefixed with a sign
+            func.substring(cast_text, r'(^[+\-][^0-9\.]+)'),  # check for a number prefixed with a sign
             func.nullif(
                 func.regexp_replace(cast_text, r'[^0-9\.]+', '', 'g'),  # remove all the non-numeric characters
                 ''
