@@ -14,6 +14,7 @@ from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
+from plaidcloud.utilities.remote.dimension import Dimensions
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
@@ -49,6 +50,8 @@ class Connection:
         else:
             self.rpc = Connect()
 
+        self.dims = Dimensions(conn=self.rpc)
+
         if project:
             try:
                 # See if this is a project ID already
@@ -63,6 +66,9 @@ class Connection:
                     self._project_id = self.rpc.analyze.project.lookup_by_name(name=project)
         else:
             self._project_id = rpc.project_id
+
+        if self._project_id:
+            self._project_name = self.rpc.analyze.project.project(project_id=self._project_id, keys=['name'])['name']
 
         _dialect_kind = self.rpc.analyze.query.dialect()
 
@@ -575,6 +581,18 @@ class Connection:
         if not self._project_id:
             raise Exception('Project Id has not been set')
         return self._project_id
+
+    @property
+    def project_name(self):
+        if not self._project_id:
+            raise Exception('Project Id has not been set')
+        return self._project_name
+    
+    def get_dimension(self, dimension_name):
+        return self.dims.get_dimension(name=dimension_name, replace=False).hierarchy_table()
+    
+    def get_table(self, table_name):
+        return Table(self, table_name)
 
 
 class Table(sqlalchemy.Table):
