@@ -757,6 +757,18 @@ def compile_safe_trim(element, compiler, **kw):
     return f"trim({compiler.process(text)})"
 
 
+@compiles(safe_trim, 'databend')
+def compile_safe_trim(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"TRIM(BOTH {compiled_args} FROM {compiler.process(text)})"
+
+    return f"TRIM({compiler.process(text)})"
+
+
 class sql_only_ascii(GenericFunction):
     name = 'ascii'
 
