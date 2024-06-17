@@ -221,7 +221,7 @@ def compile_import_cast_databend(element, compiler, **kw):
     trailing_negs = trailing_negs.value
 
     if dtype == 'date':
-        return compiler.process(func.to_date(func.to_timestamp(col, datetime_format)))
+        return compiler.process(func.to_date(col, datetime_format))
         # return compiler.process(
         #     func.coalesce(
         #         func.to_date(func.to_timestamp(col, datetime_format)),
@@ -628,18 +628,26 @@ def compile_safe_unix_to_timestamp(element, compiler, **kw):
 
 
 class safe_to_date(GenericFunction):
+    # This exists to make to_date behave as Silvio expects in the case of empty date strings.
+    # See ALYZ-2428
     name = 'to_date'
 
 @compiles(safe_to_date)
 def compile_safe_to_date(element, compiler, **kw):
-    # This exists to make to_date behave as Silvio expects in the case of empty
-    # date strings.
-    #
-    # See ALYZ-2428
     text, *args = list(element.clauses)
     if len(args):
         date_format = args[0]
         return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
+
+    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
+
+
+@compiles(safe_to_date, 'databend')
+def compile_safe_to_date(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    if len(args):
+        date_format = args[0]
+        return f"to_date(to_timestamp({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))}))"
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
 
