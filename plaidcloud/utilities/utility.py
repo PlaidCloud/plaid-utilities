@@ -12,7 +12,7 @@ import shutil
 import time
 import uuid
 
-from numpy import NaN
+from numpy import nan
 import pandas as pd
 
 from plaidcloud.utilities import data_helpers as dh
@@ -426,7 +426,7 @@ def prefix_ITEM(raw_ITEM):
         ITEM = 'ITEM_' + str(raw_ITEM).strip('ITEM_').zfill(8)
         return ITEM
     else:
-        return NaN
+        return nan
 
 
 def iter_dataframes(data_source, pd_read_csv_kwargs={'sep': '|'}):

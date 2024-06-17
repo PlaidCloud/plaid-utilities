@@ -697,7 +697,7 @@ def compile_safe_ltrim(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"ltrim({compiler.process(text)}, {compiled_args})"
 
@@ -708,7 +708,7 @@ def compile_safe_ltrim_databend(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"TRIM(LEADING {compiled_args} FROM {compiler.process(text)})"
 
@@ -723,7 +723,7 @@ def compile_safe_rtrim(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"rtrim({compiler.process(text)}, {compiled_args})"
 
@@ -735,7 +735,7 @@ def compile_safe_rtrim(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"TRIM(TRAILING {compiled_args} FROM {compiler.process(text)})"
 
@@ -750,7 +750,7 @@ def compile_safe_trim(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"trim({compiler.process(text)}, {compiled_args})"
 
@@ -762,7 +762,7 @@ def compile_safe_trim(element, compiler, **kw):
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 
-    if args:
+    if args and (len(args) > 1 or args[0].value != ''):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"TRIM(BOTH {compiled_args} FROM {compiler.process(text)})"
 
