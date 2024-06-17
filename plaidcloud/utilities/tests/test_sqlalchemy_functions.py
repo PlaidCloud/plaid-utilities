@@ -269,12 +269,58 @@ class TestStringToArray(DatabendTest):
         self.assertEqual('1,2,3,4', compiled.params['string_to_array_2'])
         self.assertEqual('', compiled.params['split_1'])
 
-def TestToNumber(DatabendTest):
+class TestToNumber(DatabendTest):
     def test_to_number(self):
-        expr = func.to_number('12345', '999999')
+        expr = sqlalchemy.func.to_number('12345', '999999')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual('to_int64(%(to_number_1)s)', str(compiled))
         self.assertEqual('12345', compiled.params['to_number_1'])
+
+
+class TestLTrim(DatabendTest):
+    def test_ltrim_plain(self):
+        expr = sqlalchemy.func.ltrim('12345', '')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(LEADING FROM CAST(%(ltrim_1)s AS TEXT))', str(compiled))
+        self.assertEqual('12345', compiled.params['ltrim_1'])
+
+    def test_ltrim_specific(self):
+        expr = sqlalchemy.func.ltrim('12345', '1')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(LEADING %(ltrim_1)s FROM CAST(%(ltrim_2)s AS TEXT))', str(compiled))
+        self.assertEqual('1', compiled.params['ltrim_1'])
+        self.assertEqual('12345', compiled.params['ltrim_2'])
+
+
+class TestRTrim(DatabendTest):
+    def test_rtrim_plain(self):
+        expr = sqlalchemy.func.rtrim('12345', '')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(TRAILING FROM CAST(%(rtrim_1)s AS TEXT))', str(compiled))
+        self.assertEqual('12345', compiled.params['rtrim_1'])
+
+    def test_rtrim_specific(self):
+        expr = sqlalchemy.func.rtrim('12345', '5')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(TRAILING %(rtrim_1)s FROM CAST(%(rtrim_2)s AS TEXT))', str(compiled))
+        self.assertEqual('5', compiled.params['rtrim_1'])
+        self.assertEqual('12345', compiled.params['rtrim_2'])
+
+
+class TestTrim(DatabendTest):
+    def test_trim_plain(self):
+        expr = sqlalchemy.func.trim('12345', '')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(CAST(%(trim_1)s AS TEXT))', str(compiled))
+        self.assertEqual('12345', compiled.params['trim_1'])
+
+    def test_trim_specific(self):
+        expr = sqlalchemy.func.trim('12345', '5')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('TRIM(BOTH %(trim_1)s FROM CAST(%(trim_2)s AS TEXT))', str(compiled))
+        self.assertEqual('5', compiled.params['trim_1'])
+        self.assertEqual('12345', compiled.params['trim_2'])
+
 
 class TestToChar(DatabendTest):
     def test_to_char_number(self):

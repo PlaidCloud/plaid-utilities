@@ -165,7 +165,7 @@ class TestDimension(TestCase):
                 ['', '', '+', 'main'],
                 ['   ', '   ', '+', 'main'],
                 ['Q5', '', '+', 'main'],
-                [np.NaN, np.NaN, '+', 'main'],
+                [np.nan, np.nan, '+', 'main'],
                 [None, None, '+', 'main'],
                 ['None', 'None', '+', 'main'],
                 ['Q5', 'Q5', '+', 'main'],
