@@ -353,3 +353,51 @@ class TestToChar(DatabendTest):
         self.assertEqual(dt, compiled.params['to_char_1'])
         self.assertEqual('%G-%V', compiled.params['to_string_1'])
 
+
+class TestSafeToDate(BaseTest):
+    def test_to_date(self):
+        expr = sqlalchemy.func.to_date('2019-01-05')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
+
+    def test_to_date_specifier(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('YYYY-MM-DD', compiled.params['param_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
+
+    def test_to_date_specifier_python(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', '%Y-%m-%d')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('YYYY-MM-DD', compiled.params['param_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
+
+class TestSafeToDateDB(DatabendTest):
+    def test_to_date(self):
+        expr = sqlalchemy.func.to_date('2019-01-05')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(nullif(TRIM(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
+
+    def test_to_date_specifier(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', '%Y-%m-%d')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(to_timestamp(nullif(TRIM(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT)))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
+
+    def test_to_date_specifier_postgres(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(to_timestamp(nullif(TRIM(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT)))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+        self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
+        self.assertEqual('', compiled.params['nullif_1'])
