@@ -9,7 +9,7 @@ from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
 from toolz.dicttoolz import dissoc
-from plaidcloud.rpc.type_conversion import python_date_from_sql
+from plaidcloud.rpc.type_conversion import postgres_to_python_date_format, python_to_postgres_date_format
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
@@ -158,13 +158,15 @@ class import_cast(GenericFunction):
 def compile_import_cast(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
-    date_format = date_format.value
+    datetime_format = date_format.value
+    if datetime_format and '%' in datetime_format:
+        datetime_format = python_to_postgres_date_format(datetime_format)
     trailing_negs = trailing_negs.value
 
     if dtype == 'date':
-        return compiler.process(func.to_date(col, date_format), **kw)
+        return compiler.process(func.to_date(col, datetime_format), **kw)
     elif dtype == 'timestamp':
-        return compiler.process(func.to_timestamp(col, date_format), **kw)
+        return compiler.process(func.to_timestamp(col, datetime_format), **kw)
     elif dtype == 'time':
         return compiler.process(func.to_timestamp(col, 'HH24:MI:SS'), **kw)
     elif dtype == 'interval':
@@ -183,13 +185,15 @@ def compile_import_cast(element, compiler, **kw):
 def compile_import_cast_hana(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
-    date_format = date_format.value
+    datetime_format = date_format.value
+    if datetime_format and '%' in datetime_format:
+        datetime_format = python_to_postgres_date_format(datetime_format)
     # trailing_negs = trailing_negs.value
 
     if dtype == 'text':
         return compiler.process(col)
     elif dtype == 'date':
-        return compiler.process(func.to_date(func.to_nvarchar(col), date_format))
+        return compiler.process(func.to_date(func.to_nvarchar(col), datetime_format))
     elif dtype == 'timestamp':
         return compiler.process(func.to_timestamp(func.to_nvarchar(col), 'YYYY-MM-DD HH24:MI:SS'))
     elif dtype == 'interval':
@@ -216,8 +220,9 @@ def compile_import_cast_hana(element, compiler, **kw):
 def compile_import_cast_databend(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
-    datetime_format = python_date_from_sql(date_format.value)
-    # date_format = python_date_from_sql(date_format.value, True)
+    datetime_format = date_format.value
+    if datetime_format and '%' not in datetime_format:
+        datetime_format = postgres_to_python_date_format(datetime_format)
     trailing_negs = trailing_negs.value
 
     if dtype == 'date':
@@ -640,7 +645,9 @@ class safe_to_date(GenericFunction):
 def compile_safe_to_date(element, compiler, **kw):
     text, *args = list(element.clauses)
     if len(args):
-        date_format = args[0]
+        date_format = args[0].value
+        if date_format and '%' in date_format:
+            date_format = python_to_postgres_date_format(date_format)
         return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
@@ -650,7 +657,9 @@ def compile_safe_to_date(element, compiler, **kw):
 def compile_safe_to_date(element, compiler, **kw):
     text, *args = list(element.clauses)
     if len(args):
-        date_format = args[0]
+        date_format = args[0].value
+        if date_format and '%' not in date_format:
+            date_format = postgres_to_python_date_format(date_format)
         return f"to_date(to_timestamp({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))}))"
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
