@@ -493,7 +493,8 @@ class Connection:
                     encoding='UTF-8',
                     quoting=csv.QUOTE_MINIMAL,
                     escapechar='"',
-                    compression='zip'
+                    compression='zip',
+                    date_format='%Y-%m-%dT%H:%M:%S', # This needs to match format passed in _load_csv below
                 )
                 csv_file.seek(0)
                 self._load_csv(
@@ -506,6 +507,7 @@ class Connection:
                     null_as='NaN',
                     quote='"',
                     escape='"',
+                    date_format='YYYY-MM-DD"T"HH24:MI:SS',
                     append=append or row > 0,
                     compressed=True,
                 )
