@@ -50,6 +50,122 @@ class TestImportCol(BaseTest):
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
 
+    def test_import_col_interval(self):
+        expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(str(compiled), 'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::interval END')
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+        self.assertEqual('', compiled.params['regexp_replace_3'])
+
+
+class TestImportColDatabend(DatabendTest):
+
+    def test_import_col_text(self):
+        expr = sqlalchemy.func.import_col('Column1', 'text', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('%(import_col_1)s', str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+
+    def test_import_col_numeric(self):
+        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(str(compiled), 'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END')
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+        self.assertEqual('', compiled.params['regexp_replace_3'])
+        self.assertEqual(0.0, compiled.params['param_1'])
+
+    def test_import_col_interval(self):
+        expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            str(compiled),
+            'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN NULL ELSE '
+            'coalesce('
+            'try_to_timestamp(%(import_col_1)s), '
+            'try_to_timestamp('
+            'concat(concat(concat(concat(concat(concat(concat(concat(concat(concat('
+            'CAST(%(coalesce_1)s + '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_1)s), %(regexp_replace_4)s, %(regexp_replace_5)s), %(nullif_1)s) AS INTEGER), %(coalesce_2)s) AS VARCHAR), %(param_1)s), '
+            'lpad(CAST(%(coalesce_3)s + '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_2)s), %(regexp_replace_6)s, %(regexp_replace_7)s), %(nullif_2)s) AS INTEGER), %(coalesce_4)s) AS VARCHAR), %(lpad_1)s, %(lpad_2)s)), %(param_2)s), '
+            'lpad(CAST(%(coalesce_5)s + '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_3)s), %(regexp_replace_8)s, %(regexp_replace_9)s), %(nullif_3)s) AS INTEGER), %(coalesce_6)s) AS VARCHAR), %(lpad_3)s, %(lpad_4)s)), %(param_3)s), '
+            'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_4)s), %(regexp_replace_10)s, %(regexp_replace_11)s), %(nullif_4)s) AS INTEGER), %(coalesce_7)s) + '
+            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_5)s), %(regexp_substr_6)s, %(regexp_substr_7)s, %(regexp_substr_8)s), %(nullif_5)s) AS INTEGER), %(coalesce_8)s) AS VARCHAR), %(lpad_5)s, %(lpad_6)s)), %(param_4)s), '
+            'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_9)s), %(regexp_replace_12)s, %(regexp_replace_13)s), %(nullif_6)s) AS INTEGER), %(coalesce_9)s) + '
+            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_10)s), %(regexp_substr_11)s, %(regexp_substr_12)s, %(regexp_substr_13)s), %(nullif_7)s) AS INTEGER), %(coalesce_10)s) AS VARCHAR), %(lpad_7)s, %(lpad_8)s)), %(param_5)s), '
+            'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_14)s), %(regexp_replace_14)s, %(regexp_replace_15)s), %(nullif_8)s) AS INTEGER), %(coalesce_11)s) + '
+            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_15)s), %(regexp_substr_16)s, %(regexp_substr_17)s, %(regexp_substr_18)s), %(nullif_9)s) AS INTEGER), %(coalesce_12)s) AS VARCHAR), %(lpad_9)s, %(lpad_10)s))))'
+            ' END'
+        )
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+        self.assertEqual('', compiled.params['regexp_replace_3'])
+        # Date starters
+        self.assertEqual(1970, compiled.params['coalesce_1'])
+        self.assertEqual(1, compiled.params['coalesce_3'])
+        self.assertEqual(1, compiled.params['coalesce_5'])
+        # Date spacers
+        self.assertEqual('-', compiled.params['param_1'])
+        self.assertEqual('-', compiled.params['param_2'])
+        self.assertEqual(' ', compiled.params['param_3'])
+        self.assertEqual(':', compiled.params['param_4'])
+        self.assertEqual(':', compiled.params['param_5'])
+        # Padding
+        self.assertEqual(2, compiled.params['lpad_1'])
+        self.assertEqual(2, compiled.params['lpad_3'])
+        self.assertEqual(2, compiled.params['lpad_5'])
+        self.assertEqual(2, compiled.params['lpad_7'])
+        self.assertEqual(2, compiled.params['lpad_9'])
+        self.assertEqual('0', compiled.params['lpad_2'])
+        self.assertEqual('0', compiled.params['lpad_4'])
+        self.assertEqual('0', compiled.params['lpad_6'])
+        self.assertEqual('0', compiled.params['lpad_8'])
+        self.assertEqual('0', compiled.params['lpad_10'])
+        # Coalesce zero
+        self.assertEqual(0, compiled.params['coalesce_2'])
+        self.assertEqual(0, compiled.params['coalesce_4'])
+        self.assertEqual(0, compiled.params['coalesce_6'])
+        self.assertEqual(0, compiled.params['coalesce_7'])
+        self.assertEqual(0, compiled.params['coalesce_9'])
+        self.assertEqual(0, compiled.params['coalesce_11'])
+        # NullIf blank
+        self.assertEqual('', compiled.params['nullif_1'])
+        self.assertEqual('', compiled.params['nullif_2'])
+        self.assertEqual('', compiled.params['nullif_3'])
+        self.assertEqual('', compiled.params['nullif_4'])
+        self.assertEqual('', compiled.params['nullif_5'])
+        self.assertEqual('', compiled.params['nullif_6'])
+        self.assertEqual('', compiled.params['nullif_7'])
+        self.assertEqual('', compiled.params['nullif_8'])
+        self.assertEqual('', compiled.params['nullif_9'])
+        # RegEx Finders
+        self.assertEqual(r'(-?\d+)\s*(?:years?|year?|y)\b', compiled.params['regexp_substr_1'])
+        self.assertEqual(r'(-?\d+)\s*(?:months?|mons?|mon?|mo)\b', compiled.params['regexp_substr_2'])
+        self.assertEqual(r'(-?\d+)\s*(?:days?|day?|d)\b', compiled.params['regexp_substr_3'])
+        self.assertEqual(r'(-?\d+)\s*(?:hours?|hour?|h)\b', compiled.params['regexp_substr_4'])
+        self.assertEqual(r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?', compiled.params['regexp_substr_5'])
+        self.assertEqual(r'\\d{1,2}', compiled.params['regexp_substr_6'])
+        self.assertEqual(1, compiled.params['regexp_substr_7'])
+        self.assertEqual(1, compiled.params['regexp_substr_8'])
+        self.assertEqual(r'(-?\d+)\s*(?:minutes?|mins?|min?|m)\b', compiled.params['regexp_substr_9'])
+        self.assertEqual(r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?', compiled.params['regexp_substr_10'])
+        self.assertEqual(r'\\d{1,2}', compiled.params['regexp_substr_11'])
+        self.assertEqual(1, compiled.params['regexp_substr_12'])
+        self.assertEqual(2, compiled.params['regexp_substr_13'])
+        self.assertEqual(r'(-?\d+)\s*(?:seconds?|secs?|sec?|s)\b', compiled.params['regexp_substr_14'])
+        self.assertEqual(r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?', compiled.params['regexp_substr_15'])
+        self.assertEqual(r'\\d{1,2}', compiled.params['regexp_substr_16'])
+        self.assertEqual(1, compiled.params['regexp_substr_17'])
+        self.assertEqual(3, compiled.params['regexp_substr_18'])
+
+
+
 
 # class TestLeft(BaseTest):
 #     def test_left(self):
