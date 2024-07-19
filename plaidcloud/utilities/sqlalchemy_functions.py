@@ -240,8 +240,215 @@ def compile_import_cast_databend(element, compiler, **kw):
     elif dtype == 'time':
         return compiler.process(func.to_timestamp(col, '%H:%M:%S'), **kw)
     elif dtype == 'interval':
-        # ToDo - Databend doesn't have an interval data type
-        return compiler.process(col, **kw) + '::interval'
+        return compiler.process(
+            # could be a timestamp format if exported so try that first, then try parsing an interval string
+            func.coalesce(
+                func.try_to_timestamp(col),
+                func.try_to_timestamp(
+                    # Year
+                    func.cast(
+                        1970 + func.coalesce(
+                            func.cast(
+                                func.nullif(
+                                    func.regexp_replace(
+                                        func.regexp_substr(
+                                            col,
+                                            r'(-?\d+)\s*(?:years?|year?|y)\b'
+                                        ),
+                                        r'\D',
+                                        '',
+                                    ),
+                                    '',
+                                ),
+                                sqlalchemy.Integer,
+                            ),
+                            0,
+                        ),
+                        sqlalchemy.String,
+                    ) + '-' +
+                    # Month
+                    func.lpad(
+                        func.cast(
+                            1 + func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_replace(
+                                            func.regexp_substr(
+                                                col,
+                                                r'(-?\d+)\s*(?:months?|mons?|mon?|mo)\b'
+                                            ),
+                                            r'\D',
+                                            '',
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ),
+                            sqlalchemy.String,
+                        ),
+                        2,
+                        '0',
+                    ) + '-' +
+                    # Day
+                    func.lpad(
+                        func.cast(
+                            1 + func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_replace(
+                                            func.regexp_substr(
+                                                col,
+                                                r'(-?\d+)\s*(?:days?|day?|d)\b'
+                                            ),
+                                            r'\D',
+                                            '',
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ),
+                            sqlalchemy.String,
+                        ),
+                        2,
+                        '0',
+                    ) + ' ' +
+                    # Hours
+                    func.lpad(
+                        func.cast(
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_replace(
+                                            func.regexp_substr(
+                                                col,
+                                                r'(-?\d+)\s*(?:hours?|hour?|h)\b'
+                                            ),
+                                            r'\D',
+                                            '',
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ) +
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_substr(
+                                            func.regexp_substr(
+                                                col,
+                                                r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?'
+                                            ),
+                                            r'\\d{1,2}',
+                                            1,
+                                            1,
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ),
+                            sqlalchemy.String,
+                        ),
+                        2,
+                        '0',
+                    ) + ':' +
+                    # Minutes
+                    func.lpad(
+                        func.cast(
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_replace(
+                                            func.regexp_substr(
+                                                col,
+                                                r'(-?\d+)\s*(?:minutes?|mins?|min?|m)\b'
+                                            ),
+                                            r'\D',
+                                            '',
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ) +
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_substr(
+                                            func.regexp_substr(
+                                                col,
+                                                r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?'
+                                            ),
+                                            r'\\d{1,2}',
+                                            1,
+                                            2,
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ),
+                            sqlalchemy.String,
+                        ),
+                        2,
+                        '0',
+                    ) + ':' +
+                    # Seconds
+                    func.lpad(
+                        func.cast(
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_replace(
+                                            func.regexp_substr(
+                                                col,
+                                                r'(-?\d+)\s*(?:seconds?|secs?|sec?|s)\b'
+                                            ),
+                                            r'\D',
+                                            '',
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ) +
+                            func.coalesce(
+                                func.cast(
+                                    func.nullif(
+                                        func.regexp_substr(
+                                            func.regexp_substr(
+                                                col,
+                                                r'\d{1,2}:\d{1,2}:\d{1,2}(?:\.\d+)?'
+                                            ),
+                                            r'\\d{1,2}',
+                                            1,
+                                            3,
+                                        ),
+                                        '',
+                                    ),
+                                    sqlalchemy.Integer,
+                                ),
+                                0,
+                            ),
+                            sqlalchemy.String,
+                        ),
+                        2,
+                        '0',
+                    ),
+                ),
+            ),
+            **kw
+        )
     elif dtype == 'boolean':
         return compiler.process(
             func.to_boolean(
