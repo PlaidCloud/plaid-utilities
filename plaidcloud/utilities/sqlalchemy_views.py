@@ -194,7 +194,7 @@ def _drop_view(drop, compiler, **kw):
     return text
 
 
-@compiles(DropView, 'starrocks')
+@compiles(DropView, 'starrocks', 'databend')
 def _drop_view(drop, compiler, **kw):
     text = "\nDROP "
     if drop.materialized:
