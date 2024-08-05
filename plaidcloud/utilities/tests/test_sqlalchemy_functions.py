@@ -469,6 +469,14 @@ class TestToChar(DatabendTest):
         self.assertEqual(dt, compiled.params['to_char_1'])
         self.assertEqual('%G-%V', compiled.params['to_string_1'])
 
+    def test_to_char_time(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'hh:mm:ss')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_string(%(to_char_1)s, %(to_string_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['to_char_1'])
+        self.assertEqual('%H:%M:%S', compiled.params['to_string_1'])
+
 
 class TestSafeToDate(BaseTest):
     def test_to_date(self):
