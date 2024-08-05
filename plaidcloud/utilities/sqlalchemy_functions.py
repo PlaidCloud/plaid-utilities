@@ -10,6 +10,7 @@ from sqlalchemy.sql import case, func
 
 from toolz.dicttoolz import dissoc
 from plaidcloud.rpc.type_conversion import postgres_to_python_date_format, python_to_postgres_date_format
+from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
@@ -532,7 +533,7 @@ def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
     field = field.effective_value
-    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Interval)):
+    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Interval, PlaidDate, PlaidTimestamp)):
         timestamp = func.to_timestamp(timestamp)
 
     return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
