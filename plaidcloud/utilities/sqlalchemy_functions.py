@@ -1235,10 +1235,11 @@ def compile_string_to_array(element, compiler, **kw):
     string, delimiter, *args = list(element.clauses)
     # null_string is not supported
 
-    split_array =  sqlalchemy.case(
-        ((delimiter == ''), [string]),
-        ((delimiter == None), func.split(string, '')),
-        else_=func.split(string, delimiter),
+    split_array = func.split(
+        string,
+        sqlalchemy.case(
+            (sqlalchemy.or_(delimiter == '', delimiter == None), ''),
+            else_=delimiter
+        )
     )
-
     return compiler.process(split_array)
