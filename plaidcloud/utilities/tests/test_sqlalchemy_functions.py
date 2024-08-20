@@ -377,13 +377,13 @@ class TestStringToArray(DatabendTest):
         expr = sqlalchemy.func.string_to_array('1,2,3,4', ',')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'CASE WHEN (%(string_to_array_1)s = %(param_1)s) THEN %(param_2)s WHEN (%(string_to_array_1)s IS NULL) THEN split(%(string_to_array_2)s, %(split_1)s) ELSE split(%(string_to_array_2)s, %(string_to_array_1)s) END',
+            'split(%(string_to_array_1)s, CASE WHEN (%(string_to_array_2)s = %(param_1)s OR %(string_to_array_2)s IS NULL) THEN %(param_2)s ELSE %(string_to_array_2)s END)',
             str(compiled)
         )
-        self.assertEqual(',', compiled.params['string_to_array_1'])
+        self.assertEqual('1,2,3,4', compiled.params['string_to_array_1'])
+        self.assertEqual(',', compiled.params['string_to_array_2'])
         self.assertEqual('', compiled.params['param_1'])
-        self.assertEqual('1,2,3,4', compiled.params['string_to_array_2'])
-        self.assertEqual('', compiled.params['split_1'])
+        self.assertEqual('', compiled.params['param_2'])
 
 class TestToNumber(DatabendTest):
     def test_to_number(self):
