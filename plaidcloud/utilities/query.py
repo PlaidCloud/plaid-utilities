@@ -7,8 +7,11 @@ import unicodecsv as csv
 
 import pandas as pd
 import numpy as np
+import requests
+from requests.adapters import HTTPAdapter
 import sqlalchemy
 from sqlalchemy.dialects import registry
+from urllib3.util.retry import Retry
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
@@ -371,6 +374,9 @@ class Connection:
             compressed=compressed,
         )
 
+    def _load_parquet(self, project_id: str, table_id: str, append: bool=False, update_table_shape: bool=True, compression: str=None):
+        pass
+
     def query(self, entities, **kwargs):
         """Declarative approach execution compiler"""
         #  TODO: compile query and execute based on declarative object chaining
@@ -482,35 +488,93 @@ class Connection:
             col_order = cols_overwrite
 
         df = df.reindex(columns=col_order)
-        for row in range(0, df.shape[0], chunk_size):
-            with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
-                df[row:row + chunk_size].to_csv(
-                    csv_file,
-                    index=False,
-                    header=True,
-                    na_rep='NaN',
-                    sep='\t',
-                    encoding='UTF-8',
-                    quoting=csv.QUOTE_MINIMAL,
-                    escapechar='"',
-                    compression='zip',
-                    date_format='%Y-%m-%dT%H:%M:%S', # This needs to match format passed in _load_csv below
-                )
-                csv_file.seek(0)
-                self._load_csv(
-                    project_id=self._project_id,
-                    table_id=table_object.id,
-                    meta=table_meta_out,
-                    csv_data=base64.b64encode(csv_file.read()),
-                    header=True,
-                    delimiter='\t',
-                    null_as='NaN',
-                    quote='"',
-                    escape='"',
-                    date_format='YYYY-MM-DD"T"HH24:MI:SS',
-                    append=append or row > 0,
-                    compressed=True,
-                )
+
+        data_load = self.rpc.analyze.table.create_data_load(
+            project_id=self._project_id,
+            table_id=table_object.id,
+            load_type='parquet',
+        )
+        if data_load:
+            with tempfile.NamedTemporaryFile(mode='wb+') as pq_file:
+                df.to_parquet(pq_file)
+                # upload the file
+                self._upload(data_load['load_type'], data_load['upload_path'], pq_file)
+
+            # execute the load
+            self.rpc.analyze.table.execute_data_load(
+                project_id=self._project_id,
+                table_id=table_object.id,
+                meta=table_meta_out,
+                load_type=data_load['load_type'],
+                upload_path=data_load['upload_path'],
+            )
+        else:
+            # Do it the old way
+            for row in range(0, df.shape[0], chunk_size):
+                with tempfile.NamedTemporaryFile(mode='wb+') as csv_file:
+                    df[row:row + chunk_size].to_csv(
+                        csv_file,
+                        index=False,
+                        header=True,
+                        na_rep='NaN',
+                        sep='\t',
+                        encoding='UTF-8',
+                        quoting=csv.QUOTE_MINIMAL,
+                        escapechar='"',
+                        compression='zip',
+                        date_format='%Y-%m-%dT%H:%M:%S', # This needs to match format passed in _load_csv below
+                    )
+                    csv_file.seek(0)
+                    self._load_csv(
+                        project_id=self._project_id,
+                        table_id=table_object.id,
+                        meta=table_meta_out,
+                        csv_data=base64.b64encode(csv_file.read()),
+                        header=True,
+                        delimiter='\t',
+                        null_as='NaN',
+                        quote='"',
+                        escape='"',
+                        date_format='YYYY-MM-DD"T"HH24:MI:SS',
+                        append=append or row > 0,
+                        compressed=True,
+                    )
+
+    def _upload(self, load_type: str, upload_path: str, pfile, verify_ssl: bool = True):
+        url = f'https://{self.rpc.hostname}/upload_data'
+
+        headers = {
+            'load_type': load_type,
+            'upload_path': upload_path,
+        }
+        values = headers
+
+        # logger.info('Preparing to open and upload {}'.format(archive_name))
+
+        with requests.sessions.Session() as session:
+            retry = Retry(
+                total=5,
+                allowed_methods=False,  # retry for any method
+                status_forcelist=[500, 502, 504],
+                backoff_factor=0.1,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+
+            r = session.post(
+                url,
+                headers=headers,
+                verify=verify_ssl,
+                files={
+                    'upload_file': pfile
+                },
+                json=values,
+                timeout=300,
+            )
+            r.raise_for_status()
+            return r.json()
+
 
     def commit(self):
         """Here for completeness.  Does nothing"""
