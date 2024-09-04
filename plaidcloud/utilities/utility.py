@@ -129,7 +129,7 @@ def copy_results_output_to_results_directory():
             # it's provided to us by the os module as a Unix timestamp. If an
             # existing file opened in 'w' mode, truncating the existing data,
             # it is still considered as 'modified', not 'created'.
-            mtime = datetime.datetime.utcfromtimestamp(os.stat(path).st_mtime)
+            mtime = datetime.datetime.fromtimestamp(os.stat(path).st_mtime, datetime.UTC)
         except:
             logger.error("'%s' does not exist to copy to '%s'. Should it be "
                          "removed from results_keys?", path, results_dir)
