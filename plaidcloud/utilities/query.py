@@ -12,6 +12,7 @@ from requests.adapters import HTTPAdapter
 import sqlalchemy
 from sqlalchemy.dialects import registry
 from urllib3.util.retry import Retry
+from urllib.parse import urlparse, urlunparse
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
@@ -542,7 +543,8 @@ class Connection:
                     )
 
     def _upload(self, load_type: str, upload_path: str, pfile, verify_ssl: bool = True):
-        url = f'https://{self.rpc.hostname}/upload_data'
+
+        upload_url = urlunparse(urlparse(self.rpc.rpc_uri)._replace(path='upload_data'))
 
         params = {
             'load_type': load_type,
@@ -566,7 +568,7 @@ class Connection:
             session.mount('https://', adapter)
 
             r = session.post(
-                url,
+                upload_url,
                 headers=headers,
                 verify=verify_ssl,
                 files={
