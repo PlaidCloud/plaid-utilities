@@ -498,6 +498,7 @@ class Connection:
             with tempfile.NamedTemporaryFile(mode='wb+') as pq_file:
                 df.to_parquet(pq_file)
                 # upload the file
+                pq_file.seek(0)
                 self._upload(data_load['load_type'], data_load['upload_path'], pq_file)
 
             # execute the load
@@ -543,11 +544,13 @@ class Connection:
     def _upload(self, load_type: str, upload_path: str, pfile, verify_ssl: bool = True):
         url = f'https://{self.rpc.hostname}/upload_data'
 
-        headers = {
+        params = {
             'load_type': load_type,
             'upload_path': upload_path,
         }
-        values = headers
+        headers = {
+            "Authorization": f'Bearer {self.rpc.auth_token}'
+        }
 
         # logger.info('Preparing to open and upload {}'.format(archive_name))
 
@@ -569,7 +572,7 @@ class Connection:
                 files={
                     'upload_file': pfile
                 },
-                json=values,
+                params=params,
                 timeout=300,
             )
             r.raise_for_status()
