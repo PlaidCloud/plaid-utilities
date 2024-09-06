@@ -542,7 +542,7 @@ class Connection:
                         compressed=True,
                     )
 
-    def _upload(self, load_type: str, upload_path: str, pfile, verify_ssl: bool = True):
+    def _upload(self, load_type: str, upload_path: str, pfile):
 
         upload_url = urlunparse(urlparse(self.rpc.rpc_uri)._replace(path='upload_data'))
 
@@ -570,7 +570,7 @@ class Connection:
             r = session.post(
                 upload_url,
                 headers=headers,
-                verify=verify_ssl,
+                verify=self.rpc.verify_ssl,
                 files={
                     'upload_file': pfile
                 },
