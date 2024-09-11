@@ -504,6 +504,7 @@ def compile_safe_to_timestamp_databend(element, compiler, **kw):
         args = []
     else:
         text, datetime_format, *args = full_args
+        datetime_format = datetime_format.value
 
     text = func.cast(text, sqlalchemy.Text)
     if datetime_format and '%' not in datetime_format:
