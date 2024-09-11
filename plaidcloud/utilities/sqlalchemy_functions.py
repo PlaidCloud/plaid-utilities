@@ -506,10 +506,9 @@ def compile_safe_to_timestamp_databend(element, compiler, **kw):
         text, datetime_format, *args = full_args
 
     text = func.cast(text, sqlalchemy.Text)
-    datetime_format = func.cast(datetime_format, sqlalchemy.Text)
     if datetime_format and '%' not in datetime_format:
         datetime_format = postgres_to_python_date_format(datetime_format)
-
+    datetime_format = func.cast(datetime_format, sqlalchemy.Text)
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"to_timestamp({compiler.process(text)}, {compiler.process(datetime_format)}, {compiled_args})"
