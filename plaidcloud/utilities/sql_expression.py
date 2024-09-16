@@ -684,24 +684,29 @@ def get_select_query(
 
     # Build DISTINCT section of our select query
     if distinct:
-        select_query = select_query.distinct(
-            *[
-                get_from_clause(
-                    tables,
-                    tc,
-                    source_columns,
-                    aggregate,
-                    variables=variables,
-                    disable_variables=disable_variables,
-                    table_numbering_start=table_numbering_start,
-                    use_row_number_for_serial=use_row_number_for_serial,
-                )
-                for tc in target_columns
-                if not tc.get('constant')
-                and tc.get('distinct')
-                and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
-            ]
-        )
+        # if any([tc for tc in target_columns if not tc.get('distinct')]):
+        #     raise Exception('Distinct cannot be used if all columns are not distinct')
+        # every other database way
+        select_query = select_query.distinct()
+        # postgres way of doing distinct (*args) will become CompileError in future
+        # select_query = select_query.distinct(
+        #     *[
+        #         get_from_clause(
+        #             tables,
+        #             tc,
+        #             source_columns,
+        #             aggregate,
+        #             variables=variables,
+        #             disable_variables=disable_variables,
+        #             table_numbering_start=table_numbering_start,
+        #             use_row_number_for_serial=use_row_number_for_serial,
+        #         )
+        #         for tc in target_columns
+        #         if not tc.get('constant')
+        #         and tc.get('distinct')
+        #         and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
+        #     ]
+        # )
 
     # HAVING
     if having:
