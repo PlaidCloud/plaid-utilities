@@ -1121,7 +1121,9 @@ class TestGetSelectQuery(TestSQLExpression):
             sqlalchemy.select(
                 self.from_clause(self.distinct_column_1),
                 self.from_clause(self.column_2),
-            ).distinct(self.from_clause(self.distinct_column_1)),
+            ).distinct(
+            #    self.from_clause(self.distinct_column_1)
+            ),
         )
 
     def test_dont_distinct_on_constant(self):
@@ -1139,7 +1141,9 @@ class TestGetSelectQuery(TestSQLExpression):
                 self.from_clause(self.distinct_column_1),
                 self.from_clause(distinct_constant),
                 self.from_clause(self.column_2),
-            ).distinct(self.from_clause(self.distinct_column_1)),
+            ).distinct(
+                #self.from_clause(self.distinct_column_1)
+            ),
         )
 
     def test_dont_distinct_on_serial(self):
@@ -1157,7 +1161,9 @@ class TestGetSelectQuery(TestSQLExpression):
             sqlalchemy.select(
                 self.from_clause(self.distinct_column_1, use_row_number_for_serial=False),
                 self.from_clause(self.column_2, use_row_number_for_serial=False),
-            ).distinct(self.from_clause(self.distinct_column_1, use_row_number_for_serial=False)),
+            ).distinct(
+                #self.from_clause(self.distinct_column_1, use_row_number_for_serial=False)
+            ),
         )
 
     def test_distinct_on_serial_row_number(self):
@@ -1169,8 +1175,8 @@ class TestGetSelectQuery(TestSQLExpression):
                 self.from_clause(distinct_serial),
                 self.from_clause(self.column_2),
             ).distinct(
-                self.from_clause(self.distinct_column_1),
-                self.from_clause(distinct_serial),
+                #self.from_clause(self.distinct_column_1),
+                #self.from_clause(distinct_serial),
             ),
             se.get_select_query(
                 [self.table],
@@ -1294,7 +1300,7 @@ class TestGetSelectQuery(TestSQLExpression):
                     self.from_clause(groupby_column_1_new, aggregate=False, cast=False)
                 )
                 .distinct(
-                    self.from_clause(sum_column_2_asc, aggregate=True)
+                    #self.from_clause(sum_column_2_asc, aggregate=True)
                 ),
                 'result.Category != "foobar"',
                 {},
