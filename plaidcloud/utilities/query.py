@@ -763,9 +763,10 @@ class Table(sqlalchemy.Table):
         table_object._schema = _schema
 
         # table must be created in database, if it doesn't already exist
-        _rpc.analyze.table.touch(
-            project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite
-        )
+        if columns:
+            _rpc.analyze.table.touch(
+                project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite
+            )
 
         return table_object
 
