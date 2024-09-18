@@ -1335,11 +1335,11 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
             if verbose:
                 logger.debug('')
                 logger.debug('iteration:{} - rule:{} - {}'.format(iteration, index, rule[condition_column]))
+                logger.debug('{} - input length'.format(input_length))
+
             if rule[condition_column] is not None and rule[condition_column] != '' and str(rule[condition_column]) != 'nan':
                 try:
                     df_subset = df_subset.query(rule[condition_column])#, engine='python')
-                    if verbose:
-                        logger.debug('{} - input length'.format(input_length))
                     if show_rules is True:
                         if include_once is True:
                             df.loc[list(df_subset.index), 'rule_number'] = list(map(write_rule_numbers, df.loc[list(df_subset.index), 'rule_number']))
@@ -1349,13 +1349,13 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                             if rule_id_column:
                                 df.loc[list(df_subset.index), 'rule_id'] = list(map(write_rule_id, df.loc[list(df_subset.index), 'rule_id']))
                         else:
-                            df_subset['rule_number'] = df_subset.index
-                            # df_subset['rule'] = rule[condition_column]
+                            df_subset.loc[list(df_subset.index), 'rule_number'] = df_subset.index
+                            # df_subset.loc[list(df_subset.index), 'rule'] = rule[condition_column]
                             # Set this to empty string.  Waaaaaay to much data being generated.
-                            df_subset['rule'] = ''
+                            df_subset.loc[list(df_subset.index), 'rule'] = ''
 
                             if rule_id_column:
-                                df_subset['rule_id'] = rule[rule_id_column]
+                                df_subset.loc[list(df_subset.index), 'rule_id'] = rule[rule_id_column]
                 except Exception as e:
                     df_subset = pd.DataFrame()
 
@@ -1373,7 +1373,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                     if include_once is True:
                         df.loc[list(df_subset.index), column] = rule[column]
                     else:
-                        df_subset[column] = rule[column]
+                        df_subset.loc[list(df_subset.index), column] = rule[column]
             # The way we're doing this allows multiple matches if include_once is False.
             # Future: MAY be a reason to allow first-in wins or last-in wins, or ALL win.
             # MIKE look here.
