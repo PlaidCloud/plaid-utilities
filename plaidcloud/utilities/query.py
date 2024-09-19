@@ -5,6 +5,7 @@ import tempfile
 import uuid
 import unicodecsv as csv
 
+import pyarrow as pa
 import pandas as pd
 import numpy as np
 import requests
@@ -21,7 +22,7 @@ from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.utilities.remote.dimension import Dimensions
 
 __author__ = 'Paul Morel'
-__copyright__ = 'Copyright 2010-2021, Tartan Solutions, Inc'
+__copyright__ = 'Copyright 2010-2024, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
 __license__ = 'Apache 2.0'
 __maintainer__ = 'Paul Morel'
@@ -496,6 +497,10 @@ class Connection:
             load_type='parquet',
         )
         if data_load:
+            schema = pa.Schema.from_pandas(df)
+            for col in schema:
+                if isinstance(col.type, (pa.ListType, pa.StructType)):
+                    df[col.name] = df[col.name].map(str)
             with tempfile.NamedTemporaryFile(mode='wb+') as pq_file:
                 df.to_parquet(pq_file)
                 # upload the file
