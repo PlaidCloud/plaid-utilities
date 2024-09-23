@@ -943,7 +943,7 @@ def compile_safe_ltrim_databend(element, compiler, **kw):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"TRIM(LEADING {compiled_args} FROM {compiler.process(text)})"
 
-    return f"TRIM(LEADING FROM {compiler.process(text)})"
+    return f"TRIM(LEADING ' ' FROM {compiler.process(text)})"
 
 
 class safe_rtrim(GenericFunction):
@@ -970,7 +970,7 @@ def compile_safe_rtrim(element, compiler, **kw):
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"TRIM(TRAILING {compiled_args} FROM {compiler.process(text)})"
 
-    return f"TRIM(TRAILING FROM {compiler.process(text)})"
+    return f"TRIM(TRAILING ' ' FROM {compiler.process(text)})"
 
 
 class safe_trim(GenericFunction):
@@ -1185,7 +1185,7 @@ def compile_to_char(element, compiler, **kw):
             decimal_non_drop_digits = len([ch for ch in right if ch == '0'])
             decimal_str = func.to_string(decimal_part)
             if decimal_non_drop_digits:
-                decimal_str = func.rpad(decimal_str, decimal_non_drop_digits)
+                decimal_str = func.rpad(decimal_str, decimal_non_drop_digits, '0')
             final_str = func.concat(integer_str, '.', decimal_str)
 
         return compiler.process(final_str)

@@ -397,7 +397,7 @@ class TestLTrim(DatabendTest):
     def test_ltrim_plain(self):
         expr = sqlalchemy.func.ltrim('12345', '')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('TRIM(LEADING FROM CAST(%(ltrim_1)s AS TEXT))', str(compiled))
+        self.assertEqual('TRIM(LEADING \' \' FROM CAST(%(ltrim_1)s AS TEXT))', str(compiled))
         self.assertEqual('12345', compiled.params['ltrim_1'])
 
     def test_ltrim_specific(self):
@@ -412,7 +412,7 @@ class TestRTrim(DatabendTest):
     def test_rtrim_plain(self):
         expr = sqlalchemy.func.rtrim('12345', '')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('TRIM(TRAILING FROM CAST(%(rtrim_1)s AS TEXT))', str(compiled))
+        self.assertEqual('TRIM(TRAILING \' \' FROM CAST(%(rtrim_1)s AS TEXT))', str(compiled))
         self.assertEqual('12345', compiled.params['rtrim_1'])
 
     def test_rtrim_specific(self):
@@ -443,7 +443,7 @@ class TestToChar(DatabendTest):
         expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'concat(concat(%(concat_1)s, to_string(truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s))), %(concat_2)s, rpad(to_string(truncate(%(to_char_1)s, %(truncate_1)s) - truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s)), %(rpad_1)s))',
+            'concat(concat(%(concat_1)s, to_string(truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s))), %(concat_2)s, rpad(to_string(truncate(%(to_char_1)s, %(truncate_1)s) - truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s)), %(rpad_1)s, %(rpad_2)s))',
             str(compiled),
         )
         self.assertEqual('$', compiled.params['concat_1'])
