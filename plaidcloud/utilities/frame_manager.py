@@ -22,7 +22,7 @@ import numpy as np
 import orjson as json
 
 from plaidcloud.rpc import utc
-from plaidcloud.rpc.type_conversion import analyze_type
+from plaidcloud.rpc.type_conversion import analyze_type, postgres_to_python_date_format
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.utilities.query import Connection, Table
@@ -2675,7 +2675,7 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
     )
 
 
-def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
+def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
     with open(avro_file_name, 'rb') as infile:
         with open(csv_file_name, 'wb') as outfile:
             reader = fastavro.reader(infile)
@@ -2699,7 +2699,7 @@ def avro_to_csv(avro_file_name, csv_file_name, start_row=0):
             writer.writerows(reader)
 
 
-def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
+def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
     df = pd.read_parquet(parquet_file_name, engine='fastparquet')
     if start_row:
         df = df.iloc[start_row:]
@@ -2709,6 +2709,7 @@ def parquet_to_csv(parquet_file_name, csv_file_name, start_row=0):
         sep='\t',
         quotechar='"',
         escapechar='"',
+        date_format=postgres_to_python_date_format(date_format),
     )
 
 
