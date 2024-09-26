@@ -425,9 +425,9 @@ class Connection:
         #
         #         self._load_csv(table_object, path)
 
-    def bulk_insert_dataframe(self, table_object, df, append=False, chunk_size=500000):
-        """Pandas-flavored wrapper method to the SQLAlchemy bulk_save_objects
-        bulk_insert_mappings(mapper, mappings, return_defaults=False, render_nulls=False)
+    def bulk_insert_dataframe(self, table_object: 'Table', df: pd.DataFrame, append: bool = False, chunk_size: int = 500000):
+        """Pandas-flavored wrapper method to the load data into PlaidCloud Table from a Dataframe
+        bulk_insert_dataframe(table_object, df, append, chunk_size)
         """
         if len(df) == 0:
             logger.debug('Empty dataframe - nothing to insert')
@@ -455,7 +455,7 @@ class Connection:
 
         table_meta_out = None
         if append:
-            # order dataframe according to existing structure
+            # order dataframe according to the existing structure
 
             # create any missing columns
             for col in cols_missing:
@@ -471,7 +471,7 @@ class Connection:
                 col_order = cols_overwrite
 
         else:
-            # match order according to existing structure, adding new cols to the end of the table
+            # match order according to the existing structure, adding new cols to the end of the table
             col_order = cols_overwrite
 
         if not table_meta_out:
@@ -514,6 +514,7 @@ class Connection:
                 meta=table_meta_out,
                 load_type=data_load['load_type'],
                 upload_path=data_load['upload_path'],
+                append=append,
             )
         else:
             # Do it the old way
