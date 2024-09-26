@@ -71,12 +71,13 @@ class TestImportColDatabend(DatabendTest):
     def test_import_col_numeric(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(str(compiled), 'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END')
+        self.assertEqual(str(compiled), 'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN (to_string(%(import_col_1)s) = %(to_string_1)s) THEN NULL ELSE %(import_col_1)s END AS DECIMAL(38, 10)) END')
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
         self.assertEqual('', compiled.params['regexp_replace_2'])
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
+        self.assertEqual('NaN', compiled.params['to_string_1'])
 
     def test_import_col_interval(self):
         expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)

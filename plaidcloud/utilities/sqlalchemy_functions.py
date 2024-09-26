@@ -465,7 +465,15 @@ def compile_import_cast_databend(element, compiler, **kw):
     elif dtype == 'smallint':
         return compiler.process(func.to_int16(col))
     elif dtype == 'numeric':
-        return compiler.process(func.cast(col, sqlalchemy.Numeric(38, 10)))
+        return compiler.process(
+            func.cast(
+                sqlalchemy.case(
+                    (func.to_string(col) == 'NaN', None),
+                    else_=col,
+                ),
+                sqlalchemy.Numeric(38, 10),
+            )
+        )
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
