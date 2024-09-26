@@ -154,7 +154,7 @@ class Connection:
         return self.rpc.analyze.query.download_csv(
             project_id=self._project_id,
             query=query_string,
-            params=params or None,
+            params=params,
         )
 
     def get_iterator(self, table, preserve_nulls=True):
