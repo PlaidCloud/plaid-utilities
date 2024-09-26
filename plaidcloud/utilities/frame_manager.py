@@ -2700,7 +2700,7 @@ def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, dat
 
 
 def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
-    df = pd.read_parquet(parquet_file_name, engine='fastparquet')
+    df = pd.read_parquet(parquet_file_name) # should use pyArrow
     if start_row:
         df = df.iloc[start_row:]
     df.to_csv(
