@@ -425,7 +425,7 @@ class Connection:
         #
         #         self._load_csv(table_object, path)
 
-    def bulk_insert_dataframe(self, table_object: 'Table', df: pd.DataFrame, append: bool = False, chunk_size: int = 500000):
+    def bulk_insert_dataframe(self, table_object: 'Table', df: pd.DataFrame, append: bool = False, chunk_size: int = 500000, load_greenplum_parquet: bool = False):
         """Pandas-flavored wrapper method to the load data into PlaidCloud Table from a Dataframe
         bulk_insert_dataframe(table_object, df, append, chunk_size)
         """
@@ -495,6 +495,7 @@ class Connection:
             project_id=self._project_id,
             table_id=table_object.id,
             load_type='parquet',
+            load_greenplum_parquet=load_greenplum_parquet,
         )
         if data_load:
             schema = pa.Schema.from_pandas(df)
