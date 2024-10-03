@@ -1,9 +1,13 @@
 # coding=utf-8
 
-import sqlalchemy as sa
+import sqlalchemy
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql.expression import table
-from sqlalchemy.sql.ddl import _CreateDropBase, CreateColumn
+from sqlalchemy.sql.ddl import _DropView, CreateColumn
+try:
+    from sqlalchemy.sql.ddl import _CreateBase as CreateBase
+except:
+    from sqlalchemy.sql.ddl import _CreateDropBase as CreateBase
+
 from sqlalchemy.sql.compiler import Compiled
 from sqlalchemy.sql import sqltypes
 
@@ -16,7 +20,7 @@ __maintainer__ = 'Patrick Buxton'
 __email__ = 'patrick.buxton@tartansolutions.com'
 
 
-class CreateView(_CreateDropBase):
+class CreateView(CreateBase):
     """
     Prepares a CREATE VIEW statement.
 
@@ -29,7 +33,6 @@ class CreateView(_CreateDropBase):
     selectable: sqlalchemy.Selectable
         A query that evaluates to a table.
         This table defines the columns and rows in the view.
-    bind: deprecated
     or_replace: boolean
         If True, this definition will replace an existing definition.
         Otherwise, an exception will be raised if the view exists.
@@ -44,13 +47,12 @@ class CreateView(_CreateDropBase):
         self,
         element,
         selectable,
-        bind=None,
         materialized=False,
         if_not_exists=False,
         or_replace=False,
         options=None,
     ):
-        super(CreateView, self).__init__(element, _legacy_bind=bind, if_not_exists=if_not_exists)
+        super(CreateView, self).__init__(element, if_not_exists=if_not_exists)
 
         self.columns = [CreateColumn(column) for column in element.columns]
         self.selectable = selectable
@@ -59,7 +61,7 @@ class CreateView(_CreateDropBase):
         self.options = options
 
 
-class DropView(_CreateDropBase):
+class DropView(_DropView):
     """
     Prepares a DROP VIEW statement.
 
@@ -81,12 +83,11 @@ class DropView(_CreateDropBase):
     def __init__(
         self,
         element,
-        bind=None,
         materialized=False,
         cascade=False,
         if_exists=False
     ):
-        super(DropView, self).__init__(element, _legacy_bind=bind, if_exists=if_exists)
+        super(DropView, self).__init__(element, if_exists=if_exists)
         self.materialized = materialized
         self.cascade = cascade
 
