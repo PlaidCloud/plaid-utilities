@@ -444,15 +444,10 @@ class TestToChar(DatabendTest):
         expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'concat(concat(%(concat_1)s, to_string(truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s))), %(concat_2)s, rpad(to_string(truncate(%(to_char_1)s, %(truncate_1)s) - truncate(truncate(%(to_char_1)s, %(truncate_1)s), %(truncate_2)s)), %(rpad_1)s, %(rpad_2)s))',
+            'to_char(%(to_char_1)s, \'$FM999,999,999,999.00\')',
             str(compiled),
         )
-        self.assertEqual('$', compiled.params['concat_1'])
         self.assertEqual(123456.789, compiled.params['to_char_1'])
-        self.assertEqual(2, compiled.params['truncate_1'])
-        self.assertEqual(0, compiled.params['truncate_2'])
-        self.assertEqual('.', compiled.params['concat_2'])
-        self.assertEqual(2, compiled.params['rpad_1'])
 
     def test_to_char_date(self):
         dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
@@ -472,7 +467,7 @@ class TestToChar(DatabendTest):
 
     def test_to_char_time(self):
         dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
-        expr = sqlalchemy.func.to_char(dt, 'hh:mm:ss')
+        expr = sqlalchemy.func.to_char(dt, 'HH24:MI:SS')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual('to_string(%(to_char_1)s, %(to_string_1)s)', str(compiled))
         self.assertEqual(dt, compiled.params['to_char_1'])

@@ -1135,7 +1135,7 @@ class sql_to_char(GenericFunction):
     name = 'to_char'
 
 @compiles(sql_to_char, 'databend')
-def compile_to_char(element, compiler, **kw):
+def compile_to_char_databend(element, compiler, **kw):
     # These already in use format strings are supported*
     # 'YYYYMMDD'
     # 'YYYY-MM-DD'
@@ -1163,57 +1163,14 @@ def compile_to_char(element, compiler, **kw):
         )
 
     if '0' in format_ or '9' in format_:
-        # This is a format for formatting a number
-        if '.' in format_:
-            left, right = format_.split('.', 1)
-        elif 'D' in format_:
-            left, right = format_.split('D', 1)
-        else:
-            left = format_
-            right = None
-
-        if right is None:
-            truncated_source = func.truncate(source, 0)
-        else:
-            decimal_places = len([ch for ch in right if ch in ['0', '9']])
-            truncated_source = func.truncate(source, decimal_places)
-
-        integer_part = func.truncate(truncated_source, 0)
-        integer_non_drop_digits = len([ch for ch in left if ch == '0'])
-        integer_str = func.to_string(integer_part)
-        if integer_non_drop_digits:
-            integer_str = func.lpad(integer_str, integer_non_drop_digits)
-        if left.startswith('L') or left.startswith('$'):
-            integer_str = func.concat('$', integer_str)
-
-        if right is None:
-            final_str = integer_str
-        else:
-            decimal_part = truncated_source - integer_part
-            decimal_non_drop_digits = len([ch for ch in right if ch == '0'])
-            decimal_str = func.to_string(decimal_part)
-            if decimal_non_drop_digits:
-                decimal_str = func.rpad(decimal_str, decimal_non_drop_digits, '0')
-            final_str = func.concat(integer_str, '.', decimal_str)
-
-        return compiler.process(final_str)
-
+        format_ = format_.replace('L', '$').replace('D', '.')
+        return f'to_char({compiler.process(source)}, \'{format_}\')'
     else:
-        # This is probably a format for formatting a date, or it's empty
-        # long string of conversions on format_ go here
-        final_format = (
-            format_
-            .replace('YYYY', '%Y')
-            .replace('MM', '%m')
-            .replace('DD', '%d')
-            .replace('hh', '%H')
-            .replace('mm', '%M')
-            .replace('ss', '%S')
-            .replace('IYYY', '%G')
-            .replace('IW', '%V')
-        )
+        if format_ and '%' not in format_:
+            format_ = postgres_to_python_date_format(format_)
+        # This is probably a format for formatting a date
         return compiler.process(
-            func.to_string(source, final_format)
+            func.to_string(source, format_)
         )
 
 
