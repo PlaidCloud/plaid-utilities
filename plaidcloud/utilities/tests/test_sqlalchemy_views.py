@@ -93,16 +93,12 @@ class TestCreateView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=False
         )
@@ -121,16 +117,12 @@ class TestCreateView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=False
         )
@@ -149,16 +141,12 @@ class TestCreateView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=True
         )
@@ -178,16 +166,12 @@ class TestCreateView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=True,
             if_not_exists=True,
@@ -207,16 +191,12 @@ class TestCreateView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             options={
                 'option1': 'opt'
@@ -281,16 +261,12 @@ class TestCreateMaterializedView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=False
@@ -310,16 +286,12 @@ class TestCreateMaterializedView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=True
@@ -340,16 +312,12 @@ class TestCreateMaterializedView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=True,
@@ -370,16 +338,12 @@ class TestCreateMaterializedView(BaseTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             options={
@@ -442,16 +406,12 @@ class TestCreateViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=False
         )
@@ -472,16 +432,12 @@ class TestCreateViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=False
         )
@@ -500,16 +456,12 @@ class TestCreateViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=True
         )
@@ -528,16 +480,12 @@ class TestCreateViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             or_replace=True,
             if_not_exists=True,
@@ -557,16 +505,12 @@ class TestCreateViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             options={
                 'option1': 'opt'
@@ -632,16 +576,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=False
@@ -663,16 +603,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=False
@@ -694,16 +630,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=False
@@ -723,16 +655,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=True
@@ -753,16 +681,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             or_replace=True,
@@ -784,16 +708,12 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
         expr = vw.CreateView(
             view_obj,
             selectable=sa.select(
-                [
-                    Article.id,
-                    Article.name,
-                    User.id.label('author_id'),
-                    User.name.label('author_name')
-                ],
-                from_obj=(
-                    Article.__table__
-                    .join(User, Article.author_id == User.id)
-                )
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
             ),
             materialized=True,
             options={

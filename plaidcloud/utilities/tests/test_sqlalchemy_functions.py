@@ -88,17 +88,17 @@ class TestImportColDatabend(DatabendTest):
             'coalesce('
             'try_to_timestamp(%(import_col_1)s), '
             'try_to_timestamp('
-            'concat(concat(concat(concat(concat(concat(concat(concat(concat(concat('
+            'concat('
             'CAST(%(coalesce_1)s + '
-            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_1)s), %(regexp_replace_4)s, %(regexp_replace_5)s), %(nullif_1)s) AS INTEGER), %(coalesce_2)s) AS VARCHAR), %(param_1)s), '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_1)s), %(regexp_replace_4)s, %(regexp_replace_5)s), %(nullif_1)s) AS INTEGER), %(coalesce_2)s) AS VARCHAR), %(concat_1)s, '
             'lpad(CAST(%(coalesce_3)s + '
-            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_2)s), %(regexp_replace_6)s, %(regexp_replace_7)s), %(nullif_2)s) AS INTEGER), %(coalesce_4)s) AS VARCHAR), %(lpad_1)s, %(lpad_2)s)), %(param_2)s), '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_2)s), %(regexp_replace_6)s, %(regexp_replace_7)s), %(nullif_2)s) AS INTEGER), %(coalesce_4)s) AS VARCHAR), %(lpad_1)s, %(lpad_2)s), %(concat_2)s, '
             'lpad(CAST(%(coalesce_5)s + '
-            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_3)s), %(regexp_replace_8)s, %(regexp_replace_9)s), %(nullif_3)s) AS INTEGER), %(coalesce_6)s) AS VARCHAR), %(lpad_3)s, %(lpad_4)s)), %(param_3)s), '
+            'coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_3)s), %(regexp_replace_8)s, %(regexp_replace_9)s), %(nullif_3)s) AS INTEGER), %(coalesce_6)s) AS VARCHAR), %(lpad_3)s, %(lpad_4)s), %(concat_3)s, '
             'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_4)s), %(regexp_replace_10)s, %(regexp_replace_11)s), %(nullif_4)s) AS INTEGER), %(coalesce_7)s) + '
-            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_5)s), %(regexp_substr_6)s, %(regexp_substr_7)s, %(regexp_substr_8)s), %(nullif_5)s) AS INTEGER), %(coalesce_8)s) AS VARCHAR), %(lpad_5)s, %(lpad_6)s)), %(param_4)s), '
+            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_5)s), %(regexp_substr_6)s, %(regexp_substr_7)s, %(regexp_substr_8)s), %(nullif_5)s) AS INTEGER), %(coalesce_8)s) AS VARCHAR), %(lpad_5)s, %(lpad_6)s), %(concat_4)s, '
             'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_9)s), %(regexp_replace_12)s, %(regexp_replace_13)s), %(nullif_6)s) AS INTEGER), %(coalesce_9)s) + '
-            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_10)s), %(regexp_substr_11)s, %(regexp_substr_12)s, %(regexp_substr_13)s), %(nullif_7)s) AS INTEGER), %(coalesce_10)s) AS VARCHAR), %(lpad_7)s, %(lpad_8)s)), %(param_5)s), '
+            'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_10)s), %(regexp_substr_11)s, %(regexp_substr_12)s, %(regexp_substr_13)s), %(nullif_7)s) AS INTEGER), %(coalesce_10)s) AS VARCHAR), %(lpad_7)s, %(lpad_8)s), %(concat_5)s, '
             'lpad(CAST(coalesce(CAST(nullif(regexp_replace(regexp_substr(%(import_col_1)s, %(regexp_substr_14)s), %(regexp_replace_14)s, %(regexp_replace_15)s), %(nullif_8)s) AS INTEGER), %(coalesce_11)s) + '
             'coalesce(CAST(nullif(regexp_substr(regexp_substr(%(import_col_1)s, %(regexp_substr_15)s), %(regexp_substr_16)s, %(regexp_substr_17)s, %(regexp_substr_18)s), %(nullif_9)s) AS INTEGER), %(coalesce_12)s) AS VARCHAR), %(lpad_9)s, %(lpad_10)s))))'
             ' END'
@@ -112,11 +112,11 @@ class TestImportColDatabend(DatabendTest):
         self.assertEqual(1, compiled.params['coalesce_3'])
         self.assertEqual(1, compiled.params['coalesce_5'])
         # Date spacers
-        self.assertEqual('-', compiled.params['param_1'])
-        self.assertEqual('-', compiled.params['param_2'])
-        self.assertEqual(' ', compiled.params['param_3'])
-        self.assertEqual(':', compiled.params['param_4'])
-        self.assertEqual(':', compiled.params['param_5'])
+        self.assertEqual('-', compiled.params['concat_1'])
+        self.assertEqual('-', compiled.params['concat_2'])
+        self.assertEqual(' ', compiled.params['concat_3'])
+        self.assertEqual(':', compiled.params['concat_4'])
+        self.assertEqual(':', compiled.params['concat_5'])
         # Padding
         self.assertEqual(2, compiled.params['lpad_1'])
         self.assertEqual(2, compiled.params['lpad_3'])
