@@ -1057,7 +1057,7 @@ def allocate(
             sqlalchemy.join(
                 cte_consol_driver,
                 cte_denominator,
-                sqlalchemy.and_(True) if not denominator_columns else
+                sqlalchemy.and_(sqlalchemy.true()) if not denominator_columns else
                 sqlalchemy.and_(
                     *[cte_consol_driver.columns[dn] == cte_denominator.columns[dn] for dn in denominator_columns]
                 ),
@@ -1115,7 +1115,7 @@ def allocate(
     allocation_select = allocation_select.join_from(
         cte_source,
         cte_ratios,
-        sqlalchemy.and_(True) if not denominator_columns else
+        sqlalchemy.and_(sqlalchemy.true()) if not denominator_columns else
         sqlalchemy.and_(
             * [
                  cte_source.columns[dn] == cte_ratios.columns[dn]
@@ -1145,7 +1145,7 @@ def allocate(
         .join_from(
             cte_source,
             cte_ratios,
-            False,
+            sqlalchemy.false(),
             isouter=True
         )
     )
