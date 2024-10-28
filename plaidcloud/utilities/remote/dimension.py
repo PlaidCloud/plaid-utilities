@@ -2226,7 +2226,8 @@ class Dimension:
 
     # noinspection PyUnusedLocal
     def load_from_table_flat(self, table, columns, top=None, consolidations=None, consol_default='+',
-                             hierarchy=MAIN, connection='sqlalchemy'):
+                             hierarchy=MAIN, alias_columns=None, property_columns=None, value_columns=None,
+                             leaf_child: str = None):
         """load_from_table(table, parents, children, consolidations, consol_default, hierarchy, connection')
         Bulk loads a dimension from an Analyze table with flattened hierarchy
 
@@ -2237,18 +2238,22 @@ class Dimension:
             consolidations (str): Column with consolidations nodes
             consol_default (str): consolidation type +, -, or ~
             hierarchy (str): alt hierarchy key
-            connection (str): connection url
+            alias_columns (list): List of columns containing alias values, alias name is column name
+            property_columns (list): List of columns containing property values, property name is column name
+            value_columns (list): List of columns containing values, value name is column name
+            leaf_child (str, optional): Column containing leaf level - to match with alias/properties/values - if omitted, will be derived
 
         Returns:
             None
         """
         self.dim.load_from_table_flat(project_id=self.project_id, name=self.name, table=table, columns=columns, top=top,
                                       consolidations=consolidations, consol_default=consol_default,
-                                      hierarchy=hierarchy)
+                                      hierarchy=hierarchy, alias_columns=alias_columns, property_columns=property_columns,
+                                      value_columns=value_columns, leaf_child=leaf_child)
 
     # noinspection PyUnusedLocal
     def load_from_table_pc(self, table, parents, children, consolidations=None, consol_default='+',
-                           hierarchy=MAIN, connection='sqlalchemy'):
+                           hierarchy=MAIN, alias_columns=None, property_columns=None, value_columns=None):
         """load_from_table(table, parents, children, consolidations, consol_default, hierarchy, connection')
         Bulk loads a dimension from an Analyze table
         Args:
@@ -2258,13 +2263,17 @@ class Dimension:
             consolidations (str): Column with consolidations nodes
             consol_default (str): consolidation type +, -, or ~
             hierarchy (str): alt hierarchy key
-            connection (str): connection url
+            alias_columns (list): List of columns containing alias values, alias name is column name
+            property_columns (list): List of columns containing property values, property name is column name
+            value_columns (list): List of columns containing values, value name is column name
+
         Returns:
             None
         """
         self.dim.load_from_table_pc(project_id=self.project_id, name=self.name, table=table, parents=parents,
                                     children=children, consolidations=consolidations, consol_default=consol_default,
-                                    hierarchy=hierarchy)
+                                    hierarchy=hierarchy, alias_columns=alias_columns, property_columns=property_columns,
+                                    value_columns=value_columns)
 
     # --------------------------------------------------------------------------------------------------
     # ==== SAVE METHODS ================================================================================
