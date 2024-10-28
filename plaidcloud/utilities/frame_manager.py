@@ -2393,6 +2393,9 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=Fals
 def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
     """Converts an excel file to a CSV file
 
+    Note:
+        This method ALWAYS adds a header row, either from the data, or guessed
+
     Args:
         excel_file_name (str): The name of the input Excel file
         csv_file_name (str): The name of the output CSV file
@@ -2513,52 +2516,56 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
                 # logger.info(f'Column information for Excel Import: {column_information}')
                 wr.writerow(header_columns)
                 column_count = len(column_information)
-            else:
-                # logger.info(f'Row Headers: {header_columns}')
-                if clean:
-                    if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
-                        # Skip rows that have no data.
-                        continue
 
-                row = []
-                col_pos = 0
-                for col_info in column_information:
-                    try:
-                        c = sh.cell(rownum, col_pos)
+                # Now we've either read, or guessed the headers. If we've read them, then they are not a line of data. Continue to next row of data
+                # If we've guessed, then also read the row as a line of data
+                if has_header:
+                    continue
+            # logger.info(f'Row Headers: {header_columns}')
+            if clean:
+                if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
+                    # Skip rows that have no data.
+                    continue
 
-                        if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
-                            row.append(null_value)
-                        else:
-                            dtype = dtype_from_excel(c.ctype)
-                            # logger.info(f'Column: {col_pos}')
-                            if dtype != col_info['dtype']:
-                                column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+            row = []
+            col_pos = 0
+            for col_info in column_information:
+                try:
+                    c = sh.cell(rownum, col_pos)
 
-                            if dtype == 'text':
-                                row.append(c.value)
-                            elif dtype == 'numeric':
-                                if int(c.value) == c.value:
-                                    row.append(int(c.value))  # This appears to be an int
-                                else:
-                                    row.append(get_formatted_number(c.value))  # some other type of number
-                            elif dtype == 'boolean':
-                                row.append(c.value)
-                            elif dtype == 'timestamp':
-                                # If there is a year, use as datetime
-                                if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
-                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
-                                else:
-                                    row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+                        row.append(null_value)
+                    else:
+                        dtype = dtype_from_excel(c.ctype)
+                        # logger.info(f'Column: {col_pos}')
+                        if dtype != col_info['dtype']:
+                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
+
+                        if dtype == 'text':
+                            row.append(c.value)
+                        elif dtype == 'numeric':
+                            if int(c.value) == c.value:
+                                row.append(int(c.value))  # This appears to be an int
                             else:
-                                #  Default is to insert the value as-is, no conversion
-                                row.append(c.value)
-                        col_pos += 1
-                    except Exception as e:
-                        raise Exception(
-                            f'Error importing cell at row {rownum}, column {col_pos}. '
-                            f'Check the cell is formatted correctly'
-                        ) from e
-                wr.writerow(row)
+                                row.append(get_formatted_number(c.value))  # some other type of number
+                        elif dtype == 'boolean':
+                            row.append(c.value)
+                        elif dtype == 'timestamp':
+                            # If there is a year, use as datetime
+                            if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
+                                row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
+                            else:
+                                row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
+                        else:
+                            #  Default is to insert the value as-is, no conversion
+                            row.append(c.value)
+                    col_pos += 1
+                except Exception as e:
+                    raise Exception(
+                        f'Error importing cell at row {rownum}, column {col_pos}. '
+                        f'Check the cell is formatted correctly'
+                    ) from e
+            wr.writerow(row)
 
         if skipped_rows:
             logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
