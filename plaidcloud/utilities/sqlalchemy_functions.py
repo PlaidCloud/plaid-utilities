@@ -464,23 +464,29 @@ def compile_import_cast_databend(element, compiler, **kw):
             ),
             **kw
         )
-    # ToDo - Databend can't handle sending a format to parse number that I can see so trailing_negs is a tough parse
-    elif dtype == 'integer':
-        return compiler.process(func.to_int32(col))
-    elif dtype == 'bigint':
-        return compiler.process(func.to_int64(col))
-    elif dtype == 'smallint':
-        return compiler.process(func.to_int16(col))
-    elif dtype == 'numeric':
-        return compiler.process(
-            func.cast(
-                sqlalchemy.case(
-                    (func.to_string(col) == 'NaN', None),
-                    else_=col,
-                ),
-                sqlalchemy.Numeric(38, 10),
+    elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
+        expr = col
+        if trailing_negs:
+            expr = sqlalchemy.case(
+                (func.regexp_like(col, '^[0-9]*\\.?[0.9]*-$'), func.concat('-', func.replace(col, '-', ''))),
+                else_=col
             )
-        )
+        if dtype == 'integer':
+            return compiler.process(func.to_int32(expr))
+        elif dtype == 'bigint':
+            return compiler.process(func.to_int64(expr))
+        elif dtype == 'smallint':
+            return compiler.process(func.to_int16(expr))
+        elif dtype == 'numeric':
+            return compiler.process(
+                func.cast(
+                    sqlalchemy.case(
+                        (func.to_string(expr) == 'NaN', None),
+                        else_=expr,
+                    ),
+                    sqlalchemy.Numeric(38, 10),
+                )
+            )
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
