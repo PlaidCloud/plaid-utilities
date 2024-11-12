@@ -102,7 +102,7 @@ class TestImportColDatabend(DatabendTest):
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
         self.assertEqual('NaN', compiled.params['to_string_1'])
-        self.assertEqual('^[0-9]*\\.?[0.9]*-$', compiled.params['regexp_like_1'])
+        self.assertEqual('^[0-9]*\\.?[0-9]*-$', compiled.params['regexp_like_1'])
         self.assertEqual('-', compiled.params['concat_1'])
         self.assertEqual('-', compiled.params['replace_1'])
         self.assertEqual('', compiled.params['replace_2'])

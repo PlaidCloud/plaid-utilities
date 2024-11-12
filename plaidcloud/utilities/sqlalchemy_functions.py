@@ -468,7 +468,7 @@ def compile_import_cast_databend(element, compiler, **kw):
         expr = col
         if trailing_negs:
             expr = sqlalchemy.case(
-                (func.regexp_like(col, '^[0-9]*\\.?[0.9]*-$'), func.concat('-', func.replace(col, '-', ''))),
+                (func.regexp_like(col, '^[0-9]*\\.?[0-9]*-$'), func.concat('-', func.replace(col, '-', ''))),
                 else_=col
             )
         if dtype == 'integer':
