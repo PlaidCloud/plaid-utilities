@@ -14,7 +14,7 @@ orjson
 openpyxl
 SQLAlchemy~=1.4
 sqlalchemy-greenplum
-sqlalchemy-hana
+# sqlalchemy-hana
 texttable
 toolz
 unicodecsv
