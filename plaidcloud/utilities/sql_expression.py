@@ -548,11 +548,11 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
 
 
 def get_select_query(
-    tables, source_columns, target_columns, wheres, config=None,
-    variables=None, aggregate=None, having=None, use_target_slicer=None,
-    limit_target_start=None, limit_target_end=None, distinct=None,
-    count=None, disable_variables=None, table_numbering_start=1,
-    use_row_number_for_serial: bool = True,
+    tables: list[sqlalchemy.Table], source_columns: list[dict], target_columns: list[dict], wheres: list[str],
+    config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
+    use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
+    distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
+    use_row_number_for_serial: bool = True, aggregation_type: str = 'group'
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -573,6 +573,11 @@ def get_select_query(
         limit_target_start:
         limit_target_end:
         distinct:
+        count:
+        disable_variables:
+        table_numbering_start:
+        use_row_number_for_serial:
+        aggregation_type: One of 'group', 'rollup', 'sets'
 
     Returns:
 
@@ -592,6 +597,7 @@ def get_select_query(
     distinct = fill_in(distinct, 'distinct', False)
     count = fill_in(count, 'count', False)
     disable_variables = fill_in(disable_variables, 'disable_variables', False)
+    aggregation_type = fill_in(aggregation_type, 'aggregation_type', 'group')
 
     # Find any columns for sorting, find these up front such that they may be used if a serial column is present
     columns_to_sort_on = [
@@ -660,27 +666,33 @@ def get_select_query(
 
     # Build GROUP BY section of our select query.
     if aggregate:
-        select_query = select_query.group_by(
-            *[
-                get_from_clause(
-                    tables,
-                    tc,
-                    source_columns,
-                    False,
-                    variables=variables,
-                    cast=False,
-                    disable_variables=disable_variables,
-                    table_numbering_start=table_numbering_start,
-                    use_row_number_for_serial=use_row_number_for_serial,
-                )
-                for tc in target_columns
-                if (
-                    tc.get('agg') in ('group', 'group_null')
-                    and not tc.get('constant')
-                    and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
-                )
-            ]
-        )
+        grouping_columns = [
+            get_from_clause(
+                tables,
+                tc,
+                source_columns,
+                False,
+                variables=variables,
+                cast=False,
+                disable_variables=disable_variables,
+                table_numbering_start=table_numbering_start,
+                use_row_number_for_serial=use_row_number_for_serial,
+            )
+            for tc in target_columns
+            if (
+                tc.get('agg') in ('group', 'group_null')
+                and not tc.get('constant')
+                and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
+            )
+        ]
+        if aggregation_type == 'rollup':
+            select_query = select_query.group_by(sqlalchemy.func.rollup(*grouping_columns))
+        elif aggregation_type == 'sets':
+            select_query = select_query.group_by(sqlalchemy.func.grouping_sets(*grouping_columns))
+        elif aggregation_type == 'cube':
+            select_query = select_query.group_by(sqlalchemy.func.cube(*grouping_columns))
+        else:
+            select_query = select_query.group_by(*grouping_columns)
 
     # Build DISTINCT section of our select query
     if distinct:
@@ -807,10 +819,10 @@ def get_combined_wheres(wheres, tables, variables, disable_variables=False, tabl
     ]
 
 
-def apply_output_filter(original_query, filter, variables=None):
+def apply_output_filter(original_query, filter_where: str, variables: dict = None):
     variables = variables or {}
     original_query = original_query.subquery('result')
-    where_clause = eval_expression(clean_where(filter), variables, [], extra_keys={'result': original_query.columns})
+    where_clause = eval_expression(clean_where(filter_where), variables, [], extra_keys={'result': original_query.columns})
     return sqlalchemy.select(*original_query.columns).where(where_clause)
 
 
