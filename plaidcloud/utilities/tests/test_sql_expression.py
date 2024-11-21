@@ -929,7 +929,7 @@ class TestGetSelectQuery(TestSQLExpression):
     def test_basic_use_case(self):
         # basic function
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], []),
             sqlalchemy.select(self.from_clause(self.target_column))
         )
 
@@ -937,8 +937,8 @@ class TestGetSelectQuery(TestSQLExpression):
         # serial are ignored
         row_number_tc = {'target': 'RowNumber', 'dtype': 'serial'}
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, row_number_tc], [], use_row_number_for_serial=False),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, row_number_tc], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_row_number_for_serial=False),
         )
 
     # def test_serial_row_number(self):
@@ -952,7 +952,7 @@ class TestGetSelectQuery(TestSQLExpression):
     def test_wheres(self):
         # wheres section
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], ['table.Column2 > 0']),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], ['table.Column2 > 0']),
             sqlalchemy.select(self.from_clause(self.target_column)).where(self.table.c.Column2 > 0),
         )
 
@@ -961,7 +961,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.target_column, self.column_2_ascending, self.column_3_descending],
                 [],
             ),
@@ -979,8 +979,8 @@ class TestGetSelectQuery(TestSQLExpression):
         # neither select nor sort should include serial columns
         serial_ascending = {'target': 'RowCount', 'dtype': 'serial', 'sort': {'ascending': True, 'order': 3}}
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending, serial_ascending], [], use_row_number_for_serial=False),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column, self.column_2_ascending], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, self.column_2_ascending, serial_ascending], [], use_row_number_for_serial=False),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, self.column_2_ascending], [], use_row_number_for_serial=False),
         )
 
     def test_dont_sort_without_ascending_param(self):
@@ -989,7 +989,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.target_column, malformed_sort, self.column_3_descending],
                 [],
             ),
@@ -1007,7 +1007,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.target_column, sort_without_order, self.column_3_descending],
                 [],
             ),
@@ -1023,7 +1023,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, self.sum_column_2],
                 [],
                 aggregate=True,
@@ -1040,7 +1040,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, groupby_constant, self.sum_column_2],
                 [],
                 aggregate=True,
@@ -1058,7 +1058,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, groupby_serial, self.sum_column_2],
                 [],
                 aggregate=True,
@@ -1084,7 +1084,7 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, groupby_serial, self.sum_column_2],
                 [],
                 aggregate=True,
@@ -1092,12 +1092,63 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
         )
 
+    def test_rollup(self):
+        # rollups (if aggregate and aggregation_type == 'rollup')
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.groupby_column_1, self.sum_column_2],
+                [],
+                aggregate=True,
+                aggregation_type='rollup'
+            ),
+            sqlalchemy.select(
+                self.from_clause(self.groupby_column_1, aggregate=True),
+                self.from_clause(self.sum_column_2, aggregate=True),
+            ).group_by(sqlalchemy.func.rollup(self.from_clause(self.groupby_column_1, aggregate=False, cast=False))),
+        )
+
+    def test_grouping_sets(self):
+        # grouping_sets (if aggregate and aggregation_type == 'sets')
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.groupby_column_1, self.sum_column_2],
+                [],
+                aggregate=True,
+                aggregation_type='sets'
+            ),
+            sqlalchemy.select(
+                self.from_clause(self.groupby_column_1, aggregate=True),
+                self.from_clause(self.sum_column_2, aggregate=True),
+            ).group_by(sqlalchemy.func.grouping_sets(self.from_clause(self.groupby_column_1, aggregate=False, cast=False))),
+        )
+
+    def test_cube(self):
+        # cube (if aggregate and aggregation_type == 'cube')
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.groupby_column_1, self.sum_column_2],
+                [],
+                aggregate=True,
+                aggregation_type='cube'
+            ),
+            sqlalchemy.select(
+                self.from_clause(self.groupby_column_1, aggregate=True),
+                self.from_clause(self.sum_column_2, aggregate=True),
+            ).group_by(sqlalchemy.func.cube(self.from_clause(self.groupby_column_1, aggregate=False, cast=False))),
+        )
+
     def test_aggregate_false(self):
         # don't group by if aggregate is turned off
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, self.sum_column_2],
                 [],
                 aggregate=False,
@@ -1113,7 +1164,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.distinct_column_1, self.column_2],
                 [],
                 distinct=True
@@ -1132,7 +1183,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.distinct_column_1, distinct_constant, self.column_2],
                 [],
                 distinct=True,
@@ -1152,7 +1203,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.distinct_column_1, distinct_serial, self.column_2],
                 [],
                 distinct=True,
@@ -1180,7 +1231,7 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.distinct_column_1, distinct_serial, self.column_2],
                 [],
                 distinct=True,
@@ -1193,7 +1244,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.distinct_column_1, self.column_2],
                 [],
                 distinct=False,
@@ -1207,35 +1258,35 @@ class TestGetSelectQuery(TestSQLExpression):
     def test_having(self):
         # having
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], having='result.TargetColumn != 0'),
-            se.apply_output_filter(se.get_select_query([self.table], [self.source_columns], [self.target_column], []), 'result.TargetColumn != 0', {})
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], having='result.TargetColumn != 0'),
+            se.apply_output_filter(se.get_select_query([self.table], self.source_columns, [self.target_column], []), 'result.TargetColumn != 0', {})
         )
 
     def test_use_target_slicer(self):
         # use_target_slicer
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, limit_target_start=10, limit_target_end=100),
             sqlalchemy.select(self.from_clause(self.target_column)).limit(90).offset(10),
         )
 
     def test_limit_defaults(self):
         # defaults are 0
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True),
             sqlalchemy.select(self.from_clause(self.target_column)).limit(0).offset(0),
         )
 
     def test_limit_target_end_not_start(self):
         # typical use case, 0-10
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_end=10),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, limit_target_end=10),
             sqlalchemy.select(self.from_clause(self.target_column)).limit(10).offset(0),
         )
 
     def test_count(self):
         # count
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [], [], count=True),
+            se.get_select_query([self.table], self.source_columns, [], [], count=True),
             sqlalchemy.select(sqlalchemy.func.count()).select_from(self.table),
         )
 
@@ -1244,26 +1295,26 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [self.groupby_column_1, self.sum_column_2],
                 [],
                 aggregate=True,
             ),
-            se.get_select_query([self.table], [self.source_columns], [self.groupby_column_1, self.sum_column_2], [], config={'aggregate': True})
+            se.get_select_query([self.table], self.source_columns, [self.groupby_column_1, self.sum_column_2], [], config={'aggregate': True})
         )
 
     def test_config_lower_priority(self):
         # args passed in take precedence over args from config
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [], [], count=True, config={'count': False}),
-            se.get_select_query([self.table], [self.source_columns], [], [], count=True),
+            se.get_select_query([self.table], self.source_columns, [], [], count=True, config={'count': False}),
+            se.get_select_query([self.table], self.source_columns, [], [], count=True),
         )
 
     def test_config_special_falsy_case(self):
         # Tests that a bug in v1.0.2 is fixed
         self.assertEquivalent(
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0, config={'limit_target_start': 10, 'limit_target_end': 100}),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0, config={'limit_target_start': 10, 'limit_target_end': 100}),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0),
         )
 
     def test_order(self):
@@ -1275,7 +1326,7 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query(
                 [self.table],
-                [self.source_columns],
+                self.source_columns,
                 [groupby_column_1_new, sum_column_2_asc, sum_column_3_desc],
                 ['table.Column2 > 0'],
                 aggregate=True,
@@ -1330,7 +1381,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
             }, '_schema', None, {}),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], []),
         )
 
     def test_source_where(self):
@@ -1341,7 +1392,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'target_columns': [self.target_column],
                 'source_where': 'table.Column1 == "foobar"',
             }, '_schema', None, {}),
-            se.get_select_query([self.table], [self.source_columns], [self.target_column], ['table.Column1 == "foobar"']),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], ['table.Column1 == "foobar"']),
         )
 
     def test_source_alias(self):
@@ -1353,7 +1404,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'target_columns': [self.target_column],
                 'source_alias': 'table_alias',
             }, '_schema', None, {}),
-            se.get_select_query([aliased_table], [self.source_columns], [self.target_column], []),
+            se.get_select_query([aliased_table], self.source_columns, [self.target_column], []),
         )
 
 class TestModifiedSelectQuery(TestSQLExpression):
@@ -1594,7 +1645,7 @@ class TestImportDataQuery(TestSQLExpression):
                 [expected_target_column],
                 se.get_select_query(
                     [self.expected_temp_table],
-                    [self.expected_temp_table_columns],
+                    self.expected_temp_table_columns,
                     [expected_target_column],
                     [],
                 ),
@@ -1623,7 +1674,7 @@ class TestImportDataQuery(TestSQLExpression):
                 [expected_target_column_tn],
                 se.get_select_query(
                     [self.expected_temp_table],
-                    [self.expected_temp_table_columns],
+                    self.expected_temp_table_columns,
                     [expected_target_column_tn],
                     [],
                 ),
@@ -1652,7 +1703,7 @@ class TestImportDataQuery(TestSQLExpression):
                 [expected_target_column_df],
                 se.get_select_query(
                     [self.expected_temp_table],
-                    [self.expected_temp_table_columns],
+                    self.expected_temp_table_columns,
                     [expected_target_column_df],
                     [],
                 ),
@@ -1718,7 +1769,7 @@ class TestImportDataQuery(TestSQLExpression):
                 magic_expected_target_columns,
                 se.get_select_query(
                     [self.expected_temp_table],
-                    [self.expected_temp_table_columns],
+                    self.expected_temp_table_columns,
                     magic_expected_target_columns,
                     []
                 ),
