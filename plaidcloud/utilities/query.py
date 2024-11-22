@@ -558,7 +558,7 @@ class Connection:
             'upload_path': upload_path,
         }
         headers = {
-            "Authorization": f'Bearer {self.rpc.auth_token}'
+            "Authorization": f'Bearer {self.rpc.auth_token() if callable(self.rpc.auth_token) else self.rpc.auth_token}'
         }
 
         # logger.info('Preparing to open and upload {}'.format(archive_name))
