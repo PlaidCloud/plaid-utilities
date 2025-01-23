@@ -1060,7 +1060,7 @@ def allocate(
                         / sqlalchemy.func.nullif(cte_denominator.columns[d], 0),
                         0,
                     ),
-                    sqlalchemy.NUMERIC,
+                    sqlalchemy.NUMERIC(38, 20),  # We need a large scale here to calc allocation correctly
                 ).label(_get_shred_col_name(d))
                 for d in driver_value_columns
             ]
