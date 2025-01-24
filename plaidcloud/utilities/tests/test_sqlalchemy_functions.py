@@ -470,3 +470,44 @@ class TestSafeToDateDB(DatabendTest):
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
+
+class TestSafeExtract(BaseTest):
+    def test_extract_datetime(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.extract('year', dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM %(extract_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['extract_1'])
+
+    def test_extract_sql_datetime(self):
+        c = sqlalchemy.column("id", self.eng.dialect.type_descriptor(sqlalchemy.types.DateTime))
+        expr = sqlalchemy.func.extract('year', c)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM id)', str(compiled))
+
+    def test_extract_sql_date(self):
+        c = sqlalchemy.column("id", self.eng.dialect.type_descriptor(sqlalchemy.types.Date))
+        expr = sqlalchemy.func.extract('year', c)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM id)', str(compiled))
+
+
+class TestSafeExtractDB(DatabendTest):
+    def test_extract_datetime(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.extract('year', dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM %(extract_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['extract_1'])
+
+    def test_extract_sql_datetime(self):
+        c = sqlalchemy.column("id", self.eng.dialect.type_descriptor(sqlalchemy.types.DateTime))
+        expr = sqlalchemy.func.extract('year', c)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM id)', str(compiled))
+
+    def test_extract_sql_date(self):
+        c = sqlalchemy.column("id", self.eng.dialect.type_descriptor(sqlalchemy.types.Date))
+        expr = sqlalchemy.func.extract('year', c)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM id)', str(compiled))

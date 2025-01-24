@@ -352,7 +352,7 @@ def compile_safe_extract(element, compiler, **kw):
     field, timestamp, *args = list(element.clauses)
 
     field = field.effective_value
-    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Interval, PlaidDate, PlaidTimestamp)):
+    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Date, sqlalchemy.Interval, PlaidDate, PlaidTimestamp)):
         timestamp = func.to_timestamp(timestamp)
 
     return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
