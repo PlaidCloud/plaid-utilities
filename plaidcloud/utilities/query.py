@@ -512,7 +512,7 @@ class Connection:
                 df.to_parquet(pq_file)
                 # upload the file
                 pq_file.seek(0)
-                self._upload(data_load['load_type'], data_load['upload_path'], pq_file)
+                self._upload(table_object.id, data_load['load_type'], data_load['upload_path'], pq_file)
 
             # execute the load
             self.rpc.analyze.table.execute_data_load(
@@ -555,11 +555,12 @@ class Connection:
                         compressed=True,
                     )
 
-    def _upload(self, load_type: str, upload_path: str, pfile):
+    def _upload(self, table_id: str, load_type: str, upload_path: str, pfile):
 
         upload_url = urlunparse(urlparse(self.rpc.rpc_uri)._replace(path='upload_data'))
 
         params = {
+            'table_id': table_id,
             'load_type': load_type,
             'upload_path': upload_path,
         }
