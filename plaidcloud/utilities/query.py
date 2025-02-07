@@ -498,12 +498,6 @@ class Connection:
             load_greenplum_parquet=load_greenplum_parquet,
         )
         if data_load:
-            # check columns are filled with the same datatypes
-            for col in list(df.columns):
-                distinct_types = df[col].map(type).unique()
-                if len(distinct_types) > 1:
-                    raise Exception(f'Error saving Dataframe, data in column {col} are not the same types, found {distinct_types}')
-
             schema = pa.Schema.from_pandas(df)
             for col in schema:
                 if isinstance(col.type, (pa.ListType, pa.StructType)):
