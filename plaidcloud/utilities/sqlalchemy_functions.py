@@ -250,11 +250,11 @@ def compile_import_cast_databend(element, compiler, **kw):
             **kw
         )
     elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
-        expr = col
+        expr = func.regexp_replace(col, r'\s*', '')
         if trailing_negs:
             expr = sqlalchemy.case(
-                (func.regexp_like(col, '^[0-9]*\\.?[0-9]*-$'), func.concat('-', func.replace(col, '-', ''))),
-                else_=col
+                (func.regexp_like(expr, '^[0-9]*\\.?[0-9]*-$'), func.concat('-', func.replace(expr, '-', ''))),
+                else_=expr
             )
         if dtype == 'integer':
             return compiler.process(func.to_int32(expr))
