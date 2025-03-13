@@ -1161,3 +1161,121 @@ def allocate(
         )
     )
     return allocation_select
+
+
+
+def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable_variables=False, table_numbering_start=1):
+    safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
+
+    try:
+        expression_with_variables = apply_variables(rule, variables)
+    except:
+        if disable_variables:
+            expression_with_variables = rule
+        else:
+            raise
+
+    compiled_expression = compile(expression_with_variables, '<string>', 'eval')
+
+    try:
+        return eval(compiled_expression, safe_dict)
+    except Exception as e:
+        raise SQLExpressionError(
+            f'Error in rule evaluation:\n{rule}\n' + str(e)
+        )
+
+
+def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, include_once=True, show_rules=False,
+                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration',
+                logger=None):
+    """
+    If include_once is True, then condition n+1 only applied to records left after condition n.
+    Adding target column(s), plural, because we'd want to only run this operation once, even
+    if we needed to set multiple columns.
+
+    Args:
+        source_query (sqlalchemy.Selectable): The Query to apply rules on
+        df_rules (pandas.DataFrame): A list of rules to apply
+        rule_id_column (str): Column name containing the rule id
+        target_columns (list of str, optional): The target columns to apply rules on.
+        include_once (bool, optional): Should records that match multiple rules
+            be included ONLY once? Defaults to `True`
+        show_rules (bool, optional): Display the rules in the result data? Defaults to `False`
+        verbose (bool, optional): Display the rules in the log messages? Defaults
+            to `True`.  This is not overly heavier than leaving it off, so we probably should
+            always leave it on unless logging is off altogether.
+        unmatched_rule (str, optional): Default rule to write in cases of records not matching any rule
+        condition_column (str, optional): Column name containing the rule condition, defaults to 'condition'
+        logger (object, optional): Logger to record any output
+
+    Returns:
+        sqlalchemy.Selectable: SQLAlchemy query to apply the rules
+    """
+    target_columns = target_columns or ['value']
+    df_rules = df_rules.reset_index(drop=True)
+    if iteration_column not in df_rules.columns:
+        df_rules[iteration_column] = 1
+
+    cte_source = source_query.cte('source')
+    # make the rules a values clause CTE => WITH cte_rules as select * from values( (rule1,), (rule2,)
+    cte_rules = sqlalchemy.select(
+        sqlalchemy.values(
+            *[sqlalchemy.column(col, sqlalchemy_from_dtype(df_rules[col].dtype)) for col in df_rules.columns],
+            name="rule_values",
+        ).data(
+            list(df_rules.values)
+        )
+    ).cte('rules')
+
+    iterations = list(set(df_rules[iteration_column]))
+    iterations.sort()
+    applied_rules_select = None
+
+    for iteration in iterations:
+        iteration_select = None
+
+        if include_once:
+            iteration_select = sqlalchemy.select(
+                *[col for col in cte_source.columns],
+                sqlalchemy.case(
+                    *[
+                        (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
+                        for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows()
+                    ],
+                    else_=None,
+                ).label('rule_id')
+            )
+        else:
+            for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
+                rule_select = sqlalchemy.select(
+                    *[col for col in cte_source.columns],
+                    sqlalchemy.literal(rule[rule_id_column]).label('rule_id')
+                ).where(
+                    eval_rule(rule[condition_column], variables={}, tables=[cte_source]),
+                )
+                if iteration_select:
+                    iteration_select = iteration_select.union_all(rule_select)
+                else:
+                    iteration_select = rule_select
+
+        if applied_rules_select:
+            applied_rules_select = applied_rules_select.union_all(iteration_select)
+        else:
+            applied_rules_select = iteration_select
+
+    cte_applied_rules = applied_rules_select.cte('applied_rules')
+
+    final_select = sqlalchemy.select(
+        *(
+            [col for col in cte_applied_rules.columns] +
+            [cte_rules.columns[t] for t in target_columns]
+        )
+    ).select_from(
+        sqlalchemy.join(
+            cte_applied_rules,
+            cte_rules,
+            cte_applied_rules.columns['rule_id'] == cte_rules.columns[rule_id_column],
+        )
+    )
+
+    return final_select
