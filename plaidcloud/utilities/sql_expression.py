@@ -1213,6 +1213,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     """
     target_columns = target_columns or ['value']
     df_rules = df_rules.reset_index(drop=True)
+    df_rules['rule_number'] = df_rules.index
     if iteration_column not in df_rules.columns:
         df_rules[iteration_column] = 1
 
@@ -1223,7 +1224,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
             *[sqlalchemy.column(col, sqlalchemy_from_dtype(df_rules[col].dtype)) for col in df_rules.columns],
             name="rule_values",
         ).data(
-            list(df_rules.values)
+            df_rules.values
         )
     ).cte('rules')
 
@@ -1269,7 +1270,11 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
         *(
             [col for col in cte_applied_rules.columns] +
             [cte_rules.columns[t] for t in target_columns]
-        )
+        ),
+        sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.VARCHAR).label('log'),
+        cte_rules.columns['rule_number'],
+        cte_rules.columns['rule'] if False else sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.VARCHAR).label('rule'),
+
     ).select_from(
         sqlalchemy.join(
             cte_applied_rules,
