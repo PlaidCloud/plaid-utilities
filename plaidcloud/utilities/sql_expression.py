@@ -1267,19 +1267,17 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     cte_applied_rules = applied_rules_select.cte('applied_rules')
 
     final_select = sqlalchemy.select(
-        *(
-            [col for col in cte_applied_rules.columns] +
-            [cte_rules.columns[t] for t in target_columns]
-        ),
+        *[col for col in cte_applied_rules.columns],
         sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.VARCHAR).label('log'),
         cte_rules.columns['rule_number'],
         cte_rules.columns['rule'] if False else sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.VARCHAR).label('rule'),
-
+        *[cte_rules.columns[t] for t in target_columns]
     ).select_from(
         sqlalchemy.join(
             cte_applied_rules,
             cte_rules,
             cte_applied_rules.columns['rule_id'] == cte_rules.columns[rule_id_column],
+            isouter=True,
         )
     )
 
