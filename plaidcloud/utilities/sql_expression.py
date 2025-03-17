@@ -1209,7 +1209,9 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
         logger (object, optional): Logger to record any output
 
     Returns:
-        sqlalchemy.Selectable: SQLAlchemy query to apply the rules
+        tuple:
+            sqlalchemy.Selectable: cte of the rules
+            sqlalchemy.Selectable: SQLAlchemy query to apply the rules
     """
     target_columns = target_columns or ['value']
     df_rules = df_rules.reset_index(drop=True)
@@ -1282,4 +1284,4 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
         )
     )
 
-    return final_select
+    return cte_rules, final_select
