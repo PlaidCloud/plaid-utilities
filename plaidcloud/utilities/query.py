@@ -3,7 +3,7 @@ import logging
 import os
 import tempfile
 import uuid
-import unicodecsv as csv
+import csv
 
 import pyarrow as pa
 import pandas as pd
@@ -642,7 +642,7 @@ class Connection:
             columns=_table_meta(),
             overwrite=True
         )
-        
+
         # use the upsert method to add the data
         insert_query, insert_params = self._compiled(table.insert().from_select(query.selected_columns, query))
         self.rpc.analyze.query.upsert(
@@ -666,10 +666,10 @@ class Connection:
         if not self._project_id:
             raise Exception('Project Id has not been set')
         return self._project_name
-    
+
     def get_dimension(self, dimension_name):
         return self.dims.get_dimension(name=dimension_name, replace=False).hierarchy_table()
-    
+
     def get_table(self, table_name):
         return Table(self, table_name)
 
