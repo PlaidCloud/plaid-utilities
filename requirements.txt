@@ -5,7 +5,7 @@ fastparquet
 ipython
 numpy
 pandas
-plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.4.9#egg=plaidcloud-rpc
+plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v87ec96eaf40d0f33d243956a50232c0cb50280a1#egg=plaidcloud-rpc
 pyarrow
 PyYAML
 requests
