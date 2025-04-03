@@ -8,6 +8,7 @@ import sys
 import math
 import datetime
 import string
+import csv
 from functools import wraps
 from io import BytesIO
 import traceback
@@ -15,7 +16,6 @@ from math import log10, floor
 import fastavro
 
 import xlrd3 as xlrd
-import unicodecsv as csv
 import pandas as pd
 from pandas.api.types import is_string_dtype
 import numpy as np
