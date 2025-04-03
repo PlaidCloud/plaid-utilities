@@ -10,7 +10,7 @@ import datetime
 import string
 import csv
 from functools import wraps
-from io import BytesIO
+from io import StringIO
 import traceback
 from math import log10, floor
 import fastavro
@@ -206,7 +206,7 @@ def list_of_dicts_to_typed_psv(lod, outfile, types, fieldnames=None, sep='|'):
             writer.writerow(row)
 
     if isinstance(outfile, str):
-        with open(outfile, 'wb') as buf:
+        with open(outfile, 'w') as buf:
             write(buf)
     else:
         write(outfile)
@@ -577,7 +577,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
 
     if isinstance(infile, str):
         if os.path.exists(infile):
-            buf = open(infile, 'rb')
+            buf = open(infile, 'r')
         else:
             logger.exception('File does not exist: {0}'.format(infile))
             return False
@@ -585,7 +585,7 @@ def load_typed_psv(infile, sep='|', **kwargs):
         buf = infile
 
     try:
-        headerIO = BytesIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
+        headerIO = StringIO(buf.readline())  # The first line needs to be in a separate iterator, so that we don't mix read and iter.
         header = next(csv.reader(headerIO, delimiter=sep))  # Just parse that first line as a csv row
         names_and_types = [h.split(CSV_TYPE_DELIMITER) for h in header]
         column_names = [n[0] for n in names_and_types]
@@ -2297,7 +2297,7 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
         j = json.loads(json_file.read())
         if columns is None:
             columns = list(get_json_columns(j))
-        with open(csv_file_name, 'wb') as csv_file:
+        with open(csv_file_name, 'w') as csv_file:
             wr = csv.DictWriter(
                 csv_file,
                 columns,
@@ -2412,7 +2412,7 @@ def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean
     column_count = sh.ncols
     null_value = '<NULL>'
 
-    with open(csv_file_name, 'wb') as csv_file:
+    with open(csv_file_name, 'w') as csv_file:
         wr = csv.writer(
             csv_file,
             delimiter='\t',
@@ -2605,7 +2605,7 @@ def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', c
     wb = openpyxl.load_workbook(excel_file_name, read_only=True, data_only=True, keep_links=False, keep_vba=False)
     logger.debug('Workbook Open')
     sh = wb[sheet_name]
-    with open(csv_file_name, 'wb') as csv_file:
+    with open(csv_file_name, 'w') as csv_file:
         wr = csv.writer(
             csv_file,
             delimiter='\t',
@@ -2683,8 +2683,8 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 
 
 def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
-    with open(avro_file_name, 'rb') as infile:
-        with open(csv_file_name, 'wb') as outfile:
+    with open(avro_file_name, 'r') as infile:
+        with open(csv_file_name, 'w') as outfile:
             reader = fastavro.reader(infile)
             if start_row:
                 # Somewhat ugly since fastavro doesn't have a clean way to do this.
