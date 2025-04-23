@@ -552,7 +552,7 @@ def get_select_query(
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
     use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
-    use_row_number_for_serial: bool = True, aggregation_type: str = 'group'
+    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -578,6 +578,7 @@ def get_select_query(
         table_numbering_start:
         use_row_number_for_serial:
         aggregation_type: One of 'group', 'rollup', 'sets'
+        cast: if the query should attempt to cast source columns
 
     Returns:
 
@@ -624,6 +625,7 @@ def get_select_query(
                 variables=variables,
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
+                cast=cast
             )
             for tc in sort_order
         ]
@@ -645,6 +647,7 @@ def get_select_query(
                 table_numbering_start=table_numbering_start,
                 sort_columns=sort_columns,
                 use_row_number_for_serial=use_row_number_for_serial,
+                cast=cast
             )
             for tc in target_columns
             if (use_row_number_for_serial or tc['dtype'] not in ('serial', 'bigserial'))
