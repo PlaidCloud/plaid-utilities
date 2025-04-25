@@ -17,7 +17,8 @@ import sqlalchemy.dialects
 
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
-from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
+from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used  # noqa: F401
+from plaidcloud.utilities import sqlalchemy_types as st  # noqa: F401
 
 
 __author__ = 'Adams Tower'
