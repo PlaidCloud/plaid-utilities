@@ -4,6 +4,7 @@ import os
 import tempfile
 import uuid
 import csv
+from typing import Any, overload, NamedTuple
 
 import pyarrow as pa
 import pandas as pd
@@ -11,6 +12,7 @@ import numpy as np
 import requests
 from requests.adapters import HTTPAdapter
 import sqlalchemy
+from sqlalchemy.sql import selectable
 from sqlalchemy.dialects import registry
 from urllib3.util.retry import Retry
 from urllib.parse import urlparse, urlunparse
@@ -39,6 +41,11 @@ TABLE_PREFIX = 'analyzetable_'
 _NA_VALUES = {'-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
               'N/A', 'n/a', '#NA', 'NULL', 'null', 'NaN', '-NaN', 'nan',
               '-nan', ''}
+
+class UDFParams(NamedTuple):
+    sources: list["Table"]
+    targets: list["Table"]
+    variables: dict[str, str]
 
 
 class Connection:
@@ -82,6 +89,7 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls()
+        self._load_udf_params()
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
@@ -108,6 +116,8 @@ class Connection:
                 project_id=self._project_id,
                 table_id=table_id
             )
+            if meta is None:
+                raise Exception('The table is not created in the database')
 
             if encoding != 'utf-8':
                 replace_func = 'utf8_to_{}'.format(encoding.replace('-', '_').lower())
@@ -205,9 +215,9 @@ class Connection:
                 return self.get_csv(data_source.fully_qualified_name, encoding=encoding, clean=clean)
             if isinstance(data_source, str):
                 if str(data_source).lower().startswith('select'):
-                    self.get_csv_by_query(data_source)
-                else:
-                    self.get_csv(data_source, encoding=encoding, clean=clean)
+                    return self.get_csv_by_query(data_source)
+                return self.get_csv(data_source, encoding=encoding, clean=clean)
+            raise Exception('Unknown type for Data Source {}'.format(repr(data_source)))
         else:
             raise Exception('Unsupported type {} for get_data.'.format(return_type))
 
@@ -354,6 +364,7 @@ class Connection:
 
         if columns:
             return [c['id'] for c in columns]
+        return []
 
     def _load_csv(
         self, project_id, table_id, meta, csv_data, header, delimiter, null_as, quote, escape='\\',
@@ -588,7 +599,6 @@ class Connection:
             r.raise_for_status()
             return r.json()
 
-
     def commit(self):
         """Here for completeness.  Does nothing"""
         pass
@@ -616,12 +626,13 @@ class Connection:
                 project_id=self._project_id, table_id=table.id
             )
 
-    def save_data(self, query, table):
+    def save_data(self, query, table, append: bool = False):
         """Saves the data from the give query as a table in the database
 
         Args:
             query (): Query from which to create the table data
             table (str or Table): Table name/path, or Table object
+            append (bool): If true, append the data to the table
 
         Returns:
             None
@@ -640,7 +651,7 @@ class Connection:
             self,
             table=table if isinstance(table, str) else table.id,
             columns=_table_meta(),
-            overwrite=True
+            overwrite=not append
         )
 
         # use the upsert method to add the data
@@ -672,6 +683,20 @@ class Connection:
 
     def get_table(self, table_name):
         return Table(self, table_name)
+
+    def _load_udf_params(self):
+        self.udf = None
+        if not isinstance(self.rpc.step_id, str):
+            return
+        config = self.rpc.analyze.step.step(
+            project_id=self._project_id,
+            step_id=self.rpc.step_id
+        )
+        self.udf= UDFParams(
+            sources=[self.get_table(s['source']) for s in config.get('sources', [])],
+            targets=[self.get_table(t['target']) for t in config.get('targets', [])],
+            variables={v['name']: v['value'] for v in config.get('variables', [])},
+        )
 
 
 class Table(sqlalchemy.Table):
@@ -819,14 +844,24 @@ class Table(sqlalchemy.Table):
     def get_data(self, clean=False):
         return self._conn.get_dataframe(self, clean=clean)
 
-    def save(self, query):
-        return self._conn.save_data(query, self)
+    @overload
+    def save(self, datasource: selectable.SelectBase, append: bool = False):
+        ...
+
+    @overload
+    def save(self, datasource: pd.DataFrame, append: bool = False):
+        ...
+
+    def save(self, datasource: Any, append: bool = False):
+        if isinstance(datasource, pd.DataFrame):
+            return self._conn.bulk_insert_dataframe(self, datasource, append=append)
+        return self._conn.save_data(datasource, self)
 
 
 def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
     if name.startswith(TABLE_PREFIX):
         # This is already the ID.  Use it
-        logger.warning('Table ID passed to _get_table_id. Not searching for paths or name.')
+        #logger.warning('Table ID passed to _get_table_id. Not searching for paths or name.')  # P.B. Turning off warning 19/05/25
         return name, None, None
     # elif '/' in name:
     #     # This is a path.  Perform a path lookup.
@@ -863,7 +898,7 @@ def _get_table_id(rpc, project_id, name, raise_if_not_found=True):
                 # We have multiple that match both name and path, and we aren't
                 # supposed to raise, so arbitrarily return the first.
                 return table_ids[0], path, table_name
-            elif len(table_ids) < 1:
+            else:  #elif len(table_ids) < 1:
                 # We have multiple that match name, but 0 that match path, and
                 # we aren't supposed to raise, so arbitrarily return the first
                 # that matches name.
