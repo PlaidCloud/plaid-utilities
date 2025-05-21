@@ -38,9 +38,9 @@ TABLE_PREFIX = 'analyzetable_'
 # We must override the default pandas na values to disallow 'NA'.
 # We are doing this by setting our own list, rather than using pandas.io.common._NA_VALUES in
 # order to future-proof, as pandas.io.common._NA_VALUES does not exist in pandas versions > 0.24.
-_NA_VALUES = {'-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
+_NA_VALUES = ('-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
               'N/A', 'n/a', '#NA', 'NULL', 'null', 'NaN', '-NaN', 'nan',
-              '-nan', ''}
+              '-nan', '')
 
 class UDFParams(NamedTuple):
     sources: list["Table"]
@@ -154,7 +154,7 @@ class Connection:
             table_name=table_name,
         )
 
-    def get_csv_by_query(self, query, params=None):
+    def get_csv_by_query(self, query, params=None) -> str:
         """Returns a file path to the query results as a CSV file."""
         if isinstance(query, str):
             query_string = query
@@ -268,7 +268,7 @@ class Connection:
                 # import traceback
                 logger.warning('Failed to delete temporary file {}, {}.'.format(file_path, str(e)))
 
-    def _get_df_from_csv(self, file_path, columns=None, encoding='utf-8'):
+    def _get_df_from_csv(self, file_path: str, columns=None, encoding='utf-8'):
         # TODO: Determine if converters are needed for various column types.
         # Examples:
         #   default null dates to a valid date (1900-01-01) for better parsing
@@ -578,7 +578,7 @@ class Connection:
         with requests.sessions.Session() as session:
             retry = Retry(
                 total=5,
-                allowed_methods=False,  # retry for any method
+                allowed_methods=None,  # retry for any method
                 status_forcelist=[500, 502, 504],
                 backoff_factor=0.1,
             )
