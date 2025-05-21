@@ -22,6 +22,7 @@ from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.utilities.remote.dimension import Dimensions
+from plaidcloud.utilities.stringtransforms import apply_variables
 
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2024, Tartan Solutions, Inc'
@@ -89,6 +90,7 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls()
+        self.variables = self.refresh_variables()
         self._load_udf_params()
 
     def _compiled(self, sa_query):
@@ -693,9 +695,20 @@ class Connection:
             step_id=self.rpc.step_id
         )
         self.udf= UDFParams(
-            sources=[self.get_table(s['source']) for s in config.get('sources', [])],
-            targets=[self.get_table(t['target']) for t in config.get('targets', [])],
-            variables={v['name']: v['value'] for v in config.get('variables', [])},
+            sources=[self.get_table(apply_variables(s['source'], self.variables)) for s in config.get('sources', [])],
+            targets=[self.get_table(apply_variables(t['target'], self.variables)) for t in config.get('targets', [])],
+            variables={v['name']: apply_variables(v['value'], self.variables) for v in config.get('variables', [])},
+        )
+
+    def refresh_variables(self) -> dict:
+        if not isinstance(self.rpc.workflow_id, str):
+            return self.rpc.analyze.project.variable_values(
+                project_id=self._project_id,
+            )
+        return self.rpc.analyze.workflow.variable_values(
+            project_id=self._project_id,
+            workflow_id=self.rpc.workflow_id,
+            include_project=True,
         )
 
 
