@@ -178,7 +178,7 @@ class Connection:
 
     def _csv_stream(self, file_name, columns, preserve_nulls):
         type_lookup = {c.name: c.type for c in columns}
-        with open(file_name, 'rb') as csvfile:
+        with open(file_name, 'r') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 for k, v in row.items():
