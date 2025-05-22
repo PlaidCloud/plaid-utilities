@@ -44,9 +44,12 @@ _NA_VALUES = ('-1.#IND', '1.#QNAN', '1.#IND', '-1.#QNAN', '#N/A N/A', '#N/A',
               '-nan', '')
 
 class UDFParams(NamedTuple):
+    source_by_name: dict[str, "Table"]
     sources: list["Table"]
+    target_by_name: dict[str, "Table"]
     targets: list["Table"]
-    variables: dict[str, str]
+    variable_by_name: dict[str, str]
+    variables: list[str]
 
 
 class Connection:
@@ -694,10 +697,25 @@ class Connection:
             project_id=self._project_id,
             step_id=self.rpc.step_id
         )
+        _sources = [
+            (self.get_table(apply_variables(s['source'], self.variables)), s['id'])
+            for s in config.get('sources', [])
+        ]
+        _targets = [
+            (self.get_table(apply_variables(t['target'], self.variables)), t['id'])
+            for t in config.get('targets', [])
+        ]
+        _variables = [
+            (apply_variables(v['value'], self.variables), v['name'])
+            for v in config.get('variables', [])
+        ]
         self.udf= UDFParams(
-            sources=[self.get_table(apply_variables(s['source'], self.variables)) for s in config.get('sources', [])],
-            targets=[self.get_table(apply_variables(t['target'], self.variables)) for t in config.get('targets', [])],
-            variables={v['name']: apply_variables(v['value'], self.variables) for v in config.get('variables', [])},
+            source_by_name={s[1]: s[0] for s in _sources},
+            sources=[s[0] for s in _sources],
+            target_by_name={t[1]: t[0] for t in _targets},
+            targets=[t[0] for t in _targets],
+            variable_by_name={v[1]: v[0] for v in _variables},
+            variables=[v[0] for v in _variables],
         )
 
     def refresh_variables(self) -> dict:
