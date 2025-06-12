@@ -5,14 +5,14 @@ fastparquet
 ipython
 numpy
 pandas
-plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.5.3#egg=plaidcloud-rpc
+plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.6.0#egg=plaidcloud-rpc
 pyarrow
 PyYAML
 requests
 setuptools
 orjson
 openpyxl
-SQLAlchemy~=1.4
+SQLAlchemy
 sqlalchemy-greenplum
 # sqlalchemy-hana
 texttable
