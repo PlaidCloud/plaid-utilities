@@ -514,7 +514,17 @@ class Connection:
             load_greenplum_parquet=load_greenplum_parquet,
         )
         if data_load:
-            schema = pa.Schema.from_pandas(df)
+            try:
+                schema = pa.Schema.from_pandas(df)
+            except pa.lib.ArrowTypeError as e:
+                bad_columns = []
+                for col in df.columns:
+                    try:
+                        pa.Schema.from_pandas(df[[col]].copy())
+                    except pa.lib.ArrowTypeError:
+                        bad_columns.append(col)
+                raise Exception(f'Mixed data in column(s) {bad_columns}') from e
+
             for col in schema:
                 if isinstance(col.type, (pa.ListType, pa.StructType)):
                     df[col.name] = df[col.name].map(str)
