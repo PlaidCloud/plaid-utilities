@@ -664,7 +664,7 @@ class Connection:
         # ensure the table exists as per the metadata
         table = Table(
             self,
-            table=table if isinstance(table, str) else table.id,
+            table if isinstance(table, str) else table.id,
             columns=_table_meta(),
             overwrite=not append
         )
