@@ -1256,7 +1256,7 @@ def apply_rule(df, rules, target_columns=None, include_once=True, show_rules=Fal
 
 def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules=False,
                 verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration',
-                rule_id_column=None, logger=logger):
+                rule_id_column=None, logger=logger, raise_exceptions=False):
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
@@ -1276,6 +1276,7 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
         condition_column (str, optional): Column name containing the rule condition, defaults to 'condition'
         rule_id_column (str, optional): Column name containing the rule id, just set to index if not provided
         logger (object, optional): Logger to record any output
+        raise_exceptions (bool, optional): Whether to raise exceptions. Defaults to `False` (backwards compatible)
 
     Returns:
         list of pandas.DataFrame: The results of applying rules to the input `df`
@@ -1357,6 +1358,8 @@ def apply_rules(df, df_rules, target_columns=None, include_once=True, show_rules
                             if rule_id_column:
                                 df_subset.loc[list(df_subset.index), 'rule_id'] = rule[rule_id_column]
                 except Exception as e:
+                    if raise_exceptions:
+                        raise
                     df_subset = pd.DataFrame()
 
                     def add_message(log):
