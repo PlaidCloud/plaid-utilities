@@ -5,7 +5,7 @@ fastparquet
 ipython
 numpy
 pandas
-plaidcloud-rpc@git+https://github.com/PlaidCloud/plaid-rpc.git@v1.6.0#egg=plaidcloud-rpc
+plaidcloud-rpc>=1.6.1
 pyarrow
 PyYAML
 requests
@@ -13,8 +13,6 @@ setuptools
 orjson
 openpyxl
 SQLAlchemy
-sqlalchemy-greenplum
-# sqlalchemy-hana
 texttable
 toolz
 xlrd3@git+https://github.com/PlaidCloud/xlrd3.git@master#egg=xlrd3
