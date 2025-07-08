@@ -7,15 +7,12 @@ import posixpath
 import sys
 import math
 import datetime
-import string
 import csv
 from functools import wraps
-from io import StringIO
+from io import StringIO, BytesIO
 import traceback
-from math import log10, floor
-import fastavro
 
-import xlrd3 as xlrd
+import fastavro
 import pandas as pd
 from pandas.api.types import is_string_dtype
 import numpy as np
@@ -532,6 +529,7 @@ def sturdy_cast_as_float(input_val):
             return float(input_val)
         except ValueError:
             return None
+
 
 def converter_from_sql(sql):
     """Gets a pandas converter from a SQL data type
@@ -2379,292 +2377,28 @@ def get_formatted_number(val):
     return f'{val:.{scale}f}'
 
 
-def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
+def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', has_header=True, skip_rows=0):
     """Converts an excel file to a CSV file
 
     Args:
         excel_file_name (str): The name of the input Excel file
         csv_file_name (str): The name of the output CSV file
         sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
-        clean (bool, optional): Remove blank rows
         has_header (bool, optional): The file has a header row
         skip_rows (int, optional): The number of rows to skip at the top of the file
     """
-    return excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name, clean, has_header, skip_rows)
-
-
-def excel_to_csv_xlrd(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
-    """Converts an excel file to a CSV file
-
-    Note:
-        This method ALWAYS adds a header row, either from the data, or guessed
-
-    Args:
-        excel_file_name (str): The name of the input Excel file
-        csv_file_name (str): The name of the output CSV file
-        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
-        clean (bool, optional): Remove blank rows
-        has_header (bool, optional): The file has a header row
-        skip_rows (int, optional): The number of rows to skip at the top of the file
-    """
-    logger.debug('opening workbook for conversion')
-    column_information = []
-    wb = xlrd.open_workbook(excel_file_name, on_demand=True)
-    datemode = getattr(wb, 'datemode', getattr(wb, 'date_mode', 0))
-    sh = wb.sheet_by_name(sheet_name)
-    column_count = sh.ncols
-    null_value = '<NULL>'
-
-    with open(csv_file_name, 'w') as csv_file:
-        wr = csv.writer(
-            csv_file,
-            delimiter='\t',
-            quotechar='"',
-            escapechar='"',
-        )
-        skipped_rows = 0
-        # Do some cleaning to account for common human errors
-        for rownum in range(sh.nrows):
-            # Just write each cell value to csv.
-            # Unless it's a DATE cell, in which case, convert it to ISO 8601
-            # The check on the first element of the tuple is to account for times.
-            if skip_rows > 0 and skip_rows > rownum:
-                continue
-            if rownum == skip_rows:
-                # This is the header row. Force to clean header values
-                # Remove whitespace on either side
-                # Remove newlines
-                # Remove carriage returns
-                # Force to string
-                unique_column_names = set()
-                unique_source_names = set()
-                invalid_characters = set(',.()[];:*')
-                header_columns = []
-
-                # logger.info(f'----- Detecting Column Headers on row: {rownum}')
-
-                for col in range(0, column_count):
-                    c = sh.cell(rownum, col)
-                    # See if this column name is a date type
-                    column_name_dtype = dtype_from_excel(c.ctype)
-                    # logger.info(f'----- Column Header dtype for column {col} is {column_name_dtype}')
-                    if has_header:
-                        cell_value = str(c.value)
-                        source_name = cell_value.strip().replace('\n', '').replace('\r', '')
-
-                        # logger.info(f'----- Column Header has header flag is {has_header}')
-                        # logger.info(f'----- Column Header Cell Value: {cell_value}')
-                        if column_name_dtype == 'timestamp':
-                            # Need to convert this from an Excel date stamp to human readable form
-                            column_name = xlrd.xldate_as_datetime(c.value, 0).date().isoformat()
-                        elif column_name_dtype == 'boolean':
-                            if c.value:
-                                column_name = 'TRUE'
-                            else:
-                                column_name = 'FALSE'
-                        else:
-                            column_name = source_name
-                        
-                        # logger.info(f'----- Raw Column name prior to compliance check {column_name}')
-
-                        if column_name[0:1] in string.digits:
-                            column_name = f'_{column_name}'
-                        column_name = ''.join([c for c in column_name if c not in invalid_characters]) # Remove invalid characters
-                        column_name = column_name[:63] # Truncate to max length
-                        try:
-                            data_dtype = dtype_from_excel(sh.cell(rownum + 1, col).ctype) # go to next row to determine dytype of the data
-                        except:
-                            # If anything goes wrong with reading the next row just default to Text to be safe.
-                            data_dtype = 'text'
-
-                        # logger.info(f'----- Column name after compliance check {column_name}')
-                    else:
-                        column_name = None
-                        source_name = None
-                        data_dtype = column_name_dtype
-
-                    if not column_name:
-                        column_name = f'column_{col}'
-
-                    if not source_name:
-                        source_name = f'column_{col}'
-
-                    # logger.info(f'----- Column name final: {column_name}')
-
-                    trial_count = 1
-                    trim_size = 58
-                    while column_name in unique_column_names:
-                        trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
-                        # All target column names must be unique.  Force this to something unique
-                        column_name = f'{column_name[:trim_size]}_dup{trial_count}'
-                        trial_count += 1
-                    unique_column_names.add(column_name)
-
-                    trial_count = 1
-                    trim_size = 58
-                    while source_name in unique_source_names:
-                        trim_size = 58 - floor(log10(trial_count)) # Need to trim more as length of counter digits increases
-                        # All target column names must be unique.  Force this to something unique
-                        source_name = f'{source_name[:trim_size]}_dup{trial_count}'
-                        trial_count += 1
-                    unique_source_names.add(source_name)
-
-                    header_columns.append(source_name)
-                    column_information.append({
-                        'source': source_name,
-                        'target': column_name,
-                        'dtype': data_dtype 
-                    })
-
-                # logger.info(f'Column information for Excel Import: {column_information}')
-                wr.writerow(header_columns)
-                column_count = len(column_information)
-
-                # Now we've either read, or guessed the headers. If we've read them, then they are not a line of data. Continue to next row of data
-                # If we've guessed, then also read the row as a line of data
-                if has_header:
-                    continue
-            # logger.info(f'Row Headers: {header_columns}')
-            if clean:
-                if all([c.ctype in [xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK] for c in sh.row(rownum)]):
-                    # Skip rows that have no data.
-                    continue
-
-            row = []
-            col_pos = 0
-            for col_info in column_information:
-                try:
-                    c = sh.cell(rownum, col_pos)
-
-                    if c.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
-                        row.append(null_value)
-                    else:
-                        dtype = dtype_from_excel(c.ctype)
-                        # logger.info(f'Column: {col_pos}')
-                        if dtype != col_info['dtype']:
-                            column_information[col_pos]['dtype'] = 'text' # elegantly handle situation where the guess was wrong initially.  must be mixed data.  default to text.
-
-                        if dtype == 'text':
-                            row.append(c.value)
-                        elif dtype == 'numeric':
-                            if int(c.value) == c.value:
-                                row.append(int(c.value))  # This appears to be an int
-                            else:
-                                row.append(get_formatted_number(c.value))  # some other type of number
-                        elif dtype == 'boolean':
-                            row.append(c.value)
-                        elif dtype == 'timestamp':
-                            # If there is a year, use as datetime
-                            if xlrd.xldate_as_tuple(c.value, datemode)[0] != 0:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).isoformat())
-                            else:
-                                row.append(xlrd.xldate_as_datetime(c.value, datemode).time().isoformat())
-                        else:
-                            #  Default is to insert the value as-is, no conversion
-                            row.append(c.value)
-                    col_pos += 1
-                except Exception as e:
-                    raise Exception(
-                        f'Error importing cell at row {rownum}, column {col_pos}. '
-                        f'Check the cell is formatted correctly'
-                    ) from e
-            wr.writerow(row)
-
-        if skipped_rows:
-            logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
-    logger.debug('Finished converting')
-
-    return column_information
-
-
-def dtype_from_excel(excel_type):
-    return {
-        xlrd.XL_CELL_TEXT: 'text',
-        xlrd.XL_CELL_NUMBER: 'numeric',
-        xlrd.XL_CELL_DATE: 'timestamp',
-        xlrd.XL_CELL_BOOLEAN: 'boolean',
-    }.get(excel_type, 'text')
-
-
-def excel_to_csv_openpyxl(excel_file_name, csv_file_name, sheet_name='sheet1', clean=False, has_header=True, skip_rows=0):
-    """Converts an excel file to a CSV file using openpyxl
-
-    Notes:
-        For files that I have tried, xlrd3 seems to outperform openpyxl by some measure.
-        This code is left here in case we decide to use just one supported library going forwards.
-
-    Args:
-        excel_file_name (str): The name of the input Excel file
-        csv_file_name (str): The name of the output CSV file
-        sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
-        clean (bool, optional): Remove blank rows
-        has_header (bool, optional): The file has a header row
-        skip_rows (int, optional): The number of rows to skip at the top of the file
-    """
-    # Importing openpyxl here because it's a slightly heavy import and we don't even use it
-    import openpyxl
-
-    logger.debug('opening workbook for conversion')
-    wb = openpyxl.load_workbook(excel_file_name, read_only=True, data_only=True, keep_links=False, keep_vba=False)
-    logger.debug('Workbook Open')
-    sh = wb[sheet_name]
-    with open(csv_file_name, 'w') as csv_file:
-        wr = csv.writer(
-            csv_file,
-            delimiter='\t',
-            quotechar='"',
-            escapechar='"',
-        )
-
-        skipped_rows = 0
-        header_done = False
-        # Do some cleaning to account for common human errors
-        for row in sh.iter_rows(min_row=skip_rows, values_only=True):
-            # Just write each cell value to csv.
-            # Unless it's a DATE cell, in which case, convert it to ISO 8601
-            # The check on the first element of the tuple is to account for times.
-            if has_header and not header_done:
-                # This is the header row. Force to clean header values
-                #   Remove whitespace on either side
-                #   Remove newlines
-                #   Remove carriage returns
-                #   Force to string
-                wr.writerow([
-                    str(cell).strip().replace('\n', '').replace('\r', '')
-                    for cell in row
-                ])
-                header_done = True
-            else:
-                if clean and all(cell is None for cell in row):
-                    # Skip rows that have no data.
-                    skipped_rows += 1
-                    continue
-
-                # def _get_value(c):
-                #     """OpenPyXL basically does something like this anyway"""
-                #     from openpyxl.cell import cell
-                #     if c.data_type == cell.TYPE_STRING:
-                #         return c.value
-                #     elif c.data_type == cell.TYPE_ERROR or c.value is None:
-                #         return '<NULL>'
-                #     elif isinstance(c.value, datetime.datetime):
-                #         return c.value.isoformat()
-                #     elif c.data_type == cell.TYPE_NUMERIC and c.value == int(c.value):
-                #         return int(c.value)
-                #     elif c.data_type == cell.TYPE_NUMERIC:
-                #         return get_formatted_number(c.value)
-                #     else:
-                #         raise Exception(f'Unknown cell {repr(c)}')
-
-                wr.writerow([
-                    # _get_value(cell)  # if values_only=False
-                    str(cell) if cell is not None else ''
-                    for cell in row
-                ])
-
-        if skipped_rows:
-            logger.debug('Warning: Skipped {} blank rows'.format(skipped_rows))
-    logger.debug('Finished converting')
+    df = pd.read_excel(
+        excel_file_name,
+        sheet_name=sheet_name,
+        header=0 if has_header else None,
+        engine="calamine",
+        skiprows=skip_rows,
+    )
+    df.to_csv(
+        csv_file_name,
+        index=False,
+        date_format='%Y-%m-%dT%H:%M:%S',
+    )
 
 
 def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):

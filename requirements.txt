@@ -11,9 +11,7 @@ PyYAML
 requests
 setuptools
 orjson
-openpyxl
 SQLAlchemy
 texttable
 toolz
-xlrd3@git+https://github.com/PlaidCloud/xlrd3.git@master#egg=xlrd3
 xlwings;platform_system=="Windows"
