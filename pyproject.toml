@@ -43,6 +43,9 @@ test = [
     "starrocks",
     "databend_sqlalchemy",
 ]
+full = [
+    "plaidcloud-rpc[full]>=1.6.1",
+]
 
 [project.urls]
 Homepage = "https://plaidcloud.com"
