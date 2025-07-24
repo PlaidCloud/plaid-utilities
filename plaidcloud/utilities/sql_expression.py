@@ -51,7 +51,7 @@ class SQLExpressionError(Exception):
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
 
-def eval_expression(expression, variables, tables, extra_keys=None, disable_variables=False, table_numbering_start=1):
+def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
 
     try:
@@ -75,7 +75,7 @@ def eval_expression(expression, variables, tables, extra_keys=None, disable_vari
         )
 
 
-def on_clause(table_a, table_b, join_map, special_null_handling=False):
+def on_clause(table_a: sqlalchemy.Table, table_b: sqlalchemy.Table, join_map: list[dict], special_null_handling: bool = False):
     """ Given two analyze tables, and a map of join keys with the structure:
     [{'a_column': COLUMN_NAME, 'b_column: COLUMN_NAME}...]
     returns a sqlalchemy clause filtering on those join keys, suitable for
@@ -127,7 +127,7 @@ def on_clause(table_a, table_b, join_map, special_null_handling=False):
     ])
 
 
-def get_column_table(source_tables, target_column_config, source_column_configs, table_numbering_start=1):
+def get_column_table(source_tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], table_numbering_start: int = 1):
     """Find the source table associated with a column."""
 
     if len(source_tables) == 1:  # Shortcut for most simple cases
@@ -160,7 +160,7 @@ def get_column_table(source_tables, target_column_config, source_column_configs,
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
-def process_fn(sort_type, cast_type, agg_type: [str, None], name):
+def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str):
     """Returns a function to apply to the source/constant/expression of a target column.
     sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is.
     cast_type should be a sqlalchemy dtype,
@@ -184,13 +184,13 @@ def process_fn(sort_type, cast_type, agg_type: [str, None], name):
     else:
         sort_fn = ident
 
-    def label_fn(expr):
+    def label_fn(expr: sqlalchemy.ColumnElement):
         return expr.label(name)
 
     return compose(label_fn, sort_fn, cast_fn, agg_fn)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def constant_from_clause(constant, sort_type, cast_type, name, variables=None, disable_variables=False):
+def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False):
     """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
     if disable_variables:
         var_fn = ident
@@ -202,7 +202,7 @@ def constant_from_clause(constant, sort_type, cast_type, name, variables=None, d
     return process_fn(sort_type, cast_type, None, name)(const)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables=None, disable_variables=False, table_numbering_start=1):
+def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1):
     """Get a representation of a target column based on an expression."""
     expr = eval_expression(
         expression.strip(),
@@ -214,7 +214,7 @@ def expression_from_clause(expression, tables, sort_type, cast_type, agg_type, n
     return process_fn(sort_type, cast_type, agg_type, name)(expr)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start=1):
+def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1):
     """Get a representation of a target column based on a source column."""
     table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
 
@@ -243,9 +243,9 @@ def source_from_clause(source, tables, target_column_config, source_column_confi
 
 
 def get_from_clause(
-    tables, target_column_config, source_column_configs, aggregate=False,
-    sort=False, variables=None, cast=True, disable_variables=False, table_numbering_start=1,
-    sort_columns=None, use_row_number_for_serial: bool = True,
+    tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
+    sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
+    sort_columns: list = None, use_row_number_for_serial: bool = True,
 ):
     """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
@@ -334,7 +334,7 @@ class Result(object):
         }
 
 
-def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
+def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, table_numbering_start: int = 1):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
     extra_keys = extra_keys or {}
@@ -424,7 +424,7 @@ def get_safe_dict(tables, extra_keys=None, table_numbering_start=1):
     return merge(default_keys, table_keys, extra_keys)
 
 
-def get_table_rep(table_id, columns, schema, metadata=None, column_key='source', alias=None):
+def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
     """
     Returns:
         sqlalchemy.Table: object representing an analyze table
@@ -460,12 +460,12 @@ def get_table_rep(table_id, columns, schema, metadata=None, column_key='source',
     )
 
     if alias:
-        return sqlalchemy.orm.aliased(table, name=alias)
+        return table.alias(name=alias)
 
     return table
 
 
-def get_table_rep_using_id(table_id, columns, project_id, metadata=None, column_key='source', alias=None):
+def get_table_rep_using_id(table_id: str, columns: list[dict], project_id: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
     """
     Returns:
         sqlalchemy.Table: object representing an analyze table
@@ -483,7 +483,7 @@ def get_table_rep_using_id(table_id, columns, project_id, metadata=None, column_
     return get_table_rep(table_id, columns, schema, metadata, column_key, alias)
 
 
-def simple_select_query(config, project, metadata, variables):
+def simple_select_query(config: dict, project: str, metadata: sqlalchemy.MetaData|None, variables: dict|None):
     """Returns a select query from a single extract config, with a single
     source table, and standard key names."""
 
@@ -548,7 +548,7 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
 
 
 def get_select_query(
-    tables: list[sqlalchemy.Table], source_columns: list[dict], target_columns: list[dict], wheres: list[str],
+    tables: list[sqlalchemy.Table], source_columns: list[list[dict]], target_columns: list[dict], wheres: list[str],
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
     use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
@@ -931,8 +931,8 @@ def allocate(
     """Performs an allocation based on the provided sqlalchemy source and driver data queries
 
     Args:
-        source_query (sqlalchemy.Selectable): Sqlalchemy query for source data
-        driver_query (sqlalchemy.Selectable): Sqlalchemy query for driver data
+        source_query (sqlalchemy.Select): Sqlalchemy query for source data
+        driver_query (sqlalchemy.Select): Sqlalchemy query for driver data
         allocate_columns (list): List of columns to apply a shred to
         numerator_columns (list): List of columns to use as numerator
         denominator_columns (list): List of columns to use as denominator
@@ -1197,7 +1197,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     if we needed to set multiple columns.
 
     Args:
-        source_query (sqlalchemy.Selectable): The Query to apply rules on
+        source_query (sqlalchemy.Select): The Query to apply rules on
         df_rules (pandas.DataFrame): A list of rules to apply
         rule_id_column (str): Column name containing the rule id
         target_columns (list of str, optional): The target columns to apply rules on.
