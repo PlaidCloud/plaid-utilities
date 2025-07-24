@@ -1246,13 +1246,13 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
                 sqlalchemy.case(
                     *[
                         (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
-                        for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows()
+                        for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows()
                     ],
                     else_=None,
                 ).label('rule_id')
             )
         else:
-            for index, rule in df_rules[df_rules[iteration_column] == iteration].iterrows():
+            for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows():
                 rule_select = sqlalchemy.select(
                     *[col for col in cte_source.columns],
                     sqlalchemy.literal(rule[rule_id_column]).label('rule_id')
