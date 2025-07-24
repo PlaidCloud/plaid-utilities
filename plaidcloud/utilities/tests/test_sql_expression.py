@@ -466,11 +466,11 @@ class TestProcessFn(TestSQLExpression):
 
 class TestGetFromClause(TestSQLExpression):
     def setUp(self):
-        self.source_column_configs = [
+        self.source_column_configs = [[
             {'source': 'Column1', 'dtype': 'text'},
             {'source': 'Column2', 'dtype': 'numeric'},
-        ]
-        self.table = se.get_table_rep('table_12345', self.source_column_configs, 'anlz_schema')
+        ]]
+        self.table = se.get_table_rep('table_12345', self.source_column_configs[0], 'anlz_schema')
 
     def test_returns_label_object(self):
         # Should always return a Label object
@@ -554,10 +554,10 @@ class TestGetFromClause(TestSQLExpression):
 
     def test_source_column_with_dot(self):
         # weird edge case - column with dot in the name that doesn't represent a relationship to a self.table
-        edge_source_column_configs = [
+        edge_source_column_configs = [[
             {'source': 'column.with.dot', 'dtype': 'text'},
-        ]
-        edge_table = se.get_table_rep('table_12345', edge_source_column_configs, 'anlz_schema')
+        ]]
+        edge_table = se.get_table_rep('table_12345', edge_source_column_configs[0], 'anlz_schema')
 
         self.assertEquivalent(
             se.get_from_clause(
@@ -907,14 +907,14 @@ class TestGetCombinedWheres(TestSQLExpression):
 
 class TestGetSelectQuery(TestSQLExpression):
     def setUp(self):
-        self.source_columns =  [
+        self.source_columns =  [[
             {'source': 'Column1', 'dtype': 'text'},
             {'source': 'Column2', 'dtype': 'numeric'},
             {'source': 'Column3', 'dtype': 'numeric'},
-        ]
+        ]]
         self.table = se.get_table_rep(
             'table_12345',
-            self.source_columns,
+            self.source_columns[0],
             'anlz_schema',
         )
         self.from_clause = curry(se.get_from_clause, [self.table], source_column_configs=[self.source_columns])
@@ -1381,7 +1381,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
             }, '_schema', None, {}),
-            se.get_select_query([self.table], self.source_columns, [self.target_column], []),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column], []),
         )
 
     def test_source_where(self):
@@ -1392,7 +1392,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'target_columns': [self.target_column],
                 'source_where': 'table.Column1 == "foobar"',
             }, '_schema', None, {}),
-            se.get_select_query([self.table], self.source_columns, [self.target_column], ['table.Column1 == "foobar"']),
+            se.get_select_query([self.table], [self.source_columns], [self.target_column], ['table.Column1 == "foobar"']),
         )
 
     def test_source_alias(self):
@@ -1404,7 +1404,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'target_columns': [self.target_column],
                 'source_alias': 'table_alias',
             }, '_schema', None, {}),
-            se.get_select_query([aliased_table], self.source_columns, [self.target_column], []),
+            se.get_select_query([aliased_table], [self.source_columns], [self.target_column], []),
         )
 
 class TestModifiedSelectQuery(TestSQLExpression):
@@ -1609,7 +1609,7 @@ class TestImportDataQuery(TestSQLExpression):
             self.target_table_columns,
             'anlz_schema',
         )
-        self.expected_temp_table_columns = [
+        self.expected_temp_table_columns = [[
             {'source': 'Column1', 'dtype': 'text'},
             {'source': 'Column2', 'dtype': 'text'},
             {'source': 'Column3', 'dtype': 'text'},
@@ -1617,10 +1617,10 @@ class TestImportDataQuery(TestSQLExpression):
             {'source': ':::FILE_NAME:::', 'dtype': 'file_name'},
             {'source': ':::TAB_NAME:::', 'dtype': 'tab_name'},
             {'source': ':::LAST_MODIFIED:::', 'dtype': 'last_modified'},
-        ]
+        ]]
         self.expected_temp_table = se.get_table_rep(
             'temp_table',
-            self.expected_temp_table_columns,
+            self.expected_temp_table_columns[0],
             'anlz_schema',
             alias='text_import',
         )
@@ -1653,7 +1653,7 @@ class TestImportDataQuery(TestSQLExpression):
         )
 
     def test_trailing_negatives(self):
-        # trailing_neagives
+        # trailing_negatives
         expected_target_column_tn = {
             'target': 'TargetColumn',
             'source': 'Column1',
