@@ -6,7 +6,6 @@ import uuid
 import csv
 from typing import Any, overload, NamedTuple
 
-import pyarrow as pa
 import pandas as pd
 import numpy as np
 import requests
@@ -445,6 +444,10 @@ class Connection:
         """Pandas-flavored wrapper method to the load data into PlaidCloud Table from a Dataframe
         bulk_insert_dataframe(table_object, df, append, chunk_size)
         """
+        try:
+            import pyarrow as pa
+        except ImportError as exc:
+            raise ImportError('Use of this method requires full install. Try running `pip install plaid-rpc[full]`') from exc
         if len(df) == 0:
             logger.debug('Empty dataframe - nothing to insert')
             return
