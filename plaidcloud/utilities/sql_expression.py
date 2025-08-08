@@ -18,6 +18,7 @@ import sqlalchemy.dialects
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
 from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
+from plaidcloud.rpc.database import PlaidUnicode, PlaidNumeric
 
 
 __author__ = 'Adams Tower'
@@ -40,6 +41,7 @@ CSV_TYPE_DELIMITER = '::'
 SCHEMA_PREFIX = 'anlz'
 table_dot_column_regex = re.compile(r'^table(\d*)\..*')
 
+TRIM_TYPES = (sqlalchemy.Text, PlaidUnicode, sqlalchemy.Integer, sqlalchemy.SMALLINT, PlaidNumeric)
 
 class SQLExpressionError(Exception):
     # Will typically be caught by
@@ -160,12 +162,13 @@ def get_column_table(source_tables: list[sqlalchemy.Table], target_column_config
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
-def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str):
+def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, trim_type: bool|None = False):
     """Returns a function to apply to the source/constant/expression of a target column.
     sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is.
     cast_type should be a sqlalchemy dtype,
     sort_type should be True (for ascending) or False (for descending),
     agg_type should be a string from the 'agg' param of the column.
+    trim_type should be a boolean indicating if a trim should be applied
 
     Processing will always include applying the label in the param 'name'
     """
@@ -186,8 +189,14 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
 
     def label_fn(expr: sqlalchemy.ColumnElement):
         return expr.label(name)
+    
+    if trim_type:
+        def trim_fn(expr: sqlalchemy.ColumnElement):
+            sqlalchemy.func.rtrim(sqlalchemy.func.rtrim(expr, '0'), '.')
+    else:
+        trim_fn = ident # type: ignore
 
-    return compose(label_fn, sort_fn, cast_fn, agg_fn)
+    return compose(label_fn, sort_fn, trim_fn, cast_fn, agg_fn)
 
 #TODO: write tests, though TestGetFromClause already covers this
 def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False):
@@ -245,7 +254,7 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
-    sort_columns: list = None, use_row_number_for_serial: bool = True,
+    sort_columns: list = None, use_row_number_for_serial: bool = True, trim_zeroes: bool = False
 ):
     """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
@@ -255,6 +264,8 @@ def get_from_clause(
 
     name = target_column_config.get('target')
     cast_type = sqlalchemy_from_dtype(target_column_config.get('dtype'))
+    
+    trim_zeroes = trim_zeroes and cast_type in TRIM_TYPES
 
     if aggregate:
         agg_type = target_column_config.get('agg')
@@ -274,13 +285,13 @@ def get_from_clause(
         return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start)
     if target_column_config.get('dtype') in {'serial', 'bigserial'}:
         if use_row_number_for_serial:
-            return process_fn(sort_type, cast_type, agg_type, name)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
+            return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
         return None
 
     if target_column_config.get('dtype') in set(MAGIC_COLUMN_MAPPING.keys()):
         if target_column_config.get('dtype') == 'source_table_name':
             # never aggregate
-            return process_fn(sort_type, cast_type, None, name)(sqlalchemy.literal(tables[0].name, type_=cast_type))
+            return process_fn(sort_type, cast_type, None, name, trim_zeroes)(sqlalchemy.literal(tables[0].name, type_=cast_type))
         return None
 
     # If we get here...
@@ -552,7 +563,7 @@ def get_select_query(
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
     use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
-    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True
+    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = True
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -579,6 +590,7 @@ def get_select_query(
         use_row_number_for_serial:
         aggregation_type: One of 'group', 'rollup', 'sets'
         cast: if the query should attempt to cast source columns
+        trim_zeroes (bool, optional): If True, removes trailing zeroes from numeric fields
 
     Returns:
 
@@ -680,6 +692,7 @@ def get_select_query(
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
                 use_row_number_for_serial=use_row_number_for_serial,
+                trim_zeroes=trim_zeroes,
             )
             for tc in target_columns
             if (
