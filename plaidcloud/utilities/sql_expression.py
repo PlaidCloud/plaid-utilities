@@ -192,7 +192,7 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
     
     if trim_type:
         def trim_fn(expr: sqlalchemy.ColumnElement):
-            sqlalchemy.func.rtrim(sqlalchemy.func.rtrim(expr, '0'), '.')
+            return sqlalchemy.func.rtrim(sqlalchemy.func.rtrim(expr, '0'), '.')
     else:
         trim_fn = ident # type: ignore
 
