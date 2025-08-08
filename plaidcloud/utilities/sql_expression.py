@@ -659,7 +659,8 @@ def get_select_query(
                 table_numbering_start=table_numbering_start,
                 sort_columns=sort_columns,
                 use_row_number_for_serial=use_row_number_for_serial,
-                cast=cast
+                cast=cast,
+                trim_zeroes=trim_zeroes,
             )
             for tc in target_columns
             if (use_row_number_for_serial or tc['dtype'] not in ('serial', 'bigserial'))
