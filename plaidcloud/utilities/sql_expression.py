@@ -199,7 +199,7 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
     return compose(label_fn, sort_fn, trim_fn, cast_fn, agg_fn)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False):
+def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False, trim_zeroes: bool = False):
     """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
     if disable_variables:
         var_fn = ident
@@ -208,10 +208,10 @@ def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalch
     const = sqlalchemy.literal(var_fn(constant), type_=cast_type)
 
     # never aggregate
-    return process_fn(sort_type, cast_type, None, name)(const)
+    return process_fn(sort_type, cast_type, None, name, trim_zeroes)(const)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1):
+def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False):
     """Get a representation of a target column based on an expression."""
     expr = eval_expression(
         expression.strip(),
@@ -220,10 +220,10 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
         disable_variables=disable_variables,
         table_numbering_start=table_numbering_start,
     )
-    return process_fn(sort_type, cast_type, agg_type, name)(expr)
+    return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
 
 #TODO: write tests, though TestGetFromClause already covers this
-def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1):
+def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False):
     """Get a representation of a target column based on a source column."""
     table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
 
@@ -248,7 +248,7 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
     else:
         cancellable_cast_type = None
 
-    return process_fn(sort_type, cancellable_cast_type, agg_type, name)(col)
+    return process_fn(sort_type, cancellable_cast_type, agg_type, name, trim_zeroes)(col)
 
 
 def get_from_clause(
@@ -265,7 +265,7 @@ def get_from_clause(
     name = target_column_config.get('target')
     cast_type = sqlalchemy_from_dtype(target_column_config.get('dtype'))
     
-    trim_zeroes = trim_zeroes and cast_type in TRIM_TYPES
+    # trim_zeroes = trim_zeroes and cast_type in TRIM_TYPES
 
     if aggregate:
         agg_type = target_column_config.get('agg')
@@ -278,11 +278,11 @@ def get_from_clause(
         sort_type = None
 
     if constant:
-        return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables)
+        return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables, trim_zeroes)
     if expression:
-        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start)
+        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes)
     if source:
-        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start)
+        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes)
     if target_column_config.get('dtype') in {'serial', 'bigserial'}:
         if use_row_number_for_serial:
             return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
