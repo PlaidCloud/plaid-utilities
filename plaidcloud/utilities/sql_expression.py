@@ -18,7 +18,6 @@ import sqlalchemy.dialects
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
 from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
-from plaidcloud.rpc.database import PlaidUnicode, PlaidNumeric
 
 
 __author__ = 'Adams Tower'
@@ -40,8 +39,6 @@ MAGIC_COLUMN_MAPPING = {
 CSV_TYPE_DELIMITER = '::'
 SCHEMA_PREFIX = 'anlz'
 table_dot_column_regex = re.compile(r'^table(\d*)\..*')
-
-TRIM_TYPES = (sqlalchemy.Text, PlaidUnicode, sqlalchemy.Integer, sqlalchemy.SMALLINT, PlaidNumeric)
 
 class SQLExpressionError(Exception):
     # Will typically be caught by
@@ -264,8 +261,6 @@ def get_from_clause(
 
     name = target_column_config.get('target')
     cast_type = sqlalchemy_from_dtype(target_column_config.get('dtype'))
-    
-    # trim_zeroes = trim_zeroes and cast_type in TRIM_TYPES
 
     if aggregate:
         agg_type = target_column_config.get('agg')
@@ -563,7 +558,7 @@ def get_select_query(
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
     use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
-    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = True
+    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = False
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
