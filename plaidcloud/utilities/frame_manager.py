@@ -2377,7 +2377,8 @@ def get_formatted_number(val):
     return f'{val:.{scale}f}'
 
 
-def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', has_header=True, skip_rows=0):
+def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sheet1', has_header: bool = True,
+                 skip_rows: int = 0, dtypes: dict|str|None = None):
     """Converts an excel file to a CSV file
 
     Args:
@@ -2386,6 +2387,7 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', has_header
         sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
         has_header (bool, optional): The file has a header row
         skip_rows (int, optional): The number of rows to skip at the top of the file
+        dtypes: (dict|str|None): The data types to use. Defaults to `None`
     """
     df = pd.read_excel(
         excel_file_name,
@@ -2393,6 +2395,7 @@ def excel_to_csv(excel_file_name, csv_file_name, sheet_name='sheet1', has_header
         header=0 if has_header else None,
         engine="calamine",
         skiprows=skip_rows,
+        dtype=dtypes,
     )
     df.to_csv(
         csv_file_name,
