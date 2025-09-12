@@ -15,6 +15,7 @@ import traceback
 import fastavro
 import pandas as pd
 from pandas.api.types import is_string_dtype
+from pandas.io.parsers.base_parser import STR_NA_VALUES
 import numpy as np
 import orjson as json
 
@@ -360,7 +361,6 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
     return dfs
 
 
-
 def load(source_tables, fetch=True, cache_locally=False, configuration=None, conn=None, clean=False):
     """Load frame(s) from requested source, returning a list of dicts
 
@@ -481,7 +481,6 @@ def avro_from_sql(sql, default=None):
     return mapping.get(sql, default)
 
 
-
 def dtype_from_sql(sql):
     """Gets a pandas dtype from a SQL data type
 
@@ -556,7 +555,6 @@ def converter_from_sql(sql):
     }
 
     return mapping.get(str(sql).lower(), str(sql).lower())
-
 
 
 def load_typed_psv(infile, sep='|', **kwargs):
@@ -1092,7 +1090,6 @@ def right_join(left_frame, right_frame, left_on, right_on=None, keep_columns=Non
         right_cols = right_cols.difference(drop_columns)
 
     return pd.merge(left_frame, right_frame[right_cols], left_on=left_on, right_on=right_on, how='right')
-
 
 
 def anti_join(left_frame, right_frame, left_on, right_on=None):
@@ -2389,6 +2386,7 @@ def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sh
         skip_rows (int, optional): The number of rows to skip at the top of the file
         dtypes: (dict|str|None): The data types to use. Defaults to `None`
     """
+    na_values = set(STR_NA_VALUES) - {'None', 'NA'}
     df = pd.read_excel(
         excel_file_name,
         sheet_name=sheet_name,
@@ -2396,6 +2394,8 @@ def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sh
         engine="calamine",
         skiprows=skip_rows,
         dtype=dtypes,
+        na_values=na_values,
+        keep_default_na=False,
     )
     df.to_csv(
         csv_file_name,
