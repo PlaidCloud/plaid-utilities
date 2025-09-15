@@ -2375,7 +2375,7 @@ def get_formatted_number(val):
 
 
 def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sheet1', has_header: bool = True,
-                 skip_rows: int = 0, dtypes: dict|str|None = None):
+                 skip_rows: int = 0, dtypes: dict|str|None = None, bypass_na_value_checks: bool = False):
     """Converts an excel file to a CSV file
 
     Args:
@@ -2384,7 +2384,8 @@ def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sh
         sheet_name (str, optional): The name of the sheet to use. Defaults to `'sheet1'`
         has_header (bool, optional): The file has a header row
         skip_rows (int, optional): The number of rows to skip at the top of the file
-        dtypes: (dict|str|None): The data types to use. Defaults to `None`
+        dtypes (dict|str|None): The data types to use. Defaults to `None`
+        bypass_na_value_checks: (bool): Whether or not to bypass na value checks
     """
     na_values = set(STR_NA_VALUES) - {'None', 'NA'}
     df = pd.read_excel(
@@ -2396,6 +2397,7 @@ def excel_to_csv(excel_file_name: str, csv_file_name: str, sheet_name: str = 'sh
         dtype=dtypes,
         na_values=na_values,
         keep_default_na=False,
+        na_filter=not bypass_na_value_checks,
     )
     df.to_csv(
         csv_file_name,
