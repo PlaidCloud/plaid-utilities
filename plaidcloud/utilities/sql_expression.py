@@ -506,7 +506,7 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
     required_args = (
         'source', 'source_columns', 'target_columns', 'source_where',
         'aggregate', 'having', 'use_target_slicer', 'limit_target_start',
-        'limit_target_end', 'distinct', 'source_alias',
+        'limit_target_end', 'distinct', 'source_alias', 'project_schema'
     )
 
     # If there's no mapping_fn, turn fmt into a mapping_fn.

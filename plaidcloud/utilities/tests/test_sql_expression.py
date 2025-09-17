@@ -1352,6 +1352,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'source': 'table_12345',
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema'
             }, '_schema', None, {}),
             se.get_select_query([self.table], [self.source_columns], [self.target_column], []),
         )
@@ -1363,6 +1364,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
                 'source_where': 'table.Column1 == "foobar"',
+                'project_schema': 'anlz_schema'
             }, '_schema', None, {}),
             se.get_select_query([self.table], [self.source_columns], [self.target_column], ['table.Column1 == "foobar"']),
         )
@@ -1375,6 +1377,7 @@ class TestSimpleSelectQuery(TestSQLExpression):
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
                 'source_alias': 'table_alias',
+                'project_schema': 'anlz_schema'
             }, '_schema', None, {}),
             se.get_select_query([aliased_table], [self.source_columns], [self.target_column], []),
         )
@@ -1400,6 +1403,7 @@ class TestModifiedSelectQuery(TestSQLExpression):
                 'source': 'table_12345',
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None)
 
     def test_fmt(self):
@@ -1409,11 +1413,13 @@ class TestModifiedSelectQuery(TestSQLExpression):
                 'source_b': 'table_12345',
                 'source_columns_b': self.source_columns,
                 'target_columns_b': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, fmt='{}_b'),
             se.simple_select_query({
                 'source': 'table_12345',
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, {}),
         )
 
@@ -1424,11 +1430,13 @@ class TestModifiedSelectQuery(TestSQLExpression):
                 'source_b': 'table_12345',
                 'source_columns_b': self.source_columns,
                 'target_columns_b': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, mapping_fn=lambda x: f'{x}_b'),
             se.simple_select_query({
                 'source': 'table_12345',
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, {}),
         )
 
@@ -1439,11 +1447,13 @@ class TestModifiedSelectQuery(TestSQLExpression):
                 'source_b': 'table_12345',
                 'source_columns_b': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, fmt='{}_b'),
             se.simple_select_query({
                 'source': 'table_12345',
                 'source_columns': self.source_columns,
                 'target_columns': [self.target_column],
+                'project_schema': 'anlz_schema',
             }, 'schema', None, {}),
         )
 
@@ -1611,6 +1621,7 @@ class TestImportDataQuery(TestSQLExpression):
                 self.source_columns,
                 [self.target_column],
                 temp_table_id='temp_table',
+                config={'project_schema': 'anlz_schema'},
             ),
             se.get_insert_query(
                 self.target_table,
@@ -1640,6 +1651,7 @@ class TestImportDataQuery(TestSQLExpression):
                 [self.target_column],
                 trailing_negatives=True,
                 temp_table_id='temp_table',
+                config={'project_schema': 'anlz_schema'},
             ),
             se.get_insert_query(
                 self.target_table,
@@ -1649,6 +1661,7 @@ class TestImportDataQuery(TestSQLExpression):
                     self.expected_temp_table_columns,
                     [expected_target_column_tn],
                     [],
+                    config={'project_schema': 'anlz_schema'},
                 ),
             ),
         )
@@ -1669,6 +1682,7 @@ class TestImportDataQuery(TestSQLExpression):
                 [self.target_column],
                 date_format='YYYYMMDD',
                 temp_table_id='temp_table',
+                config={'project_schema': 'anlz_schema'},
             ),
             se.get_insert_query(
                 self.target_table,
@@ -1678,6 +1692,7 @@ class TestImportDataQuery(TestSQLExpression):
                     self.expected_temp_table_columns,
                     [expected_target_column_df],
                     [],
+                    config={'project_schema': 'anlz_schema'},
                 ),
             ),
         )
@@ -1735,6 +1750,7 @@ class TestImportDataQuery(TestSQLExpression):
                 self.source_columns,
                 magic_target_columns,
                 temp_table_id='temp_table',
+                config={'project_schema': 'anlz_schema'},
             ),
             se.get_insert_query(
                 magic_target_table,
@@ -1743,7 +1759,8 @@ class TestImportDataQuery(TestSQLExpression):
                     [self.expected_temp_table],
                     self.expected_temp_table_columns,
                     magic_expected_target_columns,
-                    []
+                    [],
+                    config={'project_schema': 'anlz_schema'},
                 ),
             ),
         )
