@@ -295,12 +295,6 @@ def get_from_clause(
     ))
 
 
-def get_project_schema(project_id):
-    if project_id.startswith(SCHEMA_PREFIX):
-        return project_id
-
-    return f'{SCHEMA_PREFIX}{project_id}'
-
 
 def get_agg_fn(agg_str):
     """Mapping of aggregation strings to aggregation functions.
@@ -471,32 +465,15 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
     return table
 
 
-def get_table_rep_using_id(table_id: str, columns: list[dict], project_id: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
-    """
-    Returns:
-        sqlalchemy.Table: object representing an analyze table
-    Args:
-        table_id (str): the id of the analyze table
-        columns: a list of dicts (in transform config style) columns in the analyze table
-        project_id (str): the project id of the project containing the analyze table
-        metadata (sqlalchemy.MetaData): a sqlalchemy metadata object, to keep this table representation connected to others
-        column_key (str): the key in each column dict under which to look for the column name
-        alias (str, optional): If supplied, the SQL query will use the alias to make more human readable
-    """
-
-    schema = get_project_schema(project_id)
-
-    return get_table_rep(table_id, columns, schema, metadata, column_key, alias)
-
 
 def simple_select_query(config: dict, project: str, metadata: sqlalchemy.MetaData|None, variables: dict|None):
     """Returns a select query from a single extract config, with a single
     source table, and standard key names."""
 
     # Make a sqlalchemy representation of the source table
-    from_table = get_table_rep_using_id(
+    from_table = get_table_rep(
         config['source'], config['source_columns'],
-        project, metadata, alias=config.get('source_alias'),
+        config['project_schema'], metadata, alias=config.get('source_alias'),
     )
 
     # Figure out select query
@@ -901,12 +878,12 @@ def import_data_query(
 
     processed_target_columns = [processed_target_column(tc) for tc in target_columns]
 
-    from_table = get_table_rep_using_id(
+    from_table = get_table_rep(
         temp_table_id,
         temp_table_columns,
-        project_id,
+        config['project_schema'],
         metadata,
-        alias='text_import',
+        alias='text_import'
     )
 
     config = config or {}
@@ -920,10 +897,10 @@ def import_data_query(
     )
 
     # Get the target table rep
-    new_table = get_table_rep_using_id(
+    new_table = get_table_rep(
         target_table_id,
         target_meta,
-        project_id,
+        config['project_schema'],
         metadata,
         column_key='id',
     )
