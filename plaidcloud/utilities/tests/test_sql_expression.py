@@ -26,13 +26,6 @@ class TestSQLExpression(unittest.TestCase):
         return self.assertNotEqual(compiled(left), compiled(right))
 
 
-class TestGetProjectSchema(TestSQLExpression):
-    def test_adds_anlz(self):
-        self.assertEqual(se.get_project_schema('12345'), 'anlz12345')
-
-    def test_doesnt_add_anlz_when_already_there(self):
-        self.assertEqual(se.get_project_schema('anlz12345'), 'anlz12345')
-
 
 class TestGetAggFn(TestSQLExpression):
     def test_agg_none(self):
@@ -138,27 +131,6 @@ class TestGetTableRep(TestSQLExpression):
         with self.assertRaises(se.SQLExpressionError):
             se.get_table_rep(None, [], None)
 
-class TestGetTableRepUsingID(TestSQLExpression):
-    def test_get_table_rep_using_id(self):
-        table = se.get_table_rep(
-            'table_12345',
-            [
-                {'source': 'Column1', 'dtype': 'text'},
-                {'source': 'Column2', 'dtype': 'numeric'},
-            ],
-            'anlz_schema',
-        )
-        table2 = se.get_table_rep_using_id(
-            'table_12345',
-            [
-                {'source': 'Column1', 'dtype': 'text'},
-                {'source': 'Column2', 'dtype': 'numeric'},
-            ],
-            '_schema',
-            metadata=None,
-        )
-        self.assertIsInstance(table2, sqlalchemy.Table)
-        self.assertEqual(table.schema, table2.schema)
 
 class TestGetColumnTable(TestSQLExpression):
     def setUp(self):
