@@ -1245,12 +1245,12 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
                 ).where(
                     eval_rule(rule[condition_column], variables={}, tables=[cte_source]),
                 )
-                if iteration_select:
+                if iteration_select is not None:
                     iteration_select = iteration_select.union_all(rule_select)
                 else:
                     iteration_select = rule_select
 
-        if applied_rules_select:
+        if applied_rules_select is not None:
             applied_rules_select = applied_rules_select.union_all(iteration_select)
         else:
             applied_rules_select = iteration_select
