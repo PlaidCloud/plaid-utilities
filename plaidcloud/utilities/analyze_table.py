@@ -71,7 +71,7 @@ class AnalyzeTable(sqlalchemy.Table):
         if _project_id.startswith(SCHEMA_PREFIX):
             _schema = _project_id
         else:
-            _schema = '{}{}'.format(SCHEMA_PREFIX, _project_id)
+            _schema = _rpc.analyze.project.get_project_schema(project_id=_project_id)
 
         table_object = super(AnalyzeTable, cls).__new__(
             cls,
