@@ -195,7 +195,7 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
 
     return compose(label_fn, sort_fn, trim_fn, cast_fn, agg_fn)
 
-#TODO: write tests, though TestGetFromClause already covers this
+# TODO: write tests, though TestGetFromClause already covers this
 def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False, trim_zeroes: bool = False):
     """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
     if disable_variables:
@@ -207,7 +207,7 @@ def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalch
     # never aggregate
     return process_fn(sort_type, cast_type, None, name, trim_zeroes)(const)
 
-#TODO: write tests, though TestGetFromClause already covers this
+# TODO: write tests, though TestGetFromClause already covers this
 def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False):
     """Get a representation of a target column based on an expression."""
     expr = eval_expression(
@@ -219,7 +219,7 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
     )
     return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
 
-#TODO: write tests, though TestGetFromClause already covers this
+# TODO: write tests, though TestGetFromClause already covers this
 def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False):
     """Get a representation of a target column based on a source column."""
     table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
@@ -293,7 +293,6 @@ def get_from_clause(
     raise SQLExpressionError('Target Column {} needs either a Constant, an Expression or a Source Column!'.format(
         target_column_config.get('target')
     ))
-
 
 
 def get_agg_fn(agg_str):
@@ -463,7 +462,6 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
         return table.alias(name=alias)
 
     return table
-
 
 
 def simple_select_query(config: dict, project: str, metadata: sqlalchemy.MetaData|None, variables: dict|None):
@@ -1152,7 +1150,6 @@ def allocate(
     return allocation_select
 
 
-
 def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable_variables=False, table_numbering_start=1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
 
@@ -1221,40 +1218,38 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
 
     iterations = list(set(df_rules[iteration_column]))
     iterations.sort()
-    applied_rules_select = None
+    iteration_selects = []
 
     for iteration in iterations:
-        iteration_select = None
-
         if include_once:
-            iteration_select = sqlalchemy.select(
-                *[col for col in cte_source.columns],
-                sqlalchemy.case(
-                    *[
-                        (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
-                        for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows()
-                    ],
-                    else_=None,
-                ).label('rule_id')
+            iteration_selects.append(
+                sqlalchemy.select(
+                    *[col for col in cte_source.columns],
+                    sqlalchemy.case(
+                        *[
+                            (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
+                            for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows()
+                        ],
+                        else_=None,
+                    ).label('rule_id')
+                )#.label(f'iteration_{iteration}')
             )
         else:
+            rule_selects = []
             for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows():
-                rule_select = sqlalchemy.select(
-                    *[col for col in cte_source.columns],
-                    sqlalchemy.literal(rule[rule_id_column]).label('rule_id')
-                ).where(
-                    eval_rule(rule[condition_column], variables={}, tables=[cte_source]),
+                rule_selects.append(
+                    sqlalchemy.select(
+                        *[col for col in cte_source.columns],
+                        sqlalchemy.literal(rule[rule_id_column]).label('rule_id')
+                    ).where(
+                        eval_rule(rule[condition_column], variables={}, tables=[cte_source]),
+                    )
                 )
-                if iteration_select is not None:
-                    iteration_select = iteration_select.union_all(rule_select)
-                else:
-                    iteration_select = rule_select
+            iteration_selects.append(
+                sqlalchemy.union_all(*rule_selects)#.label(f'iteration_{iteration}')
+            )
 
-        if applied_rules_select is not None:
-            applied_rules_select = applied_rules_select.union_all(iteration_select)
-        else:
-            applied_rules_select = iteration_select
-
+    applied_rules_select = sqlalchemy.union_all(*iteration_selects)
     cte_applied_rules = applied_rules_select.cte('applied_rules')
 
     final_select = sqlalchemy.select(
