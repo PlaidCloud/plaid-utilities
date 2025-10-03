@@ -141,7 +141,7 @@ def compiled(sa_query, dialect='greenplum'):
             dict: query parameters
     """
     dialect = dialect or 'greenplum'  # Just in case someone sends a blank string, or a None by mistake
-    eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/')
+    eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/', paramstyle='pyformat')
     compiled_query = sa_query.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
     return str(compiled_query).replace('\n', ''), compiled_query.params
 

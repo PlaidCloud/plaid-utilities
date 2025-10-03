@@ -91,7 +91,7 @@ class Connection:
             dialect_cls = registry.load(_dialect_kind)
         except:
             dialect_cls = registry.load('postgresql')
-        self.dialect = dialect_cls()
+        self.dialect = dialect_cls(paramstyle='pyformat')
         self.variables = self.refresh_variables()
         self._load_udf_params()
 
