@@ -103,59 +103,53 @@ class Connection:
         logger.info(str(compiled_query))
         return str(compiled_query).replace('\n', ''), compiled_query.params
 
-    def get_csv(self, table_name, encoding="utf-8", clean=False):
+    def get_csv(self, table: "str|Table", encoding="utf-8", clean=False):
         """Returns a file path to the entire table as a CSV file.
 
         Args:
-            table_name (str): The table's full name, in "schema"."table" format
+            table (str|Table): The table's full name, in "schema"."table" format, or a Table Object
             clean (bool, optional): If set to True, will remove newlines and non-ascii characters
                                     from the resulting CSV.
 
         Returns:
-            The CSV file streamed from PlaidCloud"""
+            The CSV file streamed from PlaidCloud
+        """
+        sa_meta = sqlalchemy.MetaData()
+        if isinstance(table, str):
+            schema, table = table.split('.')
+            table = Table(self, table[1:-1], sa_meta)
+
         if clean:
-            # Slice off the table from the full name.
-            table_id = table_name.split('.')[1][1:-1]
-            meta = self.rpc.analyze.table.table_meta(
-                project_id=self._project_id,
-                table_id=table_id
-            )
-            if meta is None:
+            if len(table.columns) == 0:
                 raise Exception('The table is not created in the database')
 
             if encoding != 'utf-8':
-                replace_func = 'utf8_to_{}'.format(encoding.replace('-', '_').lower())
-                column_list = [
-                    """CONVERT(REPLACE(\"{col}\", '\\n', '') using {rep_func}) AS \"{col}\"""".format(
-                        col=m['id'],
-                        rep_func=replace_func
-                    )
-                    if m['dtype'] == 'text'
-                    else '"{}"'.format(m['id'])
-                    for m in meta
-                ]
+                sa_query = sqlalchemy.select(
+                    *[sqlalchemy.func.convert(
+                        sqlalchemy.func.replace(
+                            col, '\\n', ''
+                        ),
+                        f'utf8_to_{encoding.replace("-", "_").lower()}'
+                    ).label(col.name) if isinstance(col.type, sqlalchemy.String) else col
+                    for col in table.columns]
+                )
             else:
-                column_list = [
-                    """REPLACE(\"{col}\", '\\n', '') AS \"{col}\"""".format(
-                        col=m['id'],
-                    )
-                    if m['dtype'] == 'text'
-                    else '"{}"'.format(m['id'])
-                    for m in meta
-                ]
-            column_string = ','.join(column_list)
-            query = """SELECT {columns} FROM {table}""".format(
-                columns=column_string,
-                table=table_name,
-            )
+                sa_query = sqlalchemy.select(
+                    *[sqlalchemy.func.replace(
+                        col, '\\n', ''
+                    ).label(col.name) if isinstance(col.type, sqlalchemy.String) else col
+                    for col in table.columns]
+                )
+            query, params = self._compiled(sa_query)
             return self.rpc.analyze.query.download_csv(
                 project_id=self._project_id,
                 query=query,
-            )
+                params=params,
+            ) 
 
         return self.rpc.analyze.query.download_csv(
             project_id=self._project_id,
-            table_name=table_name,
+            table_name=self.dialect.identifier_preparer.format_table(table),
         )
 
     def get_csv_by_query(self, query, params=None) -> str:
@@ -173,7 +167,7 @@ class Connection:
 
     def get_iterator(self, table, preserve_nulls=True):
         """Returns a generator that yields each row as a dict."""
-        return self._csv_stream(self.get_csv(table.fully_qualified_name), table.columns, preserve_nulls)
+        return self._csv_stream(self.get_csv(table), table.columns, preserve_nulls)
 
     def get_iterator_by_query(self, sa_query, preserve_nulls=True):
         """Returns a generator that yields each row as a dict."""
@@ -205,7 +199,7 @@ class Connection:
 
                 yield row
 
-    def get_data(self, data_source, return_type='df', encoding='utf-8', clean=True):
+    def get_data(self, data_source: "Table|str", return_type='df', encoding='utf-8', clean=True):
         if return_type == 'df':
             if isinstance(data_source, Table):
                 return self.get_dataframe(data_source, encoding=encoding, clean=clean)
@@ -216,7 +210,7 @@ class Connection:
             raise Exception('Unknown type for Data Source {}'.format(repr(data_source)))
         elif return_type == 'csv':
             if isinstance(data_source, Table):
-                return self.get_csv(data_source.fully_qualified_name, encoding=encoding, clean=clean)
+                return self.get_csv(data_source, encoding=encoding, clean=clean)
             if isinstance(data_source, str):
                 if str(data_source).lower().startswith('select'):
                     return self.get_csv_by_query(data_source)
@@ -236,7 +230,7 @@ class Connection:
 
         Returns:
             `pandas.DataFrame`: A DataFrame representing the table and the data it contains"""
-        file_path = self.get_csv(table.fully_qualified_name, encoding=encoding, clean=clean)
+        file_path = self.get_csv(table, encoding=encoding, clean=clean)
 
         try:
             return self._get_df_from_csv(file_path, table.columns, encoding)
@@ -855,9 +849,8 @@ class Table(sqlalchemy.Table):
     def id(self):
         return self._table_id  # pylint: disable=no-member
 
-    @property
-    def fully_qualified_name(self):
-        return '"{}"."{}"'.format(self.schema, self.id)
+    def fully_qualified_name(self, dialect):
+        return dialect.identifier_preparer.format_table(self)
 
     def info(self, keys=None):  # pylint: disable=method-hidden
         return self.table_info(keys)
