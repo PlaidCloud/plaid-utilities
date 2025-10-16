@@ -45,6 +45,12 @@ def compile_es_databend(element, compiler, **kw):
     return "(CAST(COALESCE(%s, NOW()) AS INT64 - CAST(%s AS INT64)) / 1000000" % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
 
+@compiles(elapsed_seconds, 'starrocks')
+def compile_es_starrocks(element, compiler, **kw):
+    start_date, end_date = list(element.clauses)
+    return "seconds_diff(%s, COALESCE(%s, NOW()))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
+
+
 class avg(ReturnTypeFromArgs):
     pass
 
@@ -323,6 +329,27 @@ def compile_safe_to_timestamp_databend(element, compiler, **kw):
     return f"to_timestamp({compiler.process(text)}, {compiler.process(datetime_format)})"
 
 
+@compiles(safe_to_timestamp, 'starrocks')
+def compile_safe_to_timestamp_starrocks(element, compiler, **kw):
+    full_args = list(element.clauses)
+    if len(full_args) == 1:
+        datetime_format = 'YYYY-MM-DD HH24:MI:SS'
+        text = full_args[0]
+        args = []
+    else:
+        text, datetime_format, *args = full_args
+        datetime_format = datetime_format.value
+
+    text = func.cast(text, sqlalchemy.Text)
+    if datetime_format and '%' not in datetime_format:
+        datetime_format = postgres_to_python_date_format(datetime_format)
+    datetime_format = func.cast(datetime_format, sqlalchemy.Text)
+    if args:
+        compiled_args = ', '.join([compiler.process(arg) for arg in args])
+        return f"str_to_date({compiler.process(text)}, {compiler.process(datetime_format)}, {compiled_args})"
+
+    return f"str_to_date({compiler.process(text)}, {compiler.process(datetime_format)})"
+
 # Disabling safe_to_char - input can be date, integer, float, interval (not just date)
 # class safe_to_char(GenericFunction):
 #     name = 'to_char'
@@ -461,6 +488,33 @@ def compile_sql_numericize_databend(element, compiler, **kw):
 
     return compiler.process(sql_only_numeric(arg), **kw)
 
+@compiles(sql_numericize, 'starrocks')
+def compile_sql_numericize_starrocks(element, compiler, **kw):
+    """
+    Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
+    """
+    arg, = list(element.clauses)
+
+    def sql_only_numeric(text):
+        # Returns substring of numeric values only (-, ., numbers, scientific notation)
+        cast_text = func.cast(text, sqlalchemy.Text)
+        trim_text = func.trim(cast_text)  # trim so that when we check for a sign at the beginning, we ignore spaces
+        return func.coalesce(
+            func.nullif(
+                func.regexp_extract(trim_text, r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))', 0),  # check for valid scientific notation
+                '',
+            ),
+            func.nullif(
+                func.regexp_extract(trim_text, r'(^[+\-][0-9\.]+)', 0),  # check for a number prefixed with a sign
+                '',
+            ),
+            func.nullif(
+                func.regexp_replace(trim_text, r'[^0-9\.]+', ''),  # remove all the non-numeric characters
+                ''
+            )
+        )
+
+    return compiler.process(sql_only_numeric(arg), **kw)
 
 class sql_integerize_round(GenericFunction):
     name = 'integerize_round'
@@ -488,7 +542,7 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
     return compiler.process(func.cast(func.trunc(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
 
 
-@compiles(sql_integerize_truncate, 'databend')
+@compiles(sql_integerize_truncate, 'databend', 'starrocks')
 def compile_sql_integerize_truncate_databend(element, compiler, **kw):
     """
     Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
@@ -692,6 +746,17 @@ def compile_safe_to_date_databend(element, compiler, **kw):
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
 
+@compiles(safe_to_date, 'starrocks')
+def compile_safe_to_date_starrocks(element, compiler, **kw):
+    text, *args = list(element.clauses)
+    if len(args):
+        date_format = args[0].value
+        if date_format and '%' not in date_format:
+            date_format = date_format_from_datetime_format(date_format)
+            date_format = postgres_to_python_date_format(date_format)
+        return f"str2date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
+
+    return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
 
 class safe_round(GenericFunction):
     name = 'round'
