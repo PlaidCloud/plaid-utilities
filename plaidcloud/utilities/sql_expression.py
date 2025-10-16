@@ -1043,10 +1043,10 @@ def allocate(
                 # set ratio to null if the denominator or numerator is zero, this allows pass-through of value to be allocated
                 sqlalchemy.func.cast(
                     (
-                        sqlalchemy.func.nullif(sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC(38, 20)), 0) /
-                        sqlalchemy.func.nullif(sqlalchemy.func.cast(cte_denominator.columns[d], sqlalchemy.NUMERIC(38, 20)), 0)
+                        sqlalchemy.func.nullif(sqlalchemy.func.cast(cte_consol_driver.columns[d], sqlalchemy.NUMERIC(40, 20)), 0) /
+                        sqlalchemy.func.nullif(sqlalchemy.func.cast(cte_denominator.columns[d], sqlalchemy.NUMERIC(40, 20)), 0)
                     ),
-                    sqlalchemy.NUMERIC(38, 20),  # We need a large scale here to calc allocation correctly
+                    sqlalchemy.NUMERIC(40, 20),  # We need a large scale here to calc allocation correctly
                 ).label(_get_shred_col_name(d))
                 for d in driver_value_columns
             ]
