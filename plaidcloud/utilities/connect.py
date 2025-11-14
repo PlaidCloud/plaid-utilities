@@ -49,6 +49,18 @@ class PlaidConnection(Connect, Connection):
     Establish connection.
     """
     def __init__(self, *args, **kwargs):
+        # Check if Jupyter Connection and read kwargs into environment variables
+        is_jupyter = os.environ.get('__PLAID_JUPYTER__', 'False') == 'True'
+        project_id = kwargs.pop('project_id', '')
+        workflow_id = kwargs.pop('workflow_id', 'workflow_id_not_set')
+        step_id = kwargs.pop('step_id', 'step_id_not_set')
+        if is_jupyter:
+            if not project_id:
+                raise Exception('Set the Project ID as a keyword argument to use the connection in JupyterHub')
+            os.environ['__PLAID_RPC_AUTH_TOKEN__'] = os.environ.get('KEYCLOAK_ACCESS_TOKEN', 'NOT SET')
+            os.environ['__PLAID_PROJECT_ID__'] = project_id
+            os.environ['__PLAID_WORKFLOW_ID__'] = workflow_id
+            os.environ['__PLAID_STEP_ID__'] = step_id
         Connect.__init__(self)
         Connection.__init__(self, rpc=self)
         self._logger = Logger(rpc=self)
@@ -107,7 +119,6 @@ class PlaidConnection(Connect, Connection):
                     dh.to_xl(df, sheet=sheet, wb=self._wb)
             if save and self._wb:
                 self._wb.save()
-
 
     def save(self, df, name, append=False):
         if self.is_local is False or self.write_from_local is True:
