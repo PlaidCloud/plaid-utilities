@@ -44,7 +44,6 @@ def compile_es_databend(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
     return "(CAST(COALESCE(%s, NOW()) AS INT64 - CAST(%s AS INT64)) / 1000000" % (compiler.process(func.cast(end_date, sqlalchemy.DateTime)), compiler.process(func.cast(start_date, sqlalchemy.DateTime)))
 
-
 @compiles(elapsed_seconds, 'starrocks')
 def compile_es_starrocks(element, compiler, **kw):
     start_date, end_date = list(element.clauses)
@@ -102,7 +101,7 @@ class custom_values(FromClause):
         self.alias_name = self.name = kw.pop("alias_name", None)
         self._is_lateral = kw.pop("is_lateral", False)
 
-    def _populate_column_collection(self):
+    def _populate_column_collection(self, *args, **kw):
         for c in self._column_args:
             c._make_proxy(self)
 
@@ -278,6 +277,33 @@ def compile_import_cast_databend(element, compiler, **kw):
                     sqlalchemy.Numeric(38, 10),
                 )
             )
+    else:
+        #if dtype == 'text':
+        return compiler.process(col, **kw)
+
+@compiles(import_cast, 'starrocks')
+def compile_import_cast(element, compiler, **kw):
+    col, dtype, date_format, trailing_negs = list(element.clauses)
+    dtype = dtype.value
+    datetime_format = date_format.value
+    if datetime_format and '%' in datetime_format:
+        datetime_format = python_to_postgres_date_format(datetime_format)
+    trailing_negs = trailing_negs.value
+
+    if dtype == 'date':
+        return compiler.process(func.to_date(col, datetime_format), **kw)
+    elif dtype == 'timestamp':
+        return compiler.process(func.to_timestamp(col, datetime_format), **kw)
+    elif dtype == 'time':
+        return compiler.process(func.to_timestamp(col, 'HH24:MI:SS'), **kw)
+    elif dtype == 'interval':
+        return compiler.process(col, **kw) + '::interval'
+    elif dtype == 'boolean':
+        return compiler.process(col, **kw) + '::boolean'
+    elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
+        if trailing_negs:
+            return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
+        return compiler.process(func.cast(col, Numeric(38, 10)), **kw)
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
@@ -772,7 +798,7 @@ def compile_safe_round(element, compiler, **kw):
     else:
         number, digits, *args = all_args
 
-    number = func.cast(number, sqlalchemy.Numeric)
+    number = func.cast(number, sqlalchemy.Numeric(38, 10))
     if digits is not None:
         digits = func.cast(digits, sqlalchemy.Integer)
 
@@ -954,6 +980,25 @@ def compile_safe_divide(element, compiler, **kw):
     numerator, denominator, divide_by_zero_value = list(element.clauses)
     numerator = func.cast(numerator, sqlalchemy.Numeric)
     denominator = func.cast(denominator, sqlalchemy.Numeric)
+
+    basic_safe_divide = numerator / func.nullif(denominator, 0)
+    # NOTE: in SQL, x/NULL = NULL, for all x.
+
+    # Skip the coalesce if it's not necessary
+    return compiler.process(
+        basic_safe_divide if divide_by_zero_value is None else func.coalesce(basic_safe_divide, divide_by_zero_value)
+    )
+
+@compiles(sql_safe_divide, 'starrocks')
+def compile_safe_divide_starrocks(element, compiler, **kw):
+    """Divides numerator by denominator, returning NULL if the denominator is 0.
+    """
+    clauses = list(element.clauses)
+    numerator = clauses[0]
+    denominator = clauses[1]
+    divide_by_zero_value = clauses[2] if len(clauses) > 2 else None
+    numerator = func.cast(numerator, sqlalchemy.Numeric(38, 10))
+    denominator = func.cast(denominator, sqlalchemy.Numeric(38, 10))
 
     basic_safe_divide = numerator / func.nullif(denominator, 0)
     # NOTE: in SQL, x/NULL = NULL, for all x.
