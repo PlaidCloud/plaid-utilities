@@ -153,6 +153,17 @@ class TestImportColDatabend(DatabendTest):
 #         self.assertEqual(1, compiled.params['substring_1'])
 #         self.assertEqual(5, compiled.params['left_2'])
 
+class TestImportColStarrocks(TestImportCol, StarrocksTest):
+    def test_import_col_numeric(self):
+        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(str(compiled), 'CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END')
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+        self.assertEqual('', compiled.params['regexp_replace_3'])
+        self.assertEqual(0.0, compiled.params['param_1'])
+
 
 class TestZfill(BaseTest):
     def test_zfill(self):
@@ -562,3 +573,31 @@ class TestSafeExtractDB(DatabendTest):
         expr = sqlalchemy.func.extract('year', c)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual('EXTRACT(year FROM id)', str(compiled))
+
+class TestSafeRound(BaseTest):
+    def test_round(self):
+        expr = sqlalchemy.func.round(123.45)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('round(CAST(%(round_1)s AS NUMERIC(38, 10)))', str(compiled))
+        self.assertEqual(123.45, compiled.params['round_1'])
+
+class TestSafeDivide(BaseTest):
+    def test_safe_divide(self):
+        expr = sqlalchemy.func.safe_divide(123.45, 987.65, 100)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('coalesce(CAST(%(safe_divide_1)s AS NUMERIC) / CAST(nullif(CAST(%(safe_divide_2)s AS NUMERIC), %(nullif_1)s) AS NUMERIC), %(safe_divide_3)s)', str(compiled))
+        self.assertEqual(123.45, compiled.params['safe_divide_1'])
+        self.assertEqual(987.65, compiled.params['safe_divide_2'])
+        self.assertEqual(100, compiled.params['safe_divide_3'])
+        self.assertEqual(0, compiled.params['nullif_1'])
+
+
+class TestSafeDivideSR(StarrocksTest):
+    def test_safe_divide(self):
+        expr = sqlalchemy.func.safe_divide(123.45, 987.65, 100)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('coalesce(CAST(%(safe_divide_1)s AS DECIMAL(38, 10)) / nullif(CAST(%(safe_divide_2)s AS DECIMAL(38, 10)), %(nullif_1)s), %(safe_divide_3)s)', str(compiled))
+        self.assertEqual(123.45, compiled.params['safe_divide_1'])
+        self.assertEqual(987.65, compiled.params['safe_divide_2'])
+        self.assertEqual(100, compiled.params['safe_divide_3'])
+        self.assertEqual(0, compiled.params['nullif_1'])
