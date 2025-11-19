@@ -799,8 +799,9 @@ def compile_safe_round(element, compiler, **kw):
         number, digits, *args = all_args
 
     number = func.cast(number, sqlalchemy.Numeric(38, 10))
-    if digits is not None:
-        digits = func.cast(digits, sqlalchemy.Integer)
+    # Starrocks does not like this and it seems overkill
+    # if digits is not None:
+    #     digits = func.cast(digits, sqlalchemy.Integer)
 
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])

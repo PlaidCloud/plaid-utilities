@@ -581,6 +581,14 @@ class TestSafeRound(BaseTest):
         self.assertEqual('round(CAST(%(round_1)s AS NUMERIC(38, 10)))', str(compiled))
         self.assertEqual(123.45, compiled.params['round_1'])
 
+    def test_round_2dp(self):
+        expr = sqlalchemy.func.round(123.45, 2)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('round(CAST(%(round_2)s AS NUMERIC(38, 10)), %(round_1)s)', str(compiled))
+        self.assertEqual(2, compiled.params['round_1'])
+        self.assertEqual(123.45, compiled.params['round_2'])
+
+
 class TestSafeDivide(BaseTest):
     def test_safe_divide(self):
         expr = sqlalchemy.func.safe_divide(123.45, 987.65, 100)
