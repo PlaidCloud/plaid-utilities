@@ -650,13 +650,18 @@ class Connection:
             None
         """
         def _table_meta():
-            return [
-                {
-                    'id': col.name,
-                    'dtype': analyze_type(col.type.compile(self.dialect))
-                }
-                for col in query.selected_columns
-            ]
+            try:
+                return [
+                    {
+                        'id': col.name,
+                        'dtype': analyze_type(col.type.compile(self.dialect))
+                    }
+                    for col in query.selected_columns
+                ]
+            except:
+                col_dict = {col.name: str(col.type) for col in query.selected_columns}
+                logger.exception(f'{repr(col_dict)}')
+                raise
 
         # ensure the table exists as per the metadata
         table = Table(

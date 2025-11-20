@@ -1257,7 +1257,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
         sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.TEXT).label('log'),
         cte_rules.columns['rule_number'],
         cte_rules.columns['rule'] if False else sqlalchemy.func.cast(sqlalchemy.null(), sqlalchemy.TEXT).label('rule'),
-        cte_applied_rules.columns['rule_id'],
+        sqlalchemy.func.cast(cte_applied_rules.columns['rule_id'], sqlalchemy.TEXT),
         *[cte_rules.columns[t] for t in target_columns]
     ).select_from(
         sqlalchemy.join(
