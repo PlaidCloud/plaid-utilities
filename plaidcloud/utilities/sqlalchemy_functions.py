@@ -4,7 +4,7 @@
 import sqlalchemy
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
-from sqlalchemy.types import Numeric
+from sqlalchemy.types import Numeric, Boolean
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
@@ -282,7 +282,7 @@ def compile_import_cast_databend(element, compiler, **kw):
         return compiler.process(col, **kw)
 
 @compiles(import_cast, 'starrocks')
-def compile_import_cast(element, compiler, **kw):
+def compile_import_cast_starrocks(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     dtype = dtype.value
     datetime_format = date_format.value
@@ -299,7 +299,7 @@ def compile_import_cast(element, compiler, **kw):
     elif dtype == 'interval':
         return compiler.process(col, **kw) + '::interval'
     elif dtype == 'boolean':
-        return compiler.process(col, **kw) + '::boolean'
+        return compiler.process(func.cast(col, Boolean), **kw)
     elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
         if trailing_negs:
             return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
