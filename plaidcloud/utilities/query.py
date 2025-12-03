@@ -92,8 +92,12 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls(paramstyle='pyformat')
-        self.variables = self.refresh_variables()
-        self._load_udf_params()
+        try:
+            self.variables = self.refresh_variables()
+            self._load_udf_params()
+        except:
+            self.variables = {}
+            self.udf = None
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
