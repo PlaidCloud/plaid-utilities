@@ -9,9 +9,11 @@
 
 import os
 import shutil
+import requests
 
 from plaidcloud.rpc.logger import Logger
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
+from plaidcloud.utilities import load_utility_scripts, validate_utility_script
 from plaidcloud.utilities.query import Connection, Table
 import plaidcloud.utilities.data_helpers as dh
 import plaidcloud.utilities.frame_manager as fm
@@ -127,6 +129,49 @@ class PlaidConnection(Connect, Connection):
     @property
     def logger(self):
         return self._logger
+
+    def load_plaidcloud_utility_scripts(self, reload: bool = True):
+        """
+        Load plaidcloud utility scripts into plaidcloud.utilities.udf_helpers.{module}
+
+        Args:
+            reload: reload modules if already present
+        """
+        utility_scripts = {
+            udf['name']: self.rpc.analyze.udf.get_code(
+                project_id=self.project_id,
+                udf_id=udf['id'],
+            )
+            for udf in self.rpc.analyze.udf.udfs(project_id=self.project_id)
+            if udf['kind'] == 'utility'
+        }
+        load_utility_scripts(utility_scripts, reload=reload)
+
+    def load_remote_utility_scripts(
+            self,
+            scripts: dict[str, str],
+            reload: bool = True,
+    ):
+        """
+        Load remote utility scripts into plaidcloud.utilities.udf_helpers.{module}
+
+        Args:
+            scripts: {module_name: url}
+            reload: reload modules if already present
+            allowed_imports: optional allowlist of imports
+        """
+        scripts_to_load = {}
+        for module_name, url in scripts.items():
+            response = requests.get(url)
+            response.raise_for_status()
+            code = response.text
+            try:
+                validate_utility_script(code)
+            except ValueError as e:
+                raise ValueError(f"Invalid utility script: {module_name}: {e}") from e
+            scripts_to_load[module_name] = code
+
+        load_utility_scripts(scripts_to_load, reload=reload)
 
 
 class PlaidXLConnection(PlaidXLConnect, Connection):
