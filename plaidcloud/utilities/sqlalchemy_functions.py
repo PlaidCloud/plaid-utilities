@@ -4,7 +4,7 @@
 import sqlalchemy
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
-from sqlalchemy.types import Numeric, Boolean
+from sqlalchemy.types import Numeric, Boolean, Double
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
@@ -1131,3 +1131,47 @@ def compile_string_to_array(element, compiler, **kw):
         )
     )
     return compiler.process(split_array)
+
+class quantile_tdigest(GenericFunction):
+    type = Double()
+    name = "QUANTILE_TDIGEST"
+    inherit_cache = True
+
+
+@compiles(quantile_tdigest)
+def default_quantile_tdigest(element, compiler, **kw):
+    level, expr = list(element.clauses)
+    return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
+
+class quantile_cont(GenericFunction):
+    type = Double()
+    name = "QUANTILE_CONT"
+    inherit_cache = True
+
+
+@compiles(quantile_cont)
+def default_quantile_cont(element, compiler, **kw):
+    level, expr = list(element.clauses)
+    return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
+
+class quantile_disc(GenericFunction):
+    type = Double()
+    name = "QUANTILE_DISC"
+    inherit_cache = True
+
+
+@compiles(quantile_disc)
+def default_quantile_disc(element, compiler, **kw):
+    level, expr = list(element.clauses)
+    return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
+
+class quantile_tdigest_weighted(GenericFunction):
+    type = Double()
+    name = "QUANTILE_TDIGEST_WEIGHTED"
+    inherit_cache = True
+
+
+@compiles(quantile_tdigest_weighted)
+def default_quantile_tdigest_weighted(element, compiler, **kw):
+    level, expr, weight = list(element.clauses)
+    return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)}, {compiler.process(weight, **kw)})"
