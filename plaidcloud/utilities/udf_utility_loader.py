@@ -95,7 +95,6 @@ def validate_utility_script(code: str) -> None:
         ):
             continue
 
-
         # ❌ Disallow all other expressions (blocks function calls, etc.)
         if isinstance(node, ast.Expr):
             raise UtilityScriptValidationError(
@@ -113,6 +112,10 @@ def validate_utility_script(code: str) -> None:
 
         # ✅ Function / class definitions
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+
+        # ✅ Module imports
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
 
         # # ✅ Imports (optional allowlist)
