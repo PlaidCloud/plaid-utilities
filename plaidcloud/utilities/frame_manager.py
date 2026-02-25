@@ -2462,6 +2462,59 @@ def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 
     )
 
 
+
+def yxdb_to_csv(
+    yxdb_file_name: str,
+    csv_file_name: str,
+    start_row: int = 0,
+    date_format: str = 'YYYY-MM-DD"T"HH:MI:SS',
+):
+    """Convert an Alteryx YXDB file to a tab-delimited CSV.
+
+    The routine mimics :func:`parquet_to_csv` but uses the ``yxdb`` third-party
+    library to read data.  The YXDB reader is lazy and exposes rows one at a
+    time; we materialize the entire dataset into a ``pandas.DataFrame`` and
+    then delegate to ``DataFrame.to_csv`` for the heavy lifting.
+
+    Args:
+        yxdb_file_name (str): path to an existing YXDB file
+        csv_file_name (str): destination path for the CSV output
+        start_row (int): number of leading rows to skip (default ``0``)
+        date_format (str): postgres-style date format (see
+            :func:`postgres_to_python_date_format`)
+
+    Raises:
+        :class:`ImportError`: if the ``yxdb`` package is not installed.
+    """
+
+    try:
+        import yxdb
+    except ImportError:
+        raise ImportError(
+            "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
+        )
+
+    # read all records via the public API described on PyPI
+    reader = yxdb.YxdbReader(path=yxdb_file_name)
+    fields = reader.list_fields()
+    data = []
+    while reader.next():
+        data.append([reader.read_name(f) for f in fields])
+
+    df = pd.DataFrame(data, columns=fields)
+    if start_row:
+        df = df.iloc[start_row:]
+
+    df.to_csv(
+        csv_file_name,
+        index=False,
+        sep='\t',
+        quotechar='"',
+        escapechar='"',
+        date_format=postgres_to_python_date_format(date_format),
+    )
+
+
 def allocate(
     logging,                     # pass in the logger we want to hit.
     df_input,                     # input data frame
