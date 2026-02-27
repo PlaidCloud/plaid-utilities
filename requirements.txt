@@ -14,4 +14,3 @@ SQLAlchemy
 texttable
 toolz
 xlwings;platform_system=="Windows"
-yxdb
