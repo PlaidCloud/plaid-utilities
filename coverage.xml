@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<coverage version="5.5" timestamp="1709000000000" lines-valid="0" lines-covered="0" line-rate="1" branches-covered="0" branches-valid="0" branch-rate="1" complexity="1">
+    <sources>
+        <source>/github/workspace</source>
+    </sources>
+    <packages>
+        <package name="plaidcloud.utilities" line-rate="1" branch-rate="1" complexity="1">
+            <classes>
+                <class name="frame_manager" filename="plaidcloud/utilities/frame_manager.py" line-rate="1" branch-rate="1" complexity="1">
+                    <methods/>
+                    <lines/>
+                </class>
+            </classes>
+        </package>
+    </packages>
+</coverage>
