@@ -48,6 +48,7 @@ test = [
 ]
 full = [
     "plaidcloud-rpc[full]>=1.6.3",
+    "fastavro",
 ]
 xray = [
     "yxdb>=1.0.0",

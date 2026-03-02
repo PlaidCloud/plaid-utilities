@@ -1,7 +1,6 @@
 argparse
 chardet
-fastavro
-fastparquet
+avro
 ipython
 numpy
 pandas<3.0.0

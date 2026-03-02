@@ -12,7 +12,11 @@ from functools import wraps
 from io import StringIO, BytesIO
 import traceback
 
-import fastavro
+try:
+    import fastavro as avro
+except ImportError:
+    import avro
+
 import pandas as pd
 from pandas.api.types import is_string_dtype
 from pandas.io.parsers.base_parser import STR_NA_VALUES
@@ -2427,7 +2431,7 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
 def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
     with open(avro_file_name, 'r') as infile:
         with open(csv_file_name, 'w') as outfile:
-            reader = fastavro.reader(infile)
+            reader = avro.reader(infile)
             if start_row:
                 # Somewhat ugly since fastavro doesn't have a clean way to do this.
                 lines = 0
