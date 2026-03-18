@@ -37,24 +37,26 @@ def load_utility_scripts(
         raise ImportError(f"Namespace {namespace} is not available")
 
     for module_name, code in scripts.items():
-        if validate:
-            validate_utility_script(code)
+        try:
+            if validate:
+                validate_utility_script(code)
 
-        full_name = f"{namespace}.{module_name}"
+            full_name = f"{namespace}.{module_name}"
 
-        if full_name in sys.modules and not reload:
-            continue
+            if full_name in sys.modules and not reload:
+                continue
 
-        spec = importlib.util.spec_from_loader(full_name, loader=None)
-        module = importlib.util.module_from_spec(spec)
+            spec = importlib.util.spec_from_loader(full_name, loader=None)
+            module = importlib.util.module_from_spec(spec)
 
-        # module.__file__ = url
-        module.__package__ = namespace
+            # module.__file__ = url
+            module.__package__ = namespace
 
-        exec(code, module.__dict__)
-
-        sys.modules[full_name] = module
-        setattr(base_module, module_name, module)
+            exec(code, module.__dict__)
+            sys.modules[full_name] = module
+            setattr(base_module, module_name, module)
+        except Exception as e:
+            raise Exception(f"Error loading utility script {module_name}: {e}") from e
 
 
 def _is_constant_expr(node: ast.AST) -> bool:
