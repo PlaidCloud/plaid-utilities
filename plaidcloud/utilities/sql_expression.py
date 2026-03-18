@@ -1221,6 +1221,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     iteration_selects = []
 
     for iteration in iterations:
+        valid_rules = df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True) & (df_rules[condition_column].notnull()) & (df_rules[condition_column] != '')]
         if include_once:
             iteration_selects.append(
                 sqlalchemy.select(
@@ -1228,7 +1229,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
                     sqlalchemy.case(
                         *[
                             (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
-                            for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows()
+                            for index, rule in valid_rules.iterrows()
                         ],
                         else_=None,
                     ).label('rule_id')
@@ -1236,7 +1237,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
             )
         else:
             rule_selects = []
-            for index, rule in df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True)].iterrows():
+            for index, rule in valid_rules.iterrows():
                 rule_selects.append(
                     sqlalchemy.select(
                         *[col for col in cte_source.columns],
