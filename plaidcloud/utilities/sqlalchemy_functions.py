@@ -12,6 +12,34 @@ from toolz.dicttoolz import dissoc
 from plaidcloud.rpc.type_conversion import postgres_to_python_date_format, python_to_postgres_date_format, date_format_from_datetime_format
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 
+# Import GenericFunction classes from the StarRocks compat module so there
+# is a single class per SQL function name.  Additional dialect handlers
+# (@compiles for default, databend, hana, etc.) are attached below.
+from plaidcloud.utilities.starrocks_compat import (  # noqa: F401
+    to_timestamp as safe_to_timestamp,
+    to_date as safe_to_date,
+    to_char as sql_to_char,
+    to_number as sql_to_number,
+    transaction_timestamp as sql_transaction_timestamp,
+    strpos as sql_strpos,
+    string_to_array as sql_string_to_array,
+    metric_multiply as sql_metric_multiply,
+    numericize as sql_numericize,
+    integerize_round as sql_integerize_round,
+    integerize_truncate as sql_integerize_truncate,
+    slice_string as sql_slice_string,
+    zfill as sql_zfill,
+    normalize_whitespace as sql_normalize_whitespace,
+    unix_to_timestamp as safe_unix_to_timestamp,
+    safe_divide as sql_safe_divide,
+    ltrim as safe_ltrim,
+    rtrim as safe_rtrim,
+    quantile_tdigest,
+    quantile_cont,
+    quantile_disc,
+    quantile_tdigest_weighted,
+)
+
 __author__ = 'Paul Morel'
 __copyright__ = 'Copyright 2010-2022, Tartan Solutions, Inc'
 __credits__ = ['Paul Morel']
@@ -309,8 +337,7 @@ def compile_import_cast_starrocks(element, compiler, **kw):
         return compiler.process(col, **kw)
 
 
-class safe_to_timestamp(GenericFunction):
-    name = 'to_timestamp'
+# safe_to_timestamp imported from starrocks_compat (name='to_timestamp')
 
 
 @compiles(safe_to_timestamp)
@@ -421,8 +448,7 @@ def _squash_to_numeric(text):
     )
 
 
-class sql_metric_multiply(GenericFunction):
-    name = 'metric_multiply'
+# sql_metric_multiply imported from starrocks_compat (name='metric_multiply')
 
 @compiles(sql_metric_multiply)
 def compile_sql_metric_multiply(element, compiler, **kw):
@@ -465,9 +491,7 @@ def compile_sql_metric_multiply(element, compiler, **kw):
     return compiler.process(exp, **kw)
 
 
-class sql_numericize(GenericFunction):
-    name = 'numericize'
-    inherit_cache = False
+# sql_numericize imported from starrocks_compat (name='numericize')
 
 @compiles(sql_numericize)
 def compile_sql_numericize(element, compiler, **kw):
@@ -542,8 +566,7 @@ def compile_sql_numericize_starrocks(element, compiler, **kw):
 
     return compiler.process(sql_only_numeric(arg), **kw)
 
-class sql_integerize_round(GenericFunction):
-    name = 'integerize_round'
+# sql_integerize_round imported from starrocks_compat (name='integerize_round')
 
 @compiles(sql_integerize_round)
 def compile_sql_integerize_round(element, compiler, **kw):
@@ -555,8 +578,7 @@ def compile_sql_integerize_round(element, compiler, **kw):
     return compiler.process(func.cast(_squash_to_numeric(arg), sqlalchemy.Integer), **kw)
 
 
-class sql_integerize_truncate(GenericFunction):
-    name = 'integerize_truncate'
+# sql_integerize_truncate imported from starrocks_compat (name='integerize_truncate')
 
 @compiles(sql_integerize_truncate)
 def compile_sql_integerize_truncate(element, compiler, **kw):
@@ -602,9 +624,7 @@ def compile_sql_integerize_truncate_databend(element, compiler, **kw):
 #     return compiler.process(sql_left(text, count), **kw)
 #
 
-class sql_slice_string(GenericFunction):
-    name = 'slice_string'
-    inherit_cache = False
+# sql_slice_string imported from starrocks_compat (name='slice_string')
 
 @compiles(sql_slice_string)
 def compile_sql_slice_string(element, compiler, **kw):
@@ -678,8 +698,7 @@ def compile_sql_slice_string(element, compiler, **kw):
 
 
 # This should work with databend, assuming types are fine. length and lpad are available
-class sql_zfill(GenericFunction):
-    name = 'zfill'
+# sql_zfill imported from starrocks_compat (name='zfill')
 
 @compiles(sql_zfill)
 def compile_sql_zfill(element, compiler, **kw):
@@ -696,8 +715,7 @@ def compile_sql_zfill(element, compiler, **kw):
         func.lpad(field, true_width, char)
     )
 
-class sql_normalize_whitespace(GenericFunction):
-    name = 'normalize_whitespace'
+# sql_normalize_whitespace imported from starrocks_compat (name='normalize_whitespace')
 
 WEIRD_WHITESPACE_CHARS = [
     'n',     # newline
@@ -732,8 +750,7 @@ def compile_sql_normalize_whitespace(element, compiler, **kw):
         func.regexp_replace(field, ww_re, ' ', 1, 0)
     )
 
-class safe_unix_to_timestamp(GenericFunction):
-    name = 'unix_to_timestamp'
+# safe_unix_to_timestamp imported from starrocks_compat (name='unix_to_timestamp')
 
 @compiles(safe_unix_to_timestamp)
 def compile_safe_unix_to_timestamp(element, compiler, **kw):
@@ -743,10 +760,7 @@ def compile_safe_unix_to_timestamp(element, compiler, **kw):
     return f"to_timestamp({compiler.process(timestamp)})"
 
 
-class safe_to_date(GenericFunction):
-    # This exists to make to_date behave as Silvio expects in the case of empty date strings.
-    # See ALYZ-2428
-    name = 'to_date'
+# safe_to_date imported from starrocks_compat (name='to_date')
 
 @compiles(safe_to_date)
 def compile_safe_to_date(element, compiler, **kw):
@@ -818,8 +832,7 @@ def compile_safe_round(element, compiler, **kw):
     return f"round({all_compiled_args})"
 
 
-class safe_ltrim(GenericFunction):
-    name = 'ltrim'
+# safe_ltrim imported from starrocks_compat (name='ltrim')
 
 @compiles(safe_ltrim)
 def compile_safe_ltrim(element, compiler, **kw):
@@ -844,8 +857,7 @@ def compile_safe_ltrim_databend(element, compiler, **kw):
     return f"TRIM(LEADING ' ' FROM {compiler.process(text)})"
 
 
-class safe_rtrim(GenericFunction):
-    name = 'rtrim'
+# safe_rtrim imported from starrocks_compat (name='rtrim')
 
 @compiles(safe_rtrim)
 def compile_safe_rtrim(element, compiler, **kw):
@@ -971,8 +983,7 @@ def compile_sql_set_null(element, compiler, **kw):
     )
 
 
-class sql_safe_divide(GenericFunction):
-    name = 'safe_divide'
+# sql_safe_divide imported from starrocks_compat (name='safe_divide')
 
 @compiles(sql_safe_divide)
 def compile_safe_divide(element, compiler, **kw):
@@ -1040,8 +1051,7 @@ def compile_sql_date_add(element, compiler, **kw):
 ### Databend
 
 # Still need to check this one
-class sql_to_char(GenericFunction):
-    name = 'to_char'
+# sql_to_char imported from starrocks_compat (name='to_char')
 
 @compiles(sql_to_char, 'databend')
 def compile_to_char_databend(element, compiler, **kw):
@@ -1083,8 +1093,7 @@ def compile_to_char_databend(element, compiler, **kw):
         )
 
 
-class sql_to_number(GenericFunction):
-    name = 'to_number'
+# sql_to_number imported from starrocks_compat (name='to_number')
 
 # Need to come back to this one
 @compiles(sql_to_number, 'databend')
@@ -1095,8 +1104,7 @@ def compile_to_number(element, compiler, **kw):
         func.to_int64(string)
     )
 
-class sql_transaction_timestamp(GenericFunction):
-    name = 'transaction_timestamp'
+# sql_transaction_timestamp imported from starrocks_compat (name='transaction_timestamp')
 
 @compiles(sql_transaction_timestamp, 'databend')
 def compile_transaction_timestamp(element, compiler, **kw):
@@ -1105,8 +1113,7 @@ def compile_transaction_timestamp(element, compiler, **kw):
         func.now()
     )
 
-class sql_strpos(GenericFunction):
-    name = 'strpos'
+# sql_strpos imported from starrocks_compat (name='strpos')
 
 @compiles(sql_strpos, 'databend')
 def compile_strpos(element, compiler, **kw):
@@ -1115,8 +1122,7 @@ def compile_strpos(element, compiler, **kw):
         func.locate(substring, string)
     )
 
-class sql_string_to_array(GenericFunction):
-    name = 'string_to_array'
+# sql_string_to_array imported from starrocks_compat (name='string_to_array')
 
 @compiles(sql_string_to_array, 'databend')
 def compile_string_to_array(element, compiler, **kw):
@@ -1132,10 +1138,7 @@ def compile_string_to_array(element, compiler, **kw):
     )
     return compiler.process(split_array)
 
-class quantile_tdigest(GenericFunction):
-    type = Double()
-    name = "QUANTILE_TDIGEST"
-    inherit_cache = True
+# quantile_tdigest imported from starrocks_compat (name='quantile_tdigest')
 
 
 @compiles(quantile_tdigest)
@@ -1143,10 +1146,7 @@ def default_quantile_tdigest(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
 
-class quantile_cont(GenericFunction):
-    type = Double()
-    name = "QUANTILE_CONT"
-    inherit_cache = True
+# quantile_cont imported from starrocks_compat (name='quantile_cont')
 
 
 @compiles(quantile_cont)
@@ -1154,10 +1154,7 @@ def default_quantile_cont(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
 
-class quantile_disc(GenericFunction):
-    type = Double()
-    name = "QUANTILE_DISC"
-    inherit_cache = True
+# quantile_disc imported from starrocks_compat (name='quantile_disc')
 
 
 @compiles(quantile_disc)
@@ -1165,10 +1162,7 @@ def default_quantile_disc(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)})"
 
-class quantile_tdigest_weighted(GenericFunction):
-    type = Double()
-    name = "QUANTILE_TDIGEST_WEIGHTED"
-    inherit_cache = True
+# quantile_tdigest_weighted imported from starrocks_compat (name='quantile_tdigest_weighted')
 
 
 @compiles(quantile_tdigest_weighted)

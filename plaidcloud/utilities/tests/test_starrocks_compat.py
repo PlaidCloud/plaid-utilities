@@ -17,9 +17,6 @@ from sqlalchemy.exc import CompileError
 # Importing the module registers all @compiles decorators.
 import plaidcloud.utilities.starrocks_compat as compat  # noqa: F401
 
-# When sqlalchemy_functions.py is available, some function names are
-# handled by its own @compiles handlers (different SQL output).
-_HAS_SQLA_FUNCS = compat._HAS_SQLA_FUNCS
 
 # Try to import the StarRocks dialect; fall back to a simple mock
 # that just sets dialect.name = 'starrocks'.
@@ -68,12 +65,10 @@ class TestConversions(unittest.TestCase):
         sql = _sr_sql(func.to_timestamp(column('v'), 'YYYY-MM-DD'))
         self.assertIn('str_to_date', sql)
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'to_timestamp handled by sqlalchemy_functions')
     def test_to_timestamp_one_arg(self):
         sql = _sr_sql(func.to_timestamp(column('v')))
         self.assertIn('from_unixtime', sql)
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'to_date handled by sqlalchemy_functions')
     def test_to_date_two_args(self):
         sql = _sr_sql(func.to_date(column('v'), 'YYYY-MM-DD'))
         self.assertIn('str_to_date', sql)
@@ -129,7 +124,6 @@ class TestMath(unittest.TestCase):
         sql = _sr_sql(func.random())
         self.assertEqual(sql, 'rand()')
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'safe_divide handled by sqlalchemy_functions')
     def test_safe_divide_three_args(self):
         sql = _sr_sql(func.safe_divide(column('a'), column('b'), 0))
         self.assertIn('IF(', sql)
@@ -170,7 +164,6 @@ class TestText(unittest.TestCase):
         self.assertIn('hex(', sql)
         self.assertIn('lower', sql)
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'numericize handled by sqlalchemy_functions')
     def test_numericize(self):
         sql = _sr_sql(func.numericize(column('v')))
         self.assertIn('regexp_replace', sql)
@@ -181,7 +174,6 @@ class TestText(unittest.TestCase):
         self.assertIn('round', sql)
         self.assertIn('BIGINT', sql)
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'integerize_truncate handled by sqlalchemy_functions')
     def test_integerize_truncate(self):
         sql = _sr_sql(func.integerize_truncate(column('v')))
         self.assertIn('truncate', sql)
@@ -572,11 +564,11 @@ class TestPgToMysqlFmt(unittest.TestCase):
         self.assertEqual(compat._pg_to_mysql_fmt('HH12'), '%h')
         self.assertEqual(compat._pg_to_mysql_fmt('HH'), '%h')
 
-    def test_no_equivalent_drops(self):
-        # TZ, J, Q map to empty string
-        self.assertEqual(compat._pg_to_mysql_fmt('TZ'), '')
-        self.assertEqual(compat._pg_to_mysql_fmt('J'), '')
-        self.assertEqual(compat._pg_to_mysql_fmt('Q'), '')
+    def test_no_equivalent_passthrough(self):
+        # TZ → %Z (Python timezone), J/Q pass through unchanged
+        # (postgres_to_python_date_format does not drop these tokens)
+        result_tz = compat._pg_to_mysql_fmt('TZ')
+        self.assertNotIn('TZ', result_tz)  # converted, not left as PG token
 
     def test_passthrough(self):
         # Already MySQL-style should pass through unchanged
@@ -699,12 +691,10 @@ class TestDefaultDialectUnchanged(unittest.TestCase):
     function name (i.e. the GenericFunction registration does not
     break PostgreSQL compilation)."""
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'safe_divide PG handler from sqlalchemy_functions')
     def test_safe_divide_pg(self):
         sql = _pg_sql(func.safe_divide(column('a'), column('b'), 0))
         self.assertIn('safe_divide(', sql)
 
-    @unittest.skipIf(_HAS_SQLA_FUNCS, 'numericize PG handler from sqlalchemy_functions')
     def test_numericize_pg(self):
         sql = _pg_sql(func.numericize(column('v')))
         self.assertIn('numericize(', sql)
