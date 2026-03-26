@@ -17,6 +17,10 @@ from sqlalchemy.exc import CompileError
 # Importing the module registers all @compiles decorators.
 import plaidcloud.utilities.starrocks_compat as compat  # noqa: F401
 
+# When sqlalchemy_functions.py is available, some function names are
+# handled by its own @compiles handlers (different SQL output).
+_HAS_SQLA_FUNCS = compat._HAS_SQLA_FUNCS
+
 # Try to import the StarRocks dialect; fall back to a simple mock
 # that just sets dialect.name = 'starrocks'.
 try:
@@ -64,10 +68,12 @@ class TestConversions(unittest.TestCase):
         sql = _sr_sql(func.to_timestamp(column('v'), 'YYYY-MM-DD'))
         self.assertIn('str_to_date', sql)
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'to_timestamp handled by sqlalchemy_functions')
     def test_to_timestamp_one_arg(self):
         sql = _sr_sql(func.to_timestamp(column('v')))
         self.assertIn('from_unixtime', sql)
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'to_date handled by sqlalchemy_functions')
     def test_to_date_two_args(self):
         sql = _sr_sql(func.to_date(column('v'), 'YYYY-MM-DD'))
         self.assertIn('str_to_date', sql)
@@ -123,6 +129,7 @@ class TestMath(unittest.TestCase):
         sql = _sr_sql(func.random())
         self.assertEqual(sql, 'rand()')
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'safe_divide handled by sqlalchemy_functions')
     def test_safe_divide_three_args(self):
         sql = _sr_sql(func.safe_divide(column('a'), column('b'), 0))
         self.assertIn('IF(', sql)
@@ -163,6 +170,7 @@ class TestText(unittest.TestCase):
         self.assertIn('hex(', sql)
         self.assertIn('lower', sql)
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'numericize handled by sqlalchemy_functions')
     def test_numericize(self):
         sql = _sr_sql(func.numericize(column('v')))
         self.assertIn('regexp_replace', sql)
@@ -173,6 +181,7 @@ class TestText(unittest.TestCase):
         self.assertIn('round', sql)
         self.assertIn('BIGINT', sql)
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'integerize_truncate handled by sqlalchemy_functions')
     def test_integerize_truncate(self):
         sql = _sr_sql(func.integerize_truncate(column('v')))
         self.assertIn('truncate', sql)
@@ -408,7 +417,7 @@ class TestConversionAdditional(unittest.TestCase):
 
     def test_to_int32(self):
         sql = _sr_sql(func.to_int32(column('v')))
-        self.assertIn('INT', sql)
+        self.assertIn('AS INT)', sql)
 
     def test_to_int64(self):
         sql = _sr_sql(func.to_int64(column('v')))
@@ -533,8 +542,8 @@ class TestHashAdditional(unittest.TestCase):
 class TestUtilityAdditional(unittest.TestCase):
     def test_assume_not_null(self):
         sql = _sr_sql(func.assume_not_null(column('v')))
-        # Should just pass through the column
-        self.assertIn('v', sql)
+        # Pass-through: should not wrap in function call
+        self.assertNotIn('assume_not_null', sql)
 
     def test_humanize_number(self):
         sql = _sr_sql(func.humanize_number(column('v')))
@@ -580,15 +589,16 @@ class TestMissingCoverage(unittest.TestCase):
     # Date/time
     def test_justify_days(self):
         sql = _sr_sql(func.justify_days(column('v')))
-        self.assertIn('v', sql)
+        # Pass-through: should emit bare column, not the function name
+        self.assertNotIn('justify_days', sql)
 
     def test_justify_hours(self):
         sql = _sr_sql(func.justify_hours(column('v')))
-        self.assertIn('v', sql)
+        self.assertNotIn('justify_hours', sql)
 
     def test_justify_interval(self):
         sql = _sr_sql(func.justify_interval(column('v')))
-        self.assertIn('v', sql)
+        self.assertNotIn('justify_interval', sql)
 
     def test_timestamp_diff(self):
         sql = _sr_sql(func.timestamp_diff('day', column('ts1'), column('ts2')))
@@ -631,7 +641,8 @@ class TestMissingCoverage(unittest.TestCase):
 
     def test_to_ascii(self):
         sql = _sr_sql(func.to_ascii(column('s')))
-        self.assertIn('s', sql)
+        # Pass-through: should not wrap in function call
+        self.assertNotIn('to_ascii', sql)
 
     # Conversion
     def test_to_int16(self):
@@ -688,10 +699,12 @@ class TestDefaultDialectUnchanged(unittest.TestCase):
     function name (i.e. the GenericFunction registration does not
     break PostgreSQL compilation)."""
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'safe_divide PG handler from sqlalchemy_functions')
     def test_safe_divide_pg(self):
         sql = _pg_sql(func.safe_divide(column('a'), column('b'), 0))
         self.assertIn('safe_divide(', sql)
 
+    @unittest.skipIf(_HAS_SQLA_FUNCS, 'numericize PG handler from sqlalchemy_functions')
     def test_numericize_pg(self):
         sql = _pg_sql(func.numericize(column('v')))
         self.assertIn('numericize(', sql)
@@ -725,6 +738,9 @@ class TestDateExtraction(unittest.TestCase):
     def test_to_day_of_week(self):
         sql = _sr_sql(func.to_day_of_week(column('d')))
         self.assertIn('dayofweek(', sql)
+        # Verify Monday-based compensation formula
+        self.assertIn('+ 5', sql)
+        self.assertIn('+ 1', sql)
 
     def test_to_day_of_year(self):
         sql = _sr_sql(func.to_day_of_year(column('d')))
@@ -967,7 +983,8 @@ class TestArrayAdditional2(unittest.TestCase):
 
     def test_array_except(self):
         sql = _sr_sql(func.array_except(column('a'), column('b')))
-        self.assertIn('array_difference(', sql)
+        self.assertIn('array_filter(', sql)
+        self.assertIn('NOT array_contains(', sql)
 
     def test_array_prepend(self):
         sql = _sr_sql(func.array_prepend(column('a'), 1))
@@ -1096,11 +1113,11 @@ class TestVariantFunctions(unittest.TestCase):
 
     def test_remove_nullable(self):
         sql = _sr_sql(func.remove_nullable(column('v')))
-        self.assertIn('v', sql)
+        self.assertNotIn('remove_nullable', sql)
 
     def test_to_nullable(self):
         sql = _sr_sql(func.to_nullable(column('v')))
-        self.assertIn('v', sql)
+        self.assertNotIn('to_nullable', sql)
 
 
 class TestDefaultDialectUnchanged2(unittest.TestCase):

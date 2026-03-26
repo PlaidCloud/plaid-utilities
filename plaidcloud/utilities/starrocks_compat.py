@@ -11,6 +11,21 @@ emits the original function name unchanged so existing UDFs continue to work.
 Import this module early so that the @compiles decorators are registered
 before any queries are compiled against a StarRocks engine.
 
+Name-collision handling
+-----------------------
+``plaidcloud.utilities.sqlalchemy_functions`` registers GenericFunction
+classes for several of the same SQL function names (e.g. ``to_char``,
+``to_date``, ``numericize``).  Some of those classes already carry
+``@compiles(cls, 'starrocks')`` handlers.  To avoid double-registration
+warnings and non-deterministic behaviour:
+
+* Names that **already have** a StarRocks handler in
+  ``sqlalchemy_functions`` are skipped entirely here.
+* Names that exist in ``sqlalchemy_functions`` but **lack** a StarRocks
+  handler get one attached to the *existing* class (not a new one).
+* Names that do **not** exist in ``sqlalchemy_functions`` get a new
+  GenericFunction class as usual.
+
 Dialect target
 --------------
 All @compiles decorators target ``'starrocks'`` (the dialect name returned by
@@ -29,6 +44,44 @@ from sqlalchemy.types import (
 )
 
 _log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Import existing function classes from sqlalchemy_functions so we can
+# attach StarRocks @compiles decorators to them instead of re-registering
+# the same function names (which would emit SQLAlchemy warnings and
+# override the existing default/databend handlers).
+# ---------------------------------------------------------------------------
+try:
+    from plaidcloud.utilities.sqlalchemy_functions import (  # noqa: F401
+        # Classes that ALREADY have @compiles(cls, 'starrocks') handlers.
+        # We must NOT re-register these names or attach competing handlers.
+        safe_to_timestamp as _existing_to_timestamp,
+        safe_to_date as _existing_to_date,
+        sql_numericize as _existing_numericize,
+        sql_integerize_truncate as _existing_integerize_truncate,
+        sql_safe_divide as _existing_safe_divide,
+        # Classes that do NOT have StarRocks handlers — we will add them.
+        sql_to_char as _existing_to_char,
+        sql_to_number as _existing_to_number,
+        sql_transaction_timestamp as _existing_transaction_timestamp,
+        sql_strpos as _existing_strpos,
+        sql_string_to_array as _existing_string_to_array,
+        sql_metric_multiply as _existing_metric_multiply,
+        sql_integerize_round as _existing_integerize_round,
+        sql_slice_string as _existing_slice_string,
+        sql_zfill as _existing_zfill,
+        sql_normalize_whitespace as _existing_normalize_whitespace,
+        safe_unix_to_timestamp as _existing_unix_to_timestamp,
+        safe_ltrim as _existing_ltrim,
+        safe_rtrim as _existing_rtrim,
+        quantile_tdigest as _existing_quantile_tdigest,
+        quantile_cont as _existing_quantile_cont,
+        quantile_disc as _existing_quantile_disc,
+        quantile_tdigest_weighted as _existing_quantile_tdigest_weighted,
+    )
+    _HAS_SQLA_FUNCS = True
+except ImportError:
+    _HAS_SQLA_FUNCS = False
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +145,18 @@ def _bool_case(v: str, *, extras_true: str = '', extras_false: str = '') -> str:
 # Conversions
 # ===================================================================
 
-class to_char(functions.GenericFunction):
-    type = String()
-    name = 'to_char'
-    inherit_cache = True
+# --- Conversions: conditional registration to avoid collisions ---
+
+if not _HAS_SQLA_FUNCS:
+    class to_char(functions.GenericFunction):
+        type = String()
+        name = 'to_char'
+        inherit_cache = True
+else:
+    to_char = _existing_to_char
 
 
-@compiles(to_char, 'starrocks')
-def _sr_to_char(element, compiler, **kw):
+def _sr_to_char_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     if len(a) >= 2:
         fmt = a[1]
@@ -110,66 +167,79 @@ def _sr_to_char(element, compiler, **kw):
     return f"CAST({a[0]} AS CHAR)"
 
 
-class to_date(functions.GenericFunction):
-    type = Date()
-    name = 'to_date'
-    inherit_cache = True
+compiles(to_char, 'starrocks')(_sr_to_char_impl)
 
 
-@compiles(to_date, 'starrocks')
-def _sr_to_date(element, compiler, **kw):
-    a = _args(element, compiler, **kw)
-    if len(a) >= 2:
-        fmt = a[1]
-        if fmt.startswith("'") and fmt.endswith("'"):
-            translated = _pg_to_mysql_fmt(fmt[1:-1])
-            return f"CAST(str_to_date({a[0]}, '{translated}') AS DATE)"
-        return f"CAST(str_to_date({a[0]}, {fmt}) AS DATE)"
-    # Single-arg: StarRocks to_date(datetime) returns date
-    return f"to_date({a[0]})"
+if not _HAS_SQLA_FUNCS:
+    class to_date(functions.GenericFunction):
+        type = Date()
+        name = 'to_date'
+        inherit_cache = True
+
+    @compiles(to_date, 'starrocks')
+    def _sr_to_date(element, compiler, **kw):
+        a = _args(element, compiler, **kw)
+        if len(a) >= 2:
+            fmt = a[1]
+            if fmt.startswith("'") and fmt.endswith("'"):
+                translated = _pg_to_mysql_fmt(fmt[1:-1])
+                return f"CAST(str_to_date({a[0]}, '{translated}') AS DATE)"
+            return f"CAST(str_to_date({a[0]}, {fmt}) AS DATE)"
+        return f"to_date({a[0]})"
+# else: safe_to_date already has a StarRocks handler
 
 
-class to_number(functions.GenericFunction):
-    type = Numeric()
-    name = 'to_number'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class to_number(functions.GenericFunction):
+        type = Numeric()
+        name = 'to_number'
+        inherit_cache = True
+else:
+    to_number = _existing_to_number
 
 
-@compiles(to_number, 'starrocks')
-def _sr_to_number(element, compiler, **kw):
+def _sr_to_number_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"CAST({a[0]} AS DOUBLE)"
 
 
-class to_timestamp(functions.GenericFunction):
-    type = DateTime()
-    name = 'to_timestamp'
-    inherit_cache = True
+compiles(to_number, 'starrocks')(_sr_to_number_impl)
 
 
-@compiles(to_timestamp, 'starrocks')
-def _sr_to_timestamp(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class to_timestamp(functions.GenericFunction):
+        type = DateTime()
+        name = 'to_timestamp'
+        inherit_cache = True
+
+    @compiles(to_timestamp, 'starrocks')
+    def _sr_to_timestamp(element, compiler, **kw):
+        a = _args(element, compiler, **kw)
+        if len(a) >= 2:
+            fmt = a[1]
+            if fmt.startswith("'") and fmt.endswith("'"):
+                translated = _pg_to_mysql_fmt(fmt[1:-1])
+                return f"str_to_date({a[0]}, '{translated}')"
+            return f"str_to_date({a[0]}, {fmt})"
+        return f"from_unixtime({a[0]})"
+# else: safe_to_timestamp already has a StarRocks handler
+
+
+if not _HAS_SQLA_FUNCS:
+    class unix_to_timestamp(functions.GenericFunction):
+        type = DateTime()
+        name = 'unix_to_timestamp'
+        inherit_cache = True
+else:
+    unix_to_timestamp = _existing_unix_to_timestamp
+
+
+def _sr_unix_to_timestamp_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
-    if len(a) >= 2:
-        fmt = a[1]
-        if fmt.startswith("'") and fmt.endswith("'"):
-            translated = _pg_to_mysql_fmt(fmt[1:-1])
-            return f"str_to_date({a[0]}, '{translated}')"
-        return f"str_to_date({a[0]}, {fmt})"
-    # Single-arg: treat as unix timestamp
     return f"from_unixtime({a[0]})"
 
 
-class unix_to_timestamp(functions.GenericFunction):
-    type = DateTime()
-    name = 'unix_to_timestamp'
-    inherit_cache = True
-
-
-@compiles(unix_to_timestamp, 'starrocks')
-def _sr_unix_to_timestamp(element, compiler, **kw):
-    a = _args(element, compiler, **kw)
-    return f"from_unixtime({a[0]})"
+compiles(unix_to_timestamp, 'starrocks')(_sr_unix_to_timestamp_impl)
 
 
 # ===================================================================
@@ -292,15 +362,15 @@ def _sr_timeofday(element, compiler, **kw):
     return "CAST(now() AS CHAR)"
 
 
-class transaction_timestamp(functions.GenericFunction):
-    type = DateTime()
-    name = 'transaction_timestamp'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class transaction_timestamp(functions.GenericFunction):
+        type = DateTime()
+        name = 'transaction_timestamp'
+        inherit_cache = True
+else:
+    transaction_timestamp = _existing_transaction_timestamp
 
-
-@compiles(transaction_timestamp, 'starrocks')
-def _sr_transaction_timestamp(element, compiler, **kw):
-    return "now()"
+compiles(transaction_timestamp, 'starrocks')(lambda element, compiler, **kw: "now()")
 
 
 # ===================================================================
@@ -346,17 +416,18 @@ def _sr_random(element, compiler, **kw):
     return "rand()"
 
 
-class safe_divide(functions.GenericFunction):
-    type = Numeric()
-    name = 'safe_divide'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class safe_divide(functions.GenericFunction):
+        type = Numeric()
+        name = 'safe_divide'
+        inherit_cache = True
 
-
-@compiles(safe_divide, 'starrocks')
-def _sr_safe_divide(element, compiler, **kw):
-    a = _args(element, compiler, **kw)
-    default = a[2] if len(a) >= 3 else 'NULL'
-    return f"IF({a[1]} = 0, {default}, {a[0]} / {a[1]})"
+    @compiles(safe_divide, 'starrocks')
+    def _sr_safe_divide(element, compiler, **kw):
+        a = _args(element, compiler, **kw)
+        default = a[2] if len(a) >= 3 else 'NULL'
+        return f"IF({a[1]} = 0, {default}, {a[0]} / {a[1]})"
+# else: sql_safe_divide already has a StarRocks handler
 
 
 class setseed(functions.GenericFunction):
@@ -439,49 +510,61 @@ def _sr_chr(element, compiler, **kw):
     return f"char({a[0]})"
 
 
-class ltrim(functions.GenericFunction):
-    """Two-arg form: ``ltrim(s, chars)`` → ``TRIM(LEADING chars FROM s)``.
+if not _HAS_SQLA_FUNCS:
+    class ltrim(functions.GenericFunction):
+        """Two-arg form: ``ltrim(s, chars)`` → ``TRIM(LEADING chars FROM s)``."""
+        type = String()
+        name = 'ltrim'
+        inherit_cache = True
+else:
+    ltrim = _existing_ltrim
 
-    Same caveat as *btrim*: StarRocks trims a string, not a character set.
-    """
-    type = String()
-    name = 'ltrim'
-    inherit_cache = True
 
-
-@compiles(ltrim, 'starrocks')
-def _sr_ltrim(element, compiler, **kw):
+def _sr_ltrim_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     if len(a) >= 2:
         return f"TRIM(LEADING {a[1]} FROM {a[0]})"
     return f"ltrim({a[0]})"
 
 
-class rtrim(functions.GenericFunction):
-    type = String()
-    name = 'rtrim'
-    inherit_cache = True
+compiles(ltrim, 'starrocks')(_sr_ltrim_impl)
 
 
-@compiles(rtrim, 'starrocks')
-def _sr_rtrim(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class rtrim(functions.GenericFunction):
+        type = String()
+        name = 'rtrim'
+        inherit_cache = True
+else:
+    rtrim = _existing_rtrim
+
+
+def _sr_rtrim_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     if len(a) >= 2:
         return f"TRIM(TRAILING {a[1]} FROM {a[0]})"
     return f"rtrim({a[0]})"
 
 
-class strpos(functions.GenericFunction):
-    """``strpos(string, sub)`` → ``locate(sub, string)`` (reversed args)."""
-    type = Integer()
-    name = 'strpos'
-    inherit_cache = True
+compiles(rtrim, 'starrocks')(_sr_rtrim_impl)
 
 
-@compiles(strpos, 'starrocks')
-def _sr_strpos(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class strpos(functions.GenericFunction):
+        """``strpos(string, sub)`` → ``locate(sub, string)`` (reversed args)."""
+        type = Integer()
+        name = 'strpos'
+        inherit_cache = True
+else:
+    strpos = _existing_strpos
+
+
+def _sr_strpos_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"locate({a[1]}, {a[0]})"
+
+
+compiles(strpos, 'starrocks')(_sr_strpos_impl)
 
 
 class to_ascii(functions.GenericFunction):
@@ -545,98 +628,124 @@ def _sr_quote_literal(element, compiler, **kw):
 # Text – custom PlaidCloud functions
 # ===================================================================
 
-class numericize(functions.GenericFunction):
-    """Strip non-numeric characters and cast to DOUBLE."""
-    type = Numeric()
-    name = 'numericize'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class numericize(functions.GenericFunction):
+        """Strip non-numeric characters and cast to DOUBLE."""
+        type = Numeric()
+        name = 'numericize'
+        inherit_cache = True
+# else: sql_numericize already has a StarRocks handler
 
 
-@compiles(numericize, 'starrocks')
-def _sr_numericize(element, compiler, **kw):
-    a = _args(element, compiler, **kw)
-    return (
-        f"CAST(NULLIF(regexp_replace({a[0]}, '[^0-9.eE+-]', ''), '') AS DOUBLE)"
-    )
+if not _HAS_SQLA_FUNCS:
+    @compiles(numericize, 'starrocks')
+    def _sr_numericize(element, compiler, **kw):
+        a = _args(element, compiler, **kw)
+        return (
+            f"CAST(NULLIF(regexp_replace({a[0]}, '[^0-9.eE+-]', ''), '') AS DOUBLE)"
+        )
 
 
-class integerize_round(functions.GenericFunction):
-    """Parse string → round to nearest integer → BIGINT."""
-    type = BigInteger()
-    name = 'integerize_round'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class integerize_round(functions.GenericFunction):
+        """Parse string → round to nearest integer → BIGINT."""
+        type = BigInteger()
+        name = 'integerize_round'
+        inherit_cache = True
+else:
+    integerize_round = _existing_integerize_round
 
 
-@compiles(integerize_round, 'starrocks')
-def _sr_integerize_round(element, compiler, **kw):
+def _sr_integerize_round_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"CAST(round(CAST({a[0]} AS DOUBLE)) AS BIGINT)"
 
 
-class integerize_truncate(functions.GenericFunction):
-    """Parse string → truncate toward zero → BIGINT."""
-    type = BigInteger()
-    name = 'integerize_truncate'
-    inherit_cache = True
+compiles(integerize_round, 'starrocks')(_sr_integerize_round_impl)
 
 
-@compiles(integerize_truncate, 'starrocks')
-def _sr_integerize_truncate(element, compiler, **kw):
-    a = _args(element, compiler, **kw)
-    return f"CAST(truncate(CAST({a[0]} AS DOUBLE), 0) AS BIGINT)"
+if not _HAS_SQLA_FUNCS:
+    class integerize_truncate(functions.GenericFunction):
+        """Parse string → truncate toward zero → BIGINT."""
+        type = BigInteger()
+        name = 'integerize_truncate'
+        inherit_cache = True
+# else: sql_integerize_truncate already has a StarRocks handler
 
 
-class normalize_whitespace(functions.GenericFunction):
-    """Collapse runs of whitespace (including newlines, tabs) to a
-    single space."""
-    type = String()
-    name = 'normalize_whitespace'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    @compiles(integerize_truncate, 'starrocks')
+    def _sr_integerize_truncate(element, compiler, **kw):
+        a = _args(element, compiler, **kw)
+        return f"CAST(truncate(CAST({a[0]} AS DOUBLE), 0) AS BIGINT)"
 
 
-@compiles(normalize_whitespace, 'starrocks')
-def _sr_normalize_whitespace(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class normalize_whitespace(functions.GenericFunction):
+        """Collapse runs of whitespace to a single space."""
+        type = String()
+        name = 'normalize_whitespace'
+        inherit_cache = True
+else:
+    normalize_whitespace = _existing_normalize_whitespace
+
+
+def _sr_normalize_whitespace_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"regexp_replace({a[0]}, '\\\\s+', ' ')"
 
 
-class zfill(functions.GenericFunction):
-    """Pad *string* on the left with zeroes to *length*."""
-    type = String()
-    name = 'zfill'
-    inherit_cache = True
+compiles(normalize_whitespace, 'starrocks')(_sr_normalize_whitespace_impl)
 
 
-@compiles(zfill, 'starrocks')
-def _sr_zfill(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class zfill(functions.GenericFunction):
+        """Pad *string* on the left with zeroes to *length*."""
+        type = String()
+        name = 'zfill'
+        inherit_cache = True
+else:
+    zfill = _existing_zfill
+
+
+def _sr_zfill_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"lpad({a[0]}, {a[1]}, '0')"
 
 
-class slice_string(functions.GenericFunction):
-    """Python-style 0-indexed slicing: ``slice_string(s, start, stop)``
-    → ``substring(s, start+1, stop-start)``."""
-    type = String()
-    name = 'slice_string'
-    inherit_cache = True
+compiles(zfill, 'starrocks')(_sr_zfill_impl)
 
 
-@compiles(slice_string, 'starrocks')
-def _sr_slice_string(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class slice_string(functions.GenericFunction):
+        """Python-style 0-indexed slicing: ``slice_string(s, start, stop)``
+        → ``substring(s, start+1, stop-start)``."""
+        type = String()
+        name = 'slice_string'
+        inherit_cache = True
+else:
+    slice_string = _existing_slice_string
+
+
+def _sr_slice_string_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"substring({a[0]}, {a[1]} + 1, {a[2]} - {a[1]})"
 
 
-class metric_multiply(functions.GenericFunction):
-    """Interpret a string with a metric suffix (K, M, G, etc.) and
-    return the numeric value multiplied by the appropriate factor."""
-    type = Numeric()
-    name = 'metric_multiply'
-    inherit_cache = True
+compiles(slice_string, 'starrocks')(_sr_slice_string_impl)
 
 
-@compiles(metric_multiply, 'starrocks')
-def _sr_metric_multiply(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class metric_multiply(functions.GenericFunction):
+        """Interpret a string with a metric suffix (K, M, G, etc.)."""
+        type = Numeric()
+        name = 'metric_multiply'
+        inherit_cache = True
+else:
+    metric_multiply = _existing_metric_multiply
+
+
+def _sr_metric_multiply_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     v = a[0]
     num = f"CAST(regexp_replace({v}, '[^0-9.eE+-]', '') AS DOUBLE)"
@@ -649,6 +758,9 @@ def _sr_metric_multiply(element, compiler, **kw):
         f" ELSE {num}"
         f" END"
     )
+
+
+compiles(metric_multiply, 'starrocks')(_sr_metric_multiply_impl)
 
 
 # ===================================================================
@@ -825,16 +937,21 @@ def _sr_gen_random_uuid(element, compiler, **kw):
 # Arrays
 # ===================================================================
 
-class string_to_array(functions.GenericFunction):
-    """``string_to_array(text, delim)`` → ``split(text, delim)``."""
-    name = 'string_to_array'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class string_to_array(functions.GenericFunction):
+        """``string_to_array(text, delim)`` → ``split(text, delim)``."""
+        name = 'string_to_array'
+        inherit_cache = True
+else:
+    string_to_array = _existing_string_to_array
 
 
-@compiles(string_to_array, 'starrocks')
-def _sr_string_to_array(element, compiler, **kw):
+def _sr_string_to_array_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"split({a[0]}, {a[1]})"
+
+
+compiles(string_to_array, 'starrocks')(_sr_string_to_array_impl)
 
 
 class array_to_json(functions.GenericFunction):
@@ -1692,31 +1809,39 @@ def _sr_listagg(element, compiler, **kw):
     return f"group_concat({a[0]})"
 
 
-class quantile_cont(functions.GenericFunction):
-    """``quantile_cont(level, expr)`` → ``percentile_cont({level})``
-    within StarRocks's window-function form.  Best-effort: uses
-    ``percentile_approx(expr, level)`` as a scalar aggregate."""
-    type = Numeric()
-    name = 'quantile_cont'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class quantile_cont(functions.GenericFunction):
+        """``quantile_cont(level, expr)`` → ``percentile_approx(expr, level)``."""
+        type = Numeric()
+        name = 'quantile_cont'
+        inherit_cache = True
+else:
+    quantile_cont = _existing_quantile_cont
 
 
-@compiles(quantile_cont, 'starrocks')
-def _sr_quantile_cont(element, compiler, **kw):
+def _sr_quantile_cont_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"percentile_approx({a[1]}, {a[0]})"
 
 
-class quantile_disc(functions.GenericFunction):
-    type = Numeric()
-    name = 'quantile_disc'
-    inherit_cache = True
+compiles(quantile_cont, 'starrocks')(_sr_quantile_cont_impl)
 
 
-@compiles(quantile_disc, 'starrocks')
-def _sr_quantile_disc(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class quantile_disc(functions.GenericFunction):
+        type = Numeric()
+        name = 'quantile_disc'
+        inherit_cache = True
+else:
+    quantile_disc = _existing_quantile_disc
+
+
+def _sr_quantile_disc_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"percentile_approx({a[1]}, {a[0]})"
+
+
+compiles(quantile_disc, 'starrocks')(_sr_quantile_disc_impl)
 
 
 # ===================================================================
@@ -2018,11 +2143,11 @@ def _sr_to_day_of_month(element, compiler, **kw):
 
 
 class to_day_of_week(functions.GenericFunction):
-    """``to_day_of_week(d)`` → ``dayofweek(d)``.
+    """``to_day_of_week(d)`` – Databend returns 1=Monday…7=Sunday.
 
-    Note: Databend returns 1=Monday…7=Sunday; StarRocks ``dayofweek``
-    returns 1=Sunday…7=Saturday (MySQL convention).  If Monday-based
-    numbering is required, post-process the result.
+    StarRocks ``dayofweek`` returns 1=Sunday…7=Saturday (MySQL convention).
+    We compensate: ``(dayofweek(d) + 5) % 7 + 1`` converts MySQL numbering
+    to ISO/Databend numbering (1=Monday…7=Sunday).
     """
     type = Integer()
     name = 'to_day_of_week'
@@ -2032,7 +2157,8 @@ class to_day_of_week(functions.GenericFunction):
 @compiles(to_day_of_week, 'starrocks')
 def _sr_to_day_of_week(element, compiler, **kw):
     a = _args(element, compiler, **kw)
-    return f"dayofweek({a[0]})"
+    # MySQL: Sun=1..Sat=7  →  ISO: Mon=1..Sun=7
+    return f"((dayofweek({a[0]}) + 5) %% 7 + 1)"
 
 
 class to_day_of_year(functions.GenericFunction):
@@ -2583,30 +2709,36 @@ def _sr_median_tdigest(element, compiler, **kw):
     return f"percentile_approx({a[0]}, 0.5)"
 
 
-class quantile_tdigest(functions.GenericFunction):
-    """``quantile_tdigest(level, x)`` → ``percentile_approx(x, level)``."""
-    type = Numeric()
-    name = 'quantile_tdigest'
-    inherit_cache = True
+if not _HAS_SQLA_FUNCS:
+    class quantile_tdigest(functions.GenericFunction):
+        """``quantile_tdigest(level, x)`` → ``percentile_approx(x, level)``."""
+        type = Numeric()
+        name = 'quantile_tdigest'
+        inherit_cache = True
+else:
+    quantile_tdigest = _existing_quantile_tdigest
 
 
-@compiles(quantile_tdigest, 'starrocks')
-def _sr_quantile_tdigest(element, compiler, **kw):
+def _sr_quantile_tdigest_impl(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"percentile_approx({a[1]}, {a[0]})"
 
 
-class quantile_tdigest_weighted(functions.GenericFunction):
-    """``quantile_tdigest_weighted(level, x, w)`` – StarRocks has no
-    weighted percentile.  Best-effort: uses ``percentile_approx(x, level)``
-    ignoring the weight argument.  A warning is logged."""
-    type = Numeric()
-    name = 'quantile_tdigest_weighted'
-    inherit_cache = True
+compiles(quantile_tdigest, 'starrocks')(_sr_quantile_tdigest_impl)
 
 
-@compiles(quantile_tdigest_weighted, 'starrocks')
-def _sr_quantile_tdigest_weighted(element, compiler, **kw):
+if not _HAS_SQLA_FUNCS:
+    class quantile_tdigest_weighted(functions.GenericFunction):
+        """``quantile_tdigest_weighted(level, x, w)`` – best-effort:
+        uses ``percentile_approx(x, level)`` ignoring weight."""
+        type = Numeric()
+        name = 'quantile_tdigest_weighted'
+        inherit_cache = True
+else:
+    quantile_tdigest_weighted = _existing_quantile_tdigest_weighted
+
+
+def _sr_quantile_tdigest_weighted_impl(element, compiler, **kw):
     _log.warning(
         "quantile_tdigest_weighted() compiled as percentile_approx() on "
         "StarRocks — weight argument is ignored.  Results may differ "
@@ -2614,6 +2746,9 @@ def _sr_quantile_tdigest_weighted(element, compiler, **kw):
     )
     a = _args(element, compiler, **kw)
     return f"percentile_approx({a[1]}, {a[0]})"
+
+
+compiles(quantile_tdigest_weighted, 'starrocks')(_sr_quantile_tdigest_weighted_impl)
 
 
 class mode(functions.GenericFunction):
@@ -2811,7 +2946,11 @@ def _sr_array_get(element, compiler, **kw):
 
 
 class array_except(functions.GenericFunction):
-    """``array_except(a, b)`` → ``array_difference(a, b)``."""
+    """``array_except(a, b)`` – set-difference: elements in *a* not in *b*.
+
+    StarRocks ``array_difference`` does element-wise numeric subtraction
+    (NOT set difference), so we emulate with ``array_filter`` + lambda.
+    """
     name = 'array_except'
     inherit_cache = True
 
@@ -2819,7 +2958,7 @@ class array_except(functions.GenericFunction):
 @compiles(array_except, 'starrocks')
 def _sr_array_except(element, compiler, **kw):
     a = _args(element, compiler, **kw)
-    return f"array_difference({a[0]}, {a[1]})"
+    return f"array_filter({a[0]}, x -> NOT array_contains({a[1]}, x))"
 
 
 class array_prepend(functions.GenericFunction):
