@@ -64,8 +64,17 @@ def _pg_to_mysql_fmt(pg_fmt: str) -> str:
         py = pg_fmt
     else:
         py = _pg_to_python_fmt(pg_fmt)
-    # Python → MySQL deltas (%I→%h 12-hour, %M→%i minutes, %S→%s seconds)
-    return py.replace('%I', '%h').replace('%M', '%i').replace('%S', '%s')
+    # Python → MySQL deltas.
+    # Order matters: %M (minute) must be replaced BEFORE %B→%M (month name),
+    # otherwise the newly-inserted %M would also be converted to %i.
+    return (
+        py
+        .replace('%A', '%W')   # full weekday name
+        .replace('%I', '%h')   # 12-hour clock
+        .replace('%M', '%i')   # minutes (Python %M → MySQL %i)
+        .replace('%B', '%M')   # full month name (Python %B → MySQL %M)
+        .replace('%S', '%s')   # seconds
+    )
 
 
 def _args(element, compiler, **kw):
@@ -97,8 +106,6 @@ def _bool_case(v: str, *, extras_true: str = '', extras_false: str = '') -> str:
 # ===================================================================
 # Conversions
 # ===================================================================
-
-# --- Conversions: conditional registration to avoid collisions ---
 
 class to_char(functions.GenericFunction):
     type = String()
@@ -301,7 +308,9 @@ class transaction_timestamp(functions.GenericFunction):
     type = DateTime()
     name = 'transaction_timestamp'
     inherit_cache = True
-compiles(transaction_timestamp, 'starrocks')(lambda element, compiler, **kw: "now()")
+@compiles(transaction_timestamp, 'starrocks')
+def _sr_transaction_timestamp(element, compiler, **kw):
+    return "now()"
 
 
 # ===================================================================
