@@ -713,5 +713,419 @@ class TestDefaultDialectUnchanged(unittest.TestCase):
         self.assertIn('arg_max(', sql)
 
 
+# =================================================================
+# Second-pass wrappers
+# =================================================================
+
+class TestDateExtraction(unittest.TestCase):
+    def test_to_day_of_month(self):
+        sql = _sr_sql(func.to_day_of_month(column('d')))
+        self.assertIn('dayofmonth(', sql)
+
+    def test_to_day_of_week(self):
+        sql = _sr_sql(func.to_day_of_week(column('d')))
+        self.assertIn('dayofweek(', sql)
+
+    def test_to_day_of_year(self):
+        sql = _sr_sql(func.to_day_of_year(column('d')))
+        self.assertIn('dayofyear(', sql)
+
+    def test_to_hour(self):
+        sql = _sr_sql(func.to_hour(column('ts')))
+        self.assertIn('hour(', sql)
+
+    def test_to_minute(self):
+        sql = _sr_sql(func.to_minute(column('ts')))
+        self.assertIn('minute(', sql)
+
+    def test_to_second(self):
+        sql = _sr_sql(func.to_second(column('ts')))
+        self.assertIn('second(', sql)
+
+    def test_to_month(self):
+        sql = _sr_sql(func.to_month(column('d')))
+        self.assertIn('month(', sql)
+
+    def test_to_quarter(self):
+        sql = _sr_sql(func.to_quarter(column('d')))
+        self.assertIn('quarter(', sql)
+
+    def test_to_year(self):
+        sql = _sr_sql(func.to_year(column('d')))
+        self.assertIn('year(', sql)
+
+    def test_to_week_of_year(self):
+        sql = _sr_sql(func.to_week_of_year(column('d')))
+        self.assertIn('weekofyear(', sql)
+
+
+class TestDateRounding(unittest.TestCase):
+    def test_to_start_of_second(self):
+        sql = _sr_sql(func.to_start_of_second(column('ts')))
+        self.assertIn("date_trunc('second'", sql)
+
+    def test_to_start_of_five_minutes(self):
+        sql = _sr_sql(func.to_start_of_five_minutes(column('ts')))
+        self.assertIn('from_unixtime', sql)
+        self.assertIn('300', sql)
+
+    def test_to_start_of_ten_minutes(self):
+        sql = _sr_sql(func.to_start_of_ten_minutes(column('ts')))
+        self.assertIn('from_unixtime', sql)
+        self.assertIn('600', sql)
+
+    def test_to_start_of_fifteen_minutes(self):
+        sql = _sr_sql(func.to_start_of_fifteen_minutes(column('ts')))
+        self.assertIn('from_unixtime', sql)
+        self.assertIn('900', sql)
+
+
+class TestDateOther(unittest.TestCase):
+    def test_add_months(self):
+        sql = _sr_sql(func.add_months(column('d'), 3))
+        self.assertIn('months_add(', sql)
+
+    def test_time_slot(self):
+        sql = _sr_sql(func.time_slot(column('ts')))
+        self.assertIn('from_unixtime', sql)
+        self.assertIn('1800', sql)
+
+    def test_to_datetime_one_arg(self):
+        sql = _sr_sql(func.to_datetime(column('s')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('DATETIME', sql)
+
+    def test_to_datetime_two_args(self):
+        sql = _sr_sql(func.to_datetime(column('s'), 'YYYY-MM-DD'))
+        self.assertIn('str_to_date', sql)
+
+    def test_try_to_timestamp(self):
+        sql = _sr_sql(func.try_to_timestamp(column('s')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('DATETIME', sql)
+
+    def test_try_to_datetime(self):
+        sql = _sr_sql(func.try_to_datetime(column('s')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('DATETIME', sql)
+
+    def test_next_day(self):
+        sql = _sr_sql(func.next_day(column('d'), 'Monday'))
+        self.assertIn('next_day(', sql)
+
+    def test_previous_day(self):
+        sql = _sr_sql(func.previous_day(column('d'), 'Monday'))
+        self.assertIn('previous_day(', sql)
+
+
+class TestStringAliases(unittest.TestCase):
+    def test_mid_three_args(self):
+        sql = _sr_sql(func.mid(column('s'), 1, 5))
+        self.assertIn('substring(', sql)
+
+    def test_trim_both(self):
+        sql = _sr_sql(func.trim_both(column('s'), 'x'))
+        self.assertIn('TRIM(BOTH', sql)
+
+    def test_trim_leading(self):
+        sql = _sr_sql(func.trim_leading(column('s'), 'x'))
+        self.assertIn('TRIM(LEADING', sql)
+
+    def test_trim_trailing(self):
+        sql = _sr_sql(func.trim_trailing(column('s'), 'x'))
+        self.assertIn('TRIM(TRAILING', sql)
+
+    def test_trim_both_one_arg(self):
+        sql = _sr_sql(func.trim_both(column('s')))
+        self.assertIn('TRIM(', sql)
+
+    def test_trim_leading_one_arg(self):
+        sql = _sr_sql(func.trim_leading(column('s')))
+        self.assertIn('ltrim(', sql)
+
+    def test_trim_trailing_one_arg(self):
+        sql = _sr_sql(func.trim_trailing(column('s')))
+        self.assertIn('rtrim(', sql)
+
+
+class TestNumericAdditional2(unittest.TestCase):
+    def test_intdiv(self):
+        sql = _sr_sql(func.intdiv(column('a'), column('b')))
+        self.assertIn('floor(', sql)
+
+
+class TestConversionAdditional2(unittest.TestCase):
+    def test_to_text(self):
+        sql = _sr_sql(func.to_text(column('v')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('VARCHAR', sql)
+
+    def test_to_decimal_three_args(self):
+        sql = _sr_sql(func.to_decimal(column('v'), 10, 2))
+        self.assertIn('CAST(', sql)
+        self.assertIn('DECIMAL(', sql)
+
+    def test_to_decimal_one_arg(self):
+        sql = _sr_sql(func.to_decimal(column('v')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('DECIMAL', sql)
+
+
+class TestConditionalAdditional2(unittest.TestCase):
+    def test_is_error(self):
+        sql = _sr_sql(func.is_error(column('v')))
+        self.assertEqual(sql, 'FALSE')
+
+    def test_greatest_ignore_nulls_two(self):
+        sql = _sr_sql(func.greatest_ignore_nulls(column('a'), column('b')))
+        self.assertIn('CASE', sql)
+        self.assertIn('IS NULL', sql)
+
+    def test_greatest_ignore_nulls_three(self):
+        sql = _sr_sql(func.greatest_ignore_nulls(column('a'), column('b'), column('c')))
+        self.assertIn('CASE', sql)
+
+    def test_least_ignore_nulls_two(self):
+        sql = _sr_sql(func.least_ignore_nulls(column('a'), column('b')))
+        self.assertIn('CASE', sql)
+        self.assertIn('IS NULL', sql)
+
+    def test_least_ignore_nulls_three(self):
+        sql = _sr_sql(func.least_ignore_nulls(column('a'), column('b'), column('c')))
+        self.assertIn('CASE', sql)
+
+
+class TestAggregateAdditional2(unittest.TestCase):
+    def test_median_tdigest(self):
+        sql = _sr_sql(func.median_tdigest(column('v')))
+        self.assertIn('percentile_approx(', sql)
+        self.assertIn('0.5', sql)
+
+    def test_quantile_tdigest(self):
+        sql = _sr_sql(func.quantile_tdigest(0.9, column('v')))
+        self.assertIn('percentile_approx(', sql)
+
+    def test_quantile_tdigest_weighted(self):
+        sql = _sr_sql(func.quantile_tdigest_weighted(0.5, column('v'), column('w')))
+        self.assertIn('percentile_approx(', sql)
+
+    def test_mode_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.mode(column('v')))
+
+    def test_kurtosis_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.kurtosis(column('v')))
+
+    def test_skewness_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.skewness(column('v')))
+
+    def test_json_array_agg(self):
+        sql = _sr_sql(func.json_array_agg(column('v')))
+        self.assertIn('to_json(', sql)
+        self.assertIn('array_agg(', sql)
+
+    def test_json_object_agg(self):
+        sql = _sr_sql(func.json_object_agg(column('k'), column('v')))
+        self.assertIn('to_json(', sql)
+        self.assertIn('map_agg(', sql)
+
+
+class TestArrayAdditional2(unittest.TestCase):
+    def test_array_size(self):
+        sql = _sr_sql(func.array_size(column('a')))
+        self.assertIn('array_length(', sql)
+
+    def test_array_unique(self):
+        sql = _sr_sql(func.array_unique(column('a')))
+        self.assertIn('array_distinct(', sql)
+
+    def test_array_intersection(self):
+        sql = _sr_sql(func.array_intersection(column('a'), column('b')))
+        self.assertIn('array_intersect(', sql)
+
+    def test_array_overlap(self):
+        sql = _sr_sql(func.array_overlap(column('a'), column('b')))
+        self.assertIn('arrays_overlap(', sql)
+
+    def test_array_transform(self):
+        sql = _sr_sql(func.array_transform(column('a'), column('f')))
+        self.assertIn('array_map(', sql)
+
+    def test_array_reverse(self):
+        sql = _sr_sql(func.array_reverse(column('a')))
+        self.assertIn('reverse(', sql)
+
+    def test_contains(self):
+        sql = _sr_sql(func.contains(column('a'), 5))
+        self.assertIn('array_contains(', sql)
+
+    def test_array_get(self):
+        sql = _sr_sql(func.array_get(column('a'), 1))
+        self.assertIn('element_at(', sql)
+
+    def test_array_except(self):
+        sql = _sr_sql(func.array_except(column('a'), column('b')))
+        self.assertIn('array_difference(', sql)
+
+    def test_array_prepend(self):
+        sql = _sr_sql(func.array_prepend(column('a'), 1))
+        self.assertIn('array_concat(', sql)
+
+    def test_array_remove_first(self):
+        sql = _sr_sql(func.array_remove_first(column('a')))
+        self.assertIn('array_slice(', sql)
+
+    def test_array_remove_last(self):
+        sql = _sr_sql(func.array_remove_last(column('a')))
+        self.assertIn('array_slice(', sql)
+        self.assertIn('array_length(', sql)
+
+    def test_array_count_two_args(self):
+        sql = _sr_sql(func.array_count(column('a'), 5))
+        self.assertIn('array_filter(', sql)
+        self.assertIn('array_length(', sql)
+
+    def test_array_count_one_arg(self):
+        sql = _sr_sql(func.array_count(column('a')))
+        self.assertIn('IS NOT NULL', sql)
+
+    def test_array_generate_range(self):
+        sql = _sr_sql(func.array_generate_range(1, 10, 2))
+        self.assertIn('array_generate(', sql)
+
+
+class TestJSONAdditional2(unittest.TestCase):
+    def test_json_path_query_array(self):
+        sql = _sr_sql(func.json_path_query_array(column('j'), '$.arr'))
+        self.assertIn('json_query(', sql)
+
+    def test_json_path_match(self):
+        sql = _sr_sql(func.json_path_match(column('j'), '$.key'))
+        self.assertIn('json_exists(', sql)
+
+    def test_json_pretty(self):
+        sql = _sr_sql(func.json_pretty(column('j')))
+        self.assertIn('CAST(', sql)
+        self.assertIn('VARCHAR', sql)
+
+    def test_get(self):
+        sql = _sr_sql(func.get(column('j'), 'key'))
+        self.assertIn('json_query(', sql)
+
+    def test_get_path(self):
+        sql = _sr_sql(func.get_path(column('j'), '$.a.b'))
+        self.assertIn('json_query(', sql)
+
+
+class TestIPFunctions(unittest.TestCase):
+    def test_ipv4_string_to_num(self):
+        sql = _sr_sql(func.ipv4_string_to_num(column('ip')))
+        self.assertIn('inet_aton(', sql)
+
+    def test_ipv4_num_to_string(self):
+        sql = _sr_sql(func.ipv4_num_to_string(column('n')))
+        self.assertIn('inet_ntoa(', sql)
+
+    def test_try_inet_aton(self):
+        sql = _sr_sql(func.try_inet_aton(column('ip')))
+        self.assertIn('inet_aton(', sql)
+
+    def test_try_inet_ntoa(self):
+        sql = _sr_sql(func.try_inet_ntoa(column('n')))
+        self.assertIn('inet_ntoa(', sql)
+
+    def test_try_ipv4_string_to_num(self):
+        sql = _sr_sql(func.try_ipv4_string_to_num(column('ip')))
+        self.assertIn('inet_aton(', sql)
+
+    def test_try_ipv4_num_to_string(self):
+        sql = _sr_sql(func.try_ipv4_num_to_string(column('n')))
+        self.assertIn('inet_ntoa(', sql)
+
+
+class TestMapFunctions(unittest.TestCase):
+    def test_map_cat(self):
+        sql = _sr_sql(func.map_cat(column('m1'), column('m2')))
+        self.assertIn('map_concat(', sql)
+
+    def test_map_contains_key(self):
+        sql = _sr_sql(func.map_contains_key(column('m'), 'k'))
+        self.assertIn('array_contains(', sql)
+        self.assertIn('map_keys(', sql)
+
+
+class TestHashAdditional2(unittest.TestCase):
+    def test_siphash_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.siphash(column('v')))
+
+    def test_siphash64_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.siphash64(column('v')))
+
+    def test_blake3_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.blake3(column('v')))
+
+    def test_city64withseed_raises(self):
+        with self.assertRaises(CompileError):
+            _sr_sql(func.city64withseed(column('v'), 42))
+
+
+class TestBitmapFunctions(unittest.TestCase):
+    def test_bitmap_and_not(self):
+        sql = _sr_sql(func.bitmap_and_not(column('a'), column('b')))
+        self.assertIn('bitmap_andnot(', sql)
+
+    def test_bitmap_cardinality(self):
+        sql = _sr_sql(func.bitmap_cardinality(column('bm')))
+        self.assertIn('bitmap_count(', sql)
+
+    def test_build_bitmap(self):
+        sql = _sr_sql(func.build_bitmap(column('v')))
+        self.assertIn('bitmap_from_string(', sql)
+
+
+class TestVariantFunctions(unittest.TestCase):
+    def test_to_variant(self):
+        sql = _sr_sql(func.to_variant(column('v')))
+        self.assertIn('parse_json(', sql)
+        self.assertIn('VARCHAR', sql)
+
+    def test_remove_nullable(self):
+        sql = _sr_sql(func.remove_nullable(column('v')))
+        self.assertIn('v', sql)
+
+    def test_to_nullable(self):
+        sql = _sr_sql(func.to_nullable(column('v')))
+        self.assertIn('v', sql)
+
+
+class TestDefaultDialectUnchanged2(unittest.TestCase):
+    """Verify second-pass wrappers don't break PostgreSQL compilation."""
+
+    def test_to_day_of_month_pg(self):
+        sql = _pg_sql(func.to_day_of_month(column('d')))
+        self.assertIn('to_day_of_month(', sql)
+
+    def test_intdiv_pg(self):
+        sql = _pg_sql(func.intdiv(column('a'), column('b')))
+        self.assertIn('intdiv(', sql)
+
+    def test_array_size_pg(self):
+        sql = _pg_sql(func.array_size(column('a')))
+        self.assertIn('array_size(', sql)
+
+    def test_map_cat_pg(self):
+        sql = _pg_sql(func.map_cat(column('m1'), column('m2')))
+        self.assertIn('map_cat(', sql)
+
+    def test_ipv4_string_to_num_pg(self):
+        sql = _pg_sql(func.ipv4_string_to_num(column('ip')))
+        self.assertIn('ipv4_string_to_num(', sql)
+
+
 if __name__ == '__main__':
     unittest.main()

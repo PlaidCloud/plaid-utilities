@@ -1994,3 +1994,1239 @@ class humanize_size(functions.GenericFunction):
 def _sr_humanize_size(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     return f"format_bytes({a[0]})"
+
+
+# ###################################################################
+# Additional Databend function wrappers — second pass
+# ###################################################################
+
+# ===================================================================
+# Date / time – extraction helpers
+# ===================================================================
+
+class to_day_of_month(functions.GenericFunction):
+    """``to_day_of_month(d)`` → ``dayofmonth(d)``."""
+    type = Integer()
+    name = 'to_day_of_month'
+    inherit_cache = True
+
+
+@compiles(to_day_of_month, 'starrocks')
+def _sr_to_day_of_month(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"dayofmonth({a[0]})"
+
+
+class to_day_of_week(functions.GenericFunction):
+    """``to_day_of_week(d)`` → ``dayofweek(d)``.
+
+    Note: Databend returns 1=Monday…7=Sunday; StarRocks ``dayofweek``
+    returns 1=Sunday…7=Saturday (MySQL convention).  If Monday-based
+    numbering is required, post-process the result.
+    """
+    type = Integer()
+    name = 'to_day_of_week'
+    inherit_cache = True
+
+
+@compiles(to_day_of_week, 'starrocks')
+def _sr_to_day_of_week(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"dayofweek({a[0]})"
+
+
+class to_day_of_year(functions.GenericFunction):
+    """``to_day_of_year(d)`` → ``dayofyear(d)``."""
+    type = Integer()
+    name = 'to_day_of_year'
+    inherit_cache = True
+
+
+@compiles(to_day_of_year, 'starrocks')
+def _sr_to_day_of_year(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"dayofyear({a[0]})"
+
+
+class to_hour(functions.GenericFunction):
+    """``to_hour(ts)`` → ``hour(ts)``."""
+    type = Integer()
+    name = 'to_hour'
+    inherit_cache = True
+
+
+@compiles(to_hour, 'starrocks')
+def _sr_to_hour(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"hour({a[0]})"
+
+
+class to_minute(functions.GenericFunction):
+    """``to_minute(ts)`` → ``minute(ts)``."""
+    type = Integer()
+    name = 'to_minute'
+    inherit_cache = True
+
+
+@compiles(to_minute, 'starrocks')
+def _sr_to_minute(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"minute({a[0]})"
+
+
+class to_second(functions.GenericFunction):
+    """``to_second(ts)`` → ``second(ts)``."""
+    type = Integer()
+    name = 'to_second'
+    inherit_cache = True
+
+
+@compiles(to_second, 'starrocks')
+def _sr_to_second(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"second({a[0]})"
+
+
+class to_month(functions.GenericFunction):
+    """``to_month(d)`` → ``month(d)``."""
+    type = Integer()
+    name = 'to_month'
+    inherit_cache = True
+
+
+@compiles(to_month, 'starrocks')
+def _sr_to_month(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"month({a[0]})"
+
+
+class to_quarter(functions.GenericFunction):
+    """``to_quarter(d)`` → ``quarter(d)``."""
+    type = Integer()
+    name = 'to_quarter'
+    inherit_cache = True
+
+
+@compiles(to_quarter, 'starrocks')
+def _sr_to_quarter(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"quarter({a[0]})"
+
+
+class to_year(functions.GenericFunction):
+    """``to_year(d)`` → ``year(d)``."""
+    type = Integer()
+    name = 'to_year'
+    inherit_cache = True
+
+
+@compiles(to_year, 'starrocks')
+def _sr_to_year(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"year({a[0]})"
+
+
+class to_week_of_year(functions.GenericFunction):
+    """``to_week_of_year(d)`` → ``weekofyear(d)``."""
+    type = Integer()
+    name = 'to_week_of_year'
+    inherit_cache = True
+
+
+@compiles(to_week_of_year, 'starrocks')
+def _sr_to_week_of_year(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"weekofyear({a[0]})"
+
+
+# ===================================================================
+# Date / time – sub-minute rounding
+# ===================================================================
+
+class to_start_of_second(functions.GenericFunction):
+    """``to_start_of_second(ts)`` → ``date_trunc('second', ts)``."""
+    type = DateTime()
+    name = 'to_start_of_second'
+    inherit_cache = True
+
+
+@compiles(to_start_of_second, 'starrocks')
+def _sr_to_start_of_second(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"date_trunc('second', {a[0]})"
+
+
+class to_start_of_five_minutes(functions.GenericFunction):
+    """``to_start_of_five_minutes(ts)`` – floor to nearest 5-minute boundary."""
+    type = DateTime()
+    name = 'to_start_of_five_minutes'
+    inherit_cache = True
+
+
+@compiles(to_start_of_five_minutes, 'starrocks')
+def _sr_to_start_of_five_minutes(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"from_unixtime(floor(unix_timestamp({a[0]}) / 300) * 300)"
+
+
+class to_start_of_ten_minutes(functions.GenericFunction):
+    """``to_start_of_ten_minutes(ts)`` – floor to nearest 10-minute boundary."""
+    type = DateTime()
+    name = 'to_start_of_ten_minutes'
+    inherit_cache = True
+
+
+@compiles(to_start_of_ten_minutes, 'starrocks')
+def _sr_to_start_of_ten_minutes(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"from_unixtime(floor(unix_timestamp({a[0]}) / 600) * 600)"
+
+
+class to_start_of_fifteen_minutes(functions.GenericFunction):
+    """``to_start_of_fifteen_minutes(ts)`` – floor to nearest 15-minute boundary."""
+    type = DateTime()
+    name = 'to_start_of_fifteen_minutes'
+    inherit_cache = True
+
+
+@compiles(to_start_of_fifteen_minutes, 'starrocks')
+def _sr_to_start_of_fifteen_minutes(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"from_unixtime(floor(unix_timestamp({a[0]}) / 900) * 900)"
+
+
+# ===================================================================
+# Date / time – other
+# ===================================================================
+
+class add_months(functions.GenericFunction):
+    """``add_months(d, n)`` → ``months_add(d, n)``."""
+    type = Date()
+    name = 'add_months'
+    inherit_cache = True
+
+
+@compiles(add_months, 'starrocks')
+def _sr_add_months(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"months_add({a[0]}, {a[1]})"
+
+
+class time_slot(functions.GenericFunction):
+    """``time_slot(ts)`` – floor timestamp to nearest 30-minute boundary."""
+    type = DateTime()
+    name = 'time_slot'
+    inherit_cache = True
+
+
+@compiles(time_slot, 'starrocks')
+def _sr_time_slot(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"from_unixtime(floor(unix_timestamp({a[0]}) / 1800) * 1800)"
+
+
+class to_datetime(functions.GenericFunction):
+    """``to_datetime(s)`` → ``CAST(s AS DATETIME)``."""
+    type = DateTime()
+    name = 'to_datetime'
+    inherit_cache = True
+
+
+@compiles(to_datetime, 'starrocks')
+def _sr_to_datetime(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        fmt = a[1]
+        if fmt.startswith("'") and fmt.endswith("'"):
+            translated = _pg_to_mysql_fmt(fmt[1:-1])
+            return f"str_to_date({a[0]}, '{translated}')"
+        return f"str_to_date({a[0]}, {fmt})"
+    return f"CAST({a[0]} AS DATETIME)"
+
+
+class try_to_timestamp(functions.GenericFunction):
+    """``try_to_timestamp(s)`` – like to_timestamp but returns NULL on
+    failure.  StarRocks CAST already returns NULL on bad input."""
+    type = DateTime()
+    name = 'try_to_timestamp'
+    inherit_cache = True
+
+
+@compiles(try_to_timestamp, 'starrocks')
+def _sr_try_to_timestamp(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        fmt = a[1]
+        if fmt.startswith("'") and fmt.endswith("'"):
+            translated = _pg_to_mysql_fmt(fmt[1:-1])
+            return f"str_to_date({a[0]}, '{translated}')"
+        return f"str_to_date({a[0]}, {fmt})"
+    return f"CAST({a[0]} AS DATETIME)"
+
+
+class try_to_datetime(functions.GenericFunction):
+    """``try_to_datetime(s)`` – alias for try_to_timestamp."""
+    type = DateTime()
+    name = 'try_to_datetime'
+    inherit_cache = True
+
+
+@compiles(try_to_datetime, 'starrocks')
+def _sr_try_to_datetime(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        fmt = a[1]
+        if fmt.startswith("'") and fmt.endswith("'"):
+            translated = _pg_to_mysql_fmt(fmt[1:-1])
+            return f"str_to_date({a[0]}, '{translated}')"
+        return f"str_to_date({a[0]}, {fmt})"
+    return f"CAST({a[0]} AS DATETIME)"
+
+
+class next_day(functions.GenericFunction):
+    """``next_day(d, dow)`` – returns the first date after *d* that falls
+    on the specified day of the week (Sunday=1 … Saturday=7 in StarRocks).
+
+    Note: Databend uses string day names ('Monday', etc.).  The wrapper
+    accepts both numeric and string forms.
+    """
+    type = Date()
+    name = 'next_day'
+    inherit_cache = True
+
+
+@compiles(next_day, 'starrocks')
+def _sr_next_day(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"next_day({a[0]}, {a[1]})"
+
+
+class previous_day(functions.GenericFunction):
+    """``previous_day(d, dow)`` – returns the last date before *d* that
+    falls on the specified day of the week."""
+    type = Date()
+    name = 'previous_day'
+    inherit_cache = True
+
+
+@compiles(previous_day, 'starrocks')
+def _sr_previous_day(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"previous_day({a[0]}, {a[1]})"
+
+
+# ===================================================================
+# String – additional aliases
+# ===================================================================
+
+class mid(functions.GenericFunction):
+    """``mid(s, pos, len)`` → ``substring(s, pos, len)`` (alias)."""
+    type = String()
+    name = 'mid'
+    inherit_cache = True
+
+
+@compiles(mid, 'starrocks')
+def _sr_mid(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 3:
+        return f"substring({a[0]}, {a[1]}, {a[2]})"
+    return f"substring({a[0]}, {a[1]})"
+
+
+class trim_both(functions.GenericFunction):
+    """``trim_both(s [, chars])`` → ``TRIM(BOTH chars FROM s)``."""
+    type = String()
+    name = 'trim_both'
+    inherit_cache = True
+
+
+@compiles(trim_both, 'starrocks')
+def _sr_trim_both(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        return f"TRIM(BOTH {a[1]} FROM {a[0]})"
+    return f"TRIM({a[0]})"
+
+
+class trim_leading(functions.GenericFunction):
+    """``trim_leading(s [, chars])`` → ``TRIM(LEADING chars FROM s)``."""
+    type = String()
+    name = 'trim_leading'
+    inherit_cache = True
+
+
+@compiles(trim_leading, 'starrocks')
+def _sr_trim_leading(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        return f"TRIM(LEADING {a[1]} FROM {a[0]})"
+    return f"ltrim({a[0]})"
+
+
+class trim_trailing(functions.GenericFunction):
+    """``trim_trailing(s [, chars])`` → ``TRIM(TRAILING chars FROM s)``."""
+    type = String()
+    name = 'trim_trailing'
+    inherit_cache = True
+
+
+@compiles(trim_trailing, 'starrocks')
+def _sr_trim_trailing(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        return f"TRIM(TRAILING {a[1]} FROM {a[0]})"
+    return f"rtrim({a[0]})"
+
+
+class split_part(functions.GenericFunction):
+    """``split_part(s, delim, part)`` – exists in both Databend and
+    StarRocks with the same name and semantics.  Register the class
+    so that SQLAlchemy resolves ``func.split_part()`` consistently."""
+    type = String()
+    name = 'split_part'
+    inherit_cache = True
+
+# No @compiles – same name in StarRocks.
+
+
+class regexp_replace(functions.GenericFunction):
+    """``regexp_replace`` exists in both Databend and StarRocks.
+    Register for consistent resolution."""
+    type = String()
+    name = 'regexp_replace'
+    inherit_cache = True
+
+# No @compiles – same name in StarRocks.
+
+
+# ===================================================================
+# Numeric – additional
+# ===================================================================
+
+class intdiv(functions.GenericFunction):
+    """``intdiv(a, b)`` → ``floor(a / b)`` (integer division)."""
+    type = BigInteger()
+    name = 'intdiv'
+    inherit_cache = True
+
+
+@compiles(intdiv, 'starrocks')
+def _sr_intdiv(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"floor({a[0]} / {a[1]})"
+
+
+class crc32(functions.GenericFunction):
+    """``crc32(s)`` – exists in both Databend and StarRocks."""
+    type = BigInteger()
+    name = 'crc32'
+    inherit_cache = True
+
+# No @compiles – same name in StarRocks.
+
+
+# ===================================================================
+# Conversion – additional
+# ===================================================================
+
+class to_text(functions.GenericFunction):
+    """``to_text(x)`` → ``CAST(x AS VARCHAR)`` (alias for to_string)."""
+    type = String()
+    name = 'to_text'
+    inherit_cache = True
+
+
+@compiles(to_text, 'starrocks')
+def _sr_to_text(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"CAST({a[0]} AS VARCHAR)"
+
+
+class to_decimal(functions.GenericFunction):
+    """``to_decimal(x, p, s)`` → ``CAST(x AS DECIMAL(p, s))``.
+
+    Single-arg form falls back to ``CAST(x AS DECIMAL)``.
+    """
+    type = Numeric()
+    name = 'to_decimal'
+    inherit_cache = True
+
+
+@compiles(to_decimal, 'starrocks')
+def _sr_to_decimal(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 3:
+        return f"CAST({a[0]} AS DECIMAL({a[1]}, {a[2]}))"
+    if len(a) >= 2:
+        return f"CAST({a[0]} AS DECIMAL({a[1]}, 0))"
+    return f"CAST({a[0]} AS DECIMAL)"
+
+
+class try_cast(functions.GenericFunction):
+    """``try_cast`` is a Databend function that returns NULL on failure.
+    StarRocks CAST already returns NULL for most type failures, so
+    this is a best-effort pass-through."""
+    name = 'try_cast'
+    inherit_cache = True
+
+# No @compiles – StarRocks CAST is already lenient. Users should
+# use SQLAlchemy's cast() construct directly.
+
+
+# ===================================================================
+# Conditional – additional
+# ===================================================================
+
+class is_error(functions.GenericFunction):
+    """``is_error(expr)`` – Databend error detection.  No StarRocks
+    equivalent; always returns FALSE."""
+    type = Boolean()
+    name = 'is_error'
+    inherit_cache = True
+
+
+@compiles(is_error, 'starrocks')
+def _sr_is_error(element, compiler, **kw):
+    return "FALSE"
+
+
+class greatest_ignore_nulls(functions.GenericFunction):
+    """``greatest_ignore_nulls(a, b, ...)`` – like GREATEST but skips NULLs.
+
+    StarRocks ``GREATEST`` returns NULL if any arg is NULL.  The wrapper
+    builds a CASE chain for 2 args and falls back to a nested COALESCE
+    approach for more args.
+    """
+    name = 'greatest_ignore_nulls'
+    inherit_cache = True
+
+
+@compiles(greatest_ignore_nulls, 'starrocks')
+def _sr_greatest_ignore_nulls(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) == 1:
+        return a[0]
+    if len(a) == 2:
+        return (
+            f"CASE"
+            f" WHEN {a[0]} IS NULL THEN {a[1]}"
+            f" WHEN {a[1]} IS NULL THEN {a[0]}"
+            f" WHEN {a[0]} >= {a[1]} THEN {a[0]}"
+            f" ELSE {a[1]}"
+            f" END"
+        )
+    # For 3+ args: chain pairwise.
+    # greatest_ignore_nulls(a, b, c) →
+    #   greatest_ignore_nulls(greatest_ignore_nulls(a, b), c)
+    # We inline the CASE logic iteratively.
+    result = a[0]
+    for nxt in a[1:]:
+        result = (
+            f"CASE"
+            f" WHEN ({result}) IS NULL THEN {nxt}"
+            f" WHEN {nxt} IS NULL THEN ({result})"
+            f" WHEN ({result}) >= {nxt} THEN ({result})"
+            f" ELSE {nxt}"
+            f" END"
+        )
+    return result
+
+
+class least_ignore_nulls(functions.GenericFunction):
+    """``least_ignore_nulls(a, b, ...)`` – like LEAST but skips NULLs."""
+    name = 'least_ignore_nulls'
+    inherit_cache = True
+
+
+@compiles(least_ignore_nulls, 'starrocks')
+def _sr_least_ignore_nulls(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) == 1:
+        return a[0]
+    if len(a) == 2:
+        return (
+            f"CASE"
+            f" WHEN {a[0]} IS NULL THEN {a[1]}"
+            f" WHEN {a[1]} IS NULL THEN {a[0]}"
+            f" WHEN {a[0]} <= {a[1]} THEN {a[0]}"
+            f" ELSE {a[1]}"
+            f" END"
+        )
+    result = a[0]
+    for nxt in a[1:]:
+        result = (
+            f"CASE"
+            f" WHEN ({result}) IS NULL THEN {nxt}"
+            f" WHEN {nxt} IS NULL THEN ({result})"
+            f" WHEN ({result}) <= {nxt} THEN ({result})"
+            f" ELSE {nxt}"
+            f" END"
+        )
+    return result
+
+
+# ===================================================================
+# Aggregate – additional
+# ===================================================================
+
+class median_tdigest(functions.GenericFunction):
+    """``median_tdigest(x)`` → ``percentile_approx(x, 0.5)``."""
+    type = Numeric()
+    name = 'median_tdigest'
+    inherit_cache = True
+
+
+@compiles(median_tdigest, 'starrocks')
+def _sr_median_tdigest(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"percentile_approx({a[0]}, 0.5)"
+
+
+class quantile_tdigest(functions.GenericFunction):
+    """``quantile_tdigest(level, x)`` → ``percentile_approx(x, level)``."""
+    type = Numeric()
+    name = 'quantile_tdigest'
+    inherit_cache = True
+
+
+@compiles(quantile_tdigest, 'starrocks')
+def _sr_quantile_tdigest(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"percentile_approx({a[1]}, {a[0]})"
+
+
+class quantile_tdigest_weighted(functions.GenericFunction):
+    """``quantile_tdigest_weighted(level, x, w)`` – StarRocks has no
+    weighted percentile.  Best-effort: uses ``percentile_approx(x, level)``
+    ignoring the weight argument.  A warning is logged."""
+    type = Numeric()
+    name = 'quantile_tdigest_weighted'
+    inherit_cache = True
+
+
+@compiles(quantile_tdigest_weighted, 'starrocks')
+def _sr_quantile_tdigest_weighted(element, compiler, **kw):
+    _log.warning(
+        "quantile_tdigest_weighted() compiled as percentile_approx() on "
+        "StarRocks — weight argument is ignored.  Results may differ "
+        "from Databend."
+    )
+    a = _args(element, compiler, **kw)
+    return f"percentile_approx({a[1]}, {a[0]})"
+
+
+class mode(functions.GenericFunction):
+    """``mode(x)`` – returns the most frequent value.  No direct
+    StarRocks equivalent.  Compilation raises ``CompileError``."""
+    name = 'mode'
+    inherit_cache = True
+
+
+@compiles(mode, 'starrocks')
+def _sr_mode(element, compiler, **kw):
+    raise CompileError(
+        "mode() is not available in StarRocks.  Use a subquery with "
+        "GROUP BY + COUNT + ORDER BY + LIMIT 1 to find the most "
+        "frequent value."
+    )
+
+
+class kurtosis(functions.GenericFunction):
+    """``kurtosis(x)`` – not available in StarRocks."""
+    type = Numeric()
+    name = 'kurtosis'
+    inherit_cache = True
+
+
+@compiles(kurtosis, 'starrocks')
+def _sr_kurtosis(element, compiler, **kw):
+    raise CompileError(
+        "kurtosis() is not available in StarRocks."
+    )
+
+
+class skewness(functions.GenericFunction):
+    """``skewness(x)`` – not available in StarRocks."""
+    type = Numeric()
+    name = 'skewness'
+    inherit_cache = True
+
+
+@compiles(skewness, 'starrocks')
+def _sr_skewness(element, compiler, **kw):
+    raise CompileError(
+        "skewness() is not available in StarRocks."
+    )
+
+
+class json_array_agg(functions.GenericFunction):
+    """``json_array_agg(x)`` → ``to_json(array_agg(x))``."""
+    type = String()
+    name = 'json_array_agg'
+    inherit_cache = True
+
+
+@compiles(json_array_agg, 'starrocks')
+def _sr_json_array_agg(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"to_json(array_agg({a[0]}))"
+
+
+class json_object_agg(functions.GenericFunction):
+    """``json_object_agg(key, value)`` → ``to_json(map_agg(key, value))``."""
+    type = String()
+    name = 'json_object_agg'
+    inherit_cache = True
+
+
+@compiles(json_object_agg, 'starrocks')
+def _sr_json_object_agg(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"to_json(map_agg({a[0]}, {a[1]}))"
+
+
+# ===================================================================
+# Array – additional
+# ===================================================================
+
+class array_size(functions.GenericFunction):
+    """``array_size(arr)`` → ``array_length(arr)``."""
+    type = Integer()
+    name = 'array_size'
+    inherit_cache = True
+
+
+@compiles(array_size, 'starrocks')
+def _sr_array_size(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_length({a[0]})"
+
+
+class array_unique(functions.GenericFunction):
+    """``array_unique(arr)`` → ``array_distinct(arr)``."""
+    name = 'array_unique'
+    inherit_cache = True
+
+
+@compiles(array_unique, 'starrocks')
+def _sr_array_unique(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_distinct({a[0]})"
+
+
+class array_intersection(functions.GenericFunction):
+    """``array_intersection(a, b)`` → ``array_intersect(a, b)``."""
+    name = 'array_intersection'
+    inherit_cache = True
+
+
+@compiles(array_intersection, 'starrocks')
+def _sr_array_intersection(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_intersect({a[0]}, {a[1]})"
+
+
+class array_overlap(functions.GenericFunction):
+    """``array_overlap(a, b)`` → ``arrays_overlap(a, b)``."""
+    type = Boolean()
+    name = 'array_overlap'
+    inherit_cache = True
+
+
+@compiles(array_overlap, 'starrocks')
+def _sr_array_overlap(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"arrays_overlap({a[0]}, {a[1]})"
+
+
+class array_transform(functions.GenericFunction):
+    """``array_transform(arr, lambda)`` → ``array_map(arr, lambda)``.
+
+    Note: Lambda-expression translation is not always possible through
+    SQLAlchemy.  This wrapper emits ``array_map(...)`` with the args
+    in their original order.  If the lambda syntax does not compile
+    correctly, restructure the query to use StarRocks lambda syntax
+    directly.
+    """
+    name = 'array_transform'
+    inherit_cache = True
+
+
+@compiles(array_transform, 'starrocks')
+def _sr_array_transform(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_map({', '.join(a)})"
+
+
+class array_flatten(functions.GenericFunction):
+    """``array_flatten(arr)`` – flatten nested arrays.
+
+    StarRocks has ``array_flatten`` since 3.3+.  Falls through with
+    the same name.
+    """
+    name = 'array_flatten'
+    inherit_cache = True
+
+# No @compiles – same name in StarRocks 3.3+.
+
+
+class array_reverse(functions.GenericFunction):
+    """``array_reverse(arr)`` – reverse array element order.
+    StarRocks has ``reverse()`` for arrays."""
+    name = 'array_reverse'
+    inherit_cache = True
+
+
+@compiles(array_reverse, 'starrocks')
+def _sr_array_reverse(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"reverse({a[0]})"
+
+
+class contains(functions.GenericFunction):
+    """``contains(arr, val)`` → ``array_contains(arr, val)``
+    (Databend alias for array_contains)."""
+    type = Boolean()
+    name = 'contains'
+    inherit_cache = True
+
+
+@compiles(contains, 'starrocks')
+def _sr_contains(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_contains({a[0]}, {a[1]})"
+
+
+class array_get(functions.GenericFunction):
+    """``array_get(arr, idx)`` → ``element_at(arr, idx)``."""
+    name = 'array_get'
+    inherit_cache = True
+
+
+@compiles(array_get, 'starrocks')
+def _sr_array_get(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"element_at({a[0]}, {a[1]})"
+
+
+class array_except(functions.GenericFunction):
+    """``array_except(a, b)`` → ``array_difference(a, b)``."""
+    name = 'array_except'
+    inherit_cache = True
+
+
+@compiles(array_except, 'starrocks')
+def _sr_array_except(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_difference({a[0]}, {a[1]})"
+
+
+class array_prepend(functions.GenericFunction):
+    """``array_prepend(arr, val)`` → ``array_concat([val], arr)``.
+
+    Databend prepends *val* to *arr*.  StarRocks has no direct
+    ``array_prepend``; we emulate with ``array_concat``.
+    """
+    name = 'array_prepend'
+    inherit_cache = True
+
+
+@compiles(array_prepend, 'starrocks')
+def _sr_array_prepend(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_concat([{a[1]}], {a[0]})"
+
+
+class array_remove_first(functions.GenericFunction):
+    """``array_remove_first(arr)`` → ``array_slice(arr, 2)``
+    (skip the first element)."""
+    name = 'array_remove_first'
+    inherit_cache = True
+
+
+@compiles(array_remove_first, 'starrocks')
+def _sr_array_remove_first(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_slice({a[0]}, 2)"
+
+
+class array_remove_last(functions.GenericFunction):
+    """``array_remove_last(arr)`` → ``array_slice(arr, 1, array_length(arr) - 1)``."""
+    name = 'array_remove_last'
+    inherit_cache = True
+
+
+@compiles(array_remove_last, 'starrocks')
+def _sr_array_remove_last(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_slice({a[0]}, 1, array_length({a[0]}) - 1)"
+
+
+class array_count(functions.GenericFunction):
+    """``array_count(arr, val)`` → ``array_length(array_filter(arr, x -> x = val))``.
+
+    Simplified version: if only one arg, count non-NULL elements.
+    """
+    type = Integer()
+    name = 'array_count'
+    inherit_cache = True
+
+
+@compiles(array_count, 'starrocks')
+def _sr_array_count(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    if len(a) >= 2:
+        return f"array_length(array_filter({a[0]}, x -> x = {a[1]}))"
+    # Count non-NULL elements
+    return f"array_length(array_filter({a[0]}, x -> x IS NOT NULL))"
+
+
+class array_generate_range(functions.GenericFunction):
+    """``array_generate_range(start, stop [, step])`` → ``array_generate(start, stop [, step])``."""
+    name = 'array_generate_range'
+    inherit_cache = True
+
+
+@compiles(array_generate_range, 'starrocks')
+def _sr_array_generate_range(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_generate({', '.join(a)})"
+
+
+# ===================================================================
+# JSON – additional
+# ===================================================================
+
+class json_path_query_array(functions.GenericFunction):
+    """``json_path_query_array(json, path)`` → ``json_query(json, path)``
+    (best-effort; StarRocks json_query returns a JSON value)."""
+    type = String()
+    name = 'json_path_query_array'
+    inherit_cache = True
+
+
+@compiles(json_path_query_array, 'starrocks')
+def _sr_json_path_query_array(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"json_query({a[0]}, {a[1]})"
+
+
+class json_path_match(functions.GenericFunction):
+    """``json_path_match(json, path)`` – Databend path-predicate match.
+    No direct StarRocks equivalent.  Best-effort: test json_exists."""
+    type = Boolean()
+    name = 'json_path_match'
+    inherit_cache = True
+
+
+@compiles(json_path_match, 'starrocks')
+def _sr_json_path_match(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"json_exists({a[0]}, {a[1]})"
+
+
+class json_pretty(functions.GenericFunction):
+    """``json_pretty(json)`` – no StarRocks equivalent; falls back to
+    casting to string."""
+    type = String()
+    name = 'json_pretty'
+    inherit_cache = True
+
+
+@compiles(json_pretty, 'starrocks')
+def _sr_json_pretty(element, compiler, **kw):
+    _log.warning(
+        "json_pretty() has no StarRocks equivalent — falling back to "
+        "CAST AS VARCHAR which does not produce formatted output."
+    )
+    a = _args(element, compiler, **kw)
+    return f"CAST({a[0]} AS VARCHAR)"
+
+
+class get(functions.GenericFunction):
+    """``get(json, key)`` → ``json_query(json, concat('$.', key))``
+    (Databend semi-structured access)."""
+    type = String()
+    name = 'get'
+    inherit_cache = True
+
+
+@compiles(get, 'starrocks')
+def _sr_get(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    k = a[1]
+    if k.startswith("'") and k.endswith("'"):
+        return f"json_query({a[0]}, '$.{k[1:-1]}')"
+    return f"json_query({a[0]}, concat('$.', {k}))"
+
+
+class get_path(functions.GenericFunction):
+    """``get_path(json, path)`` → ``json_query(json, path)``."""
+    type = String()
+    name = 'get_path'
+    inherit_cache = True
+
+
+@compiles(get_path, 'starrocks')
+def _sr_get_path(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"json_query({a[0]}, {a[1]})"
+
+
+# ===================================================================
+# IP address functions
+# ===================================================================
+
+class ipv4_string_to_num(functions.GenericFunction):
+    """``ipv4_string_to_num(s)`` → ``inet_aton(s)``."""
+    type = BigInteger()
+    name = 'ipv4_string_to_num'
+    inherit_cache = True
+
+
+@compiles(ipv4_string_to_num, 'starrocks')
+def _sr_ipv4_string_to_num(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_aton({a[0]})"
+
+
+class ipv4_num_to_string(functions.GenericFunction):
+    """``ipv4_num_to_string(n)`` → ``inet_ntoa(n)``."""
+    type = String()
+    name = 'ipv4_num_to_string'
+    inherit_cache = True
+
+
+@compiles(ipv4_num_to_string, 'starrocks')
+def _sr_ipv4_num_to_string(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_ntoa({a[0]})"
+
+
+class try_inet_aton(functions.GenericFunction):
+    """``try_inet_aton(s)`` → ``inet_aton(s)`` (best-effort; StarRocks
+    returns NULL on invalid input)."""
+    type = BigInteger()
+    name = 'try_inet_aton'
+    inherit_cache = True
+
+
+@compiles(try_inet_aton, 'starrocks')
+def _sr_try_inet_aton(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_aton({a[0]})"
+
+
+class try_inet_ntoa(functions.GenericFunction):
+    """``try_inet_ntoa(n)`` → ``inet_ntoa(n)``."""
+    type = String()
+    name = 'try_inet_ntoa'
+    inherit_cache = True
+
+
+@compiles(try_inet_ntoa, 'starrocks')
+def _sr_try_inet_ntoa(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_ntoa({a[0]})"
+
+
+class try_ipv4_string_to_num(functions.GenericFunction):
+    """``try_ipv4_string_to_num(s)`` → ``inet_aton(s)``."""
+    type = BigInteger()
+    name = 'try_ipv4_string_to_num'
+    inherit_cache = True
+
+
+@compiles(try_ipv4_string_to_num, 'starrocks')
+def _sr_try_ipv4_string_to_num(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_aton({a[0]})"
+
+
+class try_ipv4_num_to_string(functions.GenericFunction):
+    """``try_ipv4_num_to_string(n)`` → ``inet_ntoa(n)``."""
+    type = String()
+    name = 'try_ipv4_num_to_string'
+    inherit_cache = True
+
+
+@compiles(try_ipv4_num_to_string, 'starrocks')
+def _sr_try_ipv4_num_to_string(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"inet_ntoa({a[0]})"
+
+
+# ===================================================================
+# Map functions
+# ===================================================================
+
+class map_cat(functions.GenericFunction):
+    """``map_cat(m1, m2)`` → ``map_concat(m1, m2)``."""
+    name = 'map_cat'
+    inherit_cache = True
+
+
+@compiles(map_cat, 'starrocks')
+def _sr_map_cat(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"map_concat({', '.join(a)})"
+
+
+class map_contains_key(functions.GenericFunction):
+    """``map_contains_key(m, k)`` → ``array_contains(map_keys(m), k)``."""
+    type = Boolean()
+    name = 'map_contains_key'
+    inherit_cache = True
+
+
+@compiles(map_contains_key, 'starrocks')
+def _sr_map_contains_key(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"array_contains(map_keys({a[0]}), {a[1]})"
+
+
+# ===================================================================
+# Hash – additional (CompileError for missing algorithms)
+# ===================================================================
+
+class siphash(functions.GenericFunction):
+    """``siphash(x)`` – not available in StarRocks."""
+    type = BigInteger()
+    name = 'siphash'
+    inherit_cache = True
+
+
+@compiles(siphash, 'starrocks')
+def _sr_siphash(element, compiler, **kw):
+    raise CompileError(
+        "siphash() is not available in StarRocks.  Use "
+        "func.murmur_hash3_32() or func.xx_hash3_64() as alternatives."
+    )
+
+
+class siphash64(functions.GenericFunction):
+    """``siphash64(x)`` – not available in StarRocks."""
+    type = BigInteger()
+    name = 'siphash64'
+    inherit_cache = True
+
+
+@compiles(siphash64, 'starrocks')
+def _sr_siphash64(element, compiler, **kw):
+    raise CompileError(
+        "siphash64() is not available in StarRocks.  Use "
+        "func.xx_hash3_64() as an alternative 64-bit hash."
+    )
+
+
+class blake3(functions.GenericFunction):
+    """``blake3(x)`` – not available in StarRocks."""
+    type = String()
+    name = 'blake3'
+    inherit_cache = True
+
+
+@compiles(blake3, 'starrocks')
+def _sr_blake3(element, compiler, **kw):
+    raise CompileError(
+        "blake3() is not available in StarRocks.  Use func.md5() "
+        "or func.sha2(x, 256) as alternatives."
+    )
+
+
+class city64withseed(functions.GenericFunction):
+    """``city64withseed(x, seed)`` – not available in StarRocks."""
+    type = BigInteger()
+    name = 'city64withseed'
+    inherit_cache = True
+
+
+@compiles(city64withseed, 'starrocks')
+def _sr_city64withseed(element, compiler, **kw):
+    raise CompileError(
+        "city64withseed() is not available in StarRocks.  Use "
+        "func.xx_hash3_64() as an alternative 64-bit hash."
+    )
+
+
+# ===================================================================
+# Bitmap functions – name differences
+# ===================================================================
+
+class bitmap_and_not(functions.GenericFunction):
+    """``bitmap_and_not(a, b)`` → ``bitmap_andnot(a, b)``."""
+    name = 'bitmap_and_not'
+    inherit_cache = True
+
+
+@compiles(bitmap_and_not, 'starrocks')
+def _sr_bitmap_and_not(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"bitmap_andnot({a[0]}, {a[1]})"
+
+
+class bitmap_cardinality(functions.GenericFunction):
+    """``bitmap_cardinality(bm)`` → ``bitmap_count(bm)``."""
+    type = BigInteger()
+    name = 'bitmap_cardinality'
+    inherit_cache = True
+
+
+@compiles(bitmap_cardinality, 'starrocks')
+def _sr_bitmap_cardinality(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"bitmap_count({a[0]})"
+
+
+class build_bitmap(functions.GenericFunction):
+    """``build_bitmap(arr)`` → ``bitmap_from_string(arr)``
+    (best-effort; input format may differ)."""
+    name = 'build_bitmap'
+    inherit_cache = True
+
+
+@compiles(build_bitmap, 'starrocks')
+def _sr_build_bitmap(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"bitmap_from_string({a[0]})"
+
+
+# ===================================================================
+# VARIANT / semi-structured – pass-through or CompileError
+# ===================================================================
+
+class to_variant(functions.GenericFunction):
+    """``to_variant(x)`` – Databend VARIANT constructor.
+    StarRocks has no VARIANT type; best-effort: cast to JSON."""
+    type = String()
+    name = 'to_variant'
+    inherit_cache = True
+
+
+@compiles(to_variant, 'starrocks')
+def _sr_to_variant(element, compiler, **kw):
+    a = _args(element, compiler, **kw)
+    return f"parse_json(CAST({a[0]} AS VARCHAR))"
+
+
+class remove_nullable(functions.GenericFunction):
+    """``remove_nullable(x)`` → ``x`` (pass through, type hint only)."""
+    name = 'remove_nullable'
+    inherit_cache = True
+
+
+@compiles(remove_nullable, 'starrocks')
+def _sr_remove_nullable(element, compiler, **kw):
+    return _args(element, compiler, **kw)[0]
+
+
+class to_nullable(functions.GenericFunction):
+    """``to_nullable(x)`` → ``x`` (pass through, type hint only)."""
+    name = 'to_nullable'
+    inherit_cache = True
+
+
+@compiles(to_nullable, 'starrocks')
+def _sr_to_nullable(element, compiler, **kw):
+    return _args(element, compiler, **kw)[0]
