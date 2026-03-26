@@ -2158,7 +2158,7 @@ class to_day_of_week(functions.GenericFunction):
 def _sr_to_day_of_week(element, compiler, **kw):
     a = _args(element, compiler, **kw)
     # MySQL: Sun=1..Sat=7  →  ISO: Mon=1..Sun=7
-    return f"((dayofweek({a[0]}) + 5) %% 7 + 1)"
+    return f"((dayofweek({a[0]}) + 5) % 7 + 1)"
 
 
 class to_day_of_year(functions.GenericFunction):
@@ -2531,7 +2531,11 @@ class regexp_replace(functions.GenericFunction):
 # ===================================================================
 
 class intdiv(functions.GenericFunction):
-    """``intdiv(a, b)`` → ``floor(a / b)`` (integer division)."""
+    """``intdiv(a, b)`` – integer division truncated toward zero.
+
+    Uses ``truncate(a/b, 0)`` instead of ``floor(a/b)`` to match
+    Databend's truncate-toward-zero semantics for negative numbers.
+    """
     type = BigInteger()
     name = 'intdiv'
     inherit_cache = True
@@ -2540,7 +2544,7 @@ class intdiv(functions.GenericFunction):
 @compiles(intdiv, 'starrocks')
 def _sr_intdiv(element, compiler, **kw):
     a = _args(element, compiler, **kw)
-    return f"floor({a[0]} / {a[1]})"
+    return f"truncate({a[0]} / {a[1]}, 0)"
 
 
 class crc32(functions.GenericFunction):

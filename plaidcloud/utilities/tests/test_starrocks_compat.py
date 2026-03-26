@@ -738,7 +738,9 @@ class TestDateExtraction(unittest.TestCase):
     def test_to_day_of_week(self):
         sql = _sr_sql(func.to_day_of_week(column('d')))
         self.assertIn('dayofweek(', sql)
-        # Verify Monday-based compensation formula
+        # Verify Monday-based compensation formula with modulo
+        self.assertIn('% 7', sql)
+        self.assertNotIn('%%', sql)  # f-string bug guard
         self.assertIn('+ 5', sql)
         self.assertIn('+ 1', sql)
 
@@ -867,7 +869,8 @@ class TestStringAliases(unittest.TestCase):
 class TestNumericAdditional2(unittest.TestCase):
     def test_intdiv(self):
         sql = _sr_sql(func.intdiv(column('a'), column('b')))
-        self.assertIn('floor(', sql)
+        # truncate toward zero (not floor, which rounds toward -inf)
+        self.assertIn('truncate(', sql)
 
 
 class TestConversionAdditional2(unittest.TestCase):
