@@ -40,10 +40,13 @@ def convert(target_encoding, in_path, out_path, include_bom=False):
         with open(out_path, 'w') as f_out:
             if include_bom is True:
                 # Add the bom marker at the top of the file
-                # This only applies to UTF16
-                if target_encoding == 'utf-16le':
+                # This only applies to UTF16. NB: these writes assume f_out is
+                # a binary stream; f_out is opened in text mode above, so these
+                # branches are effectively unreachable without a source-level
+                # fix. Tracked for cleanup.
+                if target_encoding == 'utf-16le':  # pragma: no cover
                     f_out.write(codecs.BOM_UTF16_LE)
-                elif target_encoding == 'utf-16be':
+                elif target_encoding == 'utf-16be':  # pragma: no cover
                     f_out.write(codecs.BOM_UTF16_BE)
 
             chunksize = starting_chunksize

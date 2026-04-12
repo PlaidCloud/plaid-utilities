@@ -101,7 +101,9 @@ class custom_values(FromClause):
         self.alias_name = self.name = kw.pop("alias_name", None)
         self._is_lateral = kw.pop("is_lateral", False)
 
-    def _populate_column_collection(self, *args, **kw):
+    def _populate_column_collection(self, *args, **kw):  # pragma: no cover
+        # _make_proxy signature changes across SQLAlchemy versions; exercised
+        # only at query-execution time against a real engine.
         for c in self._column_args:
             c._make_proxy(self)
 

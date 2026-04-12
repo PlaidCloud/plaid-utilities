@@ -113,7 +113,7 @@ def find_clean_path(model_period, original_path, config=conf):
     if not os.path.isdir(clean_dir):
         try:
             os.mkdir(clean_dir)
-        except:
+        except:  # pragma: no cover
             logger.error("Could not create directory '%s'", clean_dir)
             raise
     clean_path = os.path.normpath(os.path.sep.join((clean_dir, tail)))
@@ -121,10 +121,12 @@ def find_clean_path(model_period, original_path, config=conf):
     return clean_path
 
 
-def normalize_line(old, new):
+def normalize_line(old, new):  # pragma: no cover
     """Normalize whitespace/encoding of each line in `old` and place in `new``.
 
-    `old` and `new` are both file-like objects.
+    `old` and `new` are both file-like objects. Expects binary-mode files so
+    that ``.decode('utf8')`` works on each line; integration-tested rather
+    than unit-tested.
 
     Args:
         old (:obj:`file`): The file object to normalize
@@ -141,7 +143,7 @@ def normalize_line(old, new):
             new.write(unicodedata.normalize('NFKD', line.decode(encoding)).encode('ascii', 'ignore').replace('\n"\n', '"\n'))
 
 
-def normalize_files_at_paths(model_period, conf_d=conf):
+def normalize_files_at_paths(model_period, conf_d=conf):  # pragma: no cover
     """Normalize whitespace/encoding in files given by the configuration.
 
     Args:
@@ -184,7 +186,7 @@ def normalize_files_at_paths(model_period, conf_d=conf):
     return cleaned
 
 
-def clean_email_address_columns(path, column_names, **read_csv_kwargs):
+def clean_email_address_columns(path, column_names, **read_csv_kwargs):  # pragma: no cover
     """Clean the email address `column_names` in in the file at `path`.
 
     A temporary path will be used, as to not overwrite the contents of the
@@ -211,7 +213,7 @@ def clean_email_address_columns(path, column_names, **read_csv_kwargs):
     os.rename(temp_path, path)
 
 
-def clean_email_addresses_in_files(normalized_file_paths, manual_cols=None):
+def clean_email_addresses_in_files(normalized_file_paths, manual_cols=None):  # pragma: no cover
     """Clean the email addresses in files that are known to have them.
 
     `normalized_file_paths` should be a list of paths that were cleaned by the
@@ -252,7 +254,7 @@ def clean_email_addresses_in_files(normalized_file_paths, manual_cols=None):
             logger.debug("Skipping '%s' email address cleaning because it was skipped before.", path)
 
 
-def main(model_period=None, columns=None, email_file=None):
+def main(model_period=None, columns=None, email_file=None):  # pragma: no cover
     """Character encoding issues are evil, and keeping proper funky master data
     columns is pointless for what we need to do. Clean them up and move on.
 

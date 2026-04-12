@@ -112,7 +112,7 @@ def Xray(input_object, id_list=[], level=1, printout=False, show_private=False, 
                 elif type(input_object.__getattribute__(item)) in([type(None)]):
                     my_line.extend([lvl, "None     ", itm, "   <", str(id(itm)),">","[", str(level), "]"])
 
-                elif type(input_object.__getattribute__(item)).__name__ == "instancemethod":
+                elif type(input_object.__getattribute__(item)).__name__ == "instancemethod":  # pragma: no cover
                     my_line.extend([lvl, "method    ", itm, "   <", str(id(itm)),">","[", str(level), "]"])
 
                 elif "builtin" in str(type(input_object.__getattribute__(item))):
@@ -223,7 +223,7 @@ def XrayDict(input_object, id_list, level=1, printout=False, show_private = Fals
         elif type(input_object.get(key)) in([type(None)]):
             my_line.extend([lvl, "None      ", itm, "   <", str(id(itm)),">","[", str(level), "]"])
 
-        elif type(input_object.get(key)).__name__ == "instancemethod":
+        elif type(input_object.get(key)).__name__ == "instancemethod":  # pragma: no cover
             my_line.extend([lvl, "method    ", itm, "   <", str(id(itm)),">","[", str(level), "]"])
 
         elif "builtin" in str(type(input_object.get(key))):

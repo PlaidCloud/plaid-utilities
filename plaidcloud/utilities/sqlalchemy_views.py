@@ -5,7 +5,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.ddl import _DropView, CreateColumn
 try:
     from sqlalchemy.sql.ddl import _CreateBase as CreateBase
-except:
+except:  # pragma: no cover
     from sqlalchemy.sql.ddl import _CreateDropBase as CreateBase
 
 from sqlalchemy.sql.compiler import Compiled

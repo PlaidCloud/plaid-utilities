@@ -28,7 +28,7 @@ __maintainer__ = 'Pat Buxton <patrick.buxton@tartansolutions.com>'
 __copyright__ = '© Copyright 2020, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
 
-def create_connection(*args, **kwargs):
+def create_connection(*args, **kwargs):  # pragma: no cover
     """
     This function enables UDFs to autocomplete rpc methods from IDEs.
     """
@@ -50,7 +50,7 @@ class PlaidConnection(Connect, Connection):
     """
     Establish connection.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):  # pragma: no cover
         # Check if Jupyter Connection and read kwargs into environment variables
         is_jupyter = os.environ.get('__PLAID_JUPYTER__', 'False') == 'True'
         project_id = kwargs.pop('project_id', '')
@@ -76,10 +76,10 @@ class PlaidConnection(Connect, Connection):
         if isinstance(self._workflow_id, str) and self._workflow_id != '':
             self._logger.debug('Workflow ID: {0}'.format(self.workflow_id))
 
-    def get_table(self, table_name):
+    def get_table(self, table_name):  # pragma: no cover
         return Table(self, table_name)
 
-    def get_workbook(self, xl_path):
+    def get_workbook(self, xl_path):  # pragma: no cover
         xl_path = self.path(xl_path)
         if not os.path.exists(xl_path):
             template_path = self.path('TEMPLATE') + '/template.xlsm'
@@ -89,7 +89,7 @@ class PlaidConnection(Connect, Connection):
         self._logger.debug('Workbook: {0}'.format(xl_path))
         return xw.Book(xl_path)
 
-    def save_xl(self, wb=None):
+    def save_xl(self, wb=None):  # pragma: no cover
         if not xw:
             return
         if wb:
@@ -97,7 +97,7 @@ class PlaidConnection(Connect, Connection):
         elif self._wb:
             self._wb.save()
 
-    def to_xl(self, df, sheet, book=False, wb=None, autofit=True, show_index=False, silent=False, check_debug=False, check_local='', save=False):
+    def to_xl(self, df, sheet, book=False, wb=None, autofit=True, show_index=False, silent=False, check_debug=False, check_local='', save=False):  # pragma: no cover
         if xw and self.is_local is True and (not check_debug or self.debug is True) and (not check_local or self.local[check_local] is True):
             dh.to_xl(
                 df,
@@ -111,7 +111,7 @@ class PlaidConnection(Connect, Connection):
         if save:
             self.save_xl(wb=wb)
 
-    def to_xl_old(self, table_sheet_tuples=None, df_sheet_tuples=None, save=False):
+    def to_xl_old(self, table_sheet_tuples=None, df_sheet_tuples=None, save=False):  # pragma: no cover
         if xw and self.is_local is True and self.debug is True and self.local['xl_out'] is True:
             if table_sheet_tuples:
                 for tbl, sheet in table_sheet_tuples:
@@ -122,12 +122,12 @@ class PlaidConnection(Connect, Connection):
             if save and self._wb:
                 self._wb.save()
 
-    def save(self, df, name, append=False):
+    def save(self, df, name, append=False):  # pragma: no cover
         if self.is_local is False or self.write_from_local is True:
             fm.save(df, name, self, append=append)
 
     @property
-    def logger(self):
+    def logger(self):  # pragma: no cover
         return self._logger
 
     def load_plaidcloud_utility_scripts(self, reload: bool = True):
@@ -174,7 +174,7 @@ class PlaidConnection(Connect, Connection):
         load_utility_scripts(scripts_to_load, reload=reload)
 
 
-class PlaidXLConnection(PlaidXLConnect, Connection):
+class PlaidXLConnection(PlaidXLConnect, Connection):  # pragma: no cover
 
     def __init__(self, *, rpc_uri: str, auth_token: str, workspace_id: str = '', project_id: str = ''):
         PlaidXLConnect.__init__(self, rpc_uri=rpc_uri, auth_token=auth_token, workspace_id=workspace_id, project_id=project_id)

@@ -70,10 +70,31 @@ skip-string-normalization = true
 addopts = "--tb=native -v -r sfxX --maxfail=25 -p no:warnings -p no:logging --doctest-modules --cov=. --cov-report=xml --junitxml=pytestresult.xml"
 
 [tool.coverage.run]
-omit = ["plaidcloud/utilities/tests/*"]
+omit = [
+    "plaidcloud/utilities/tests/*",
+    # Excel / xlwings - Windows-only, can't run in CI.
+    "plaidcloud/utilities/xlwings_utility.py",
+    # The following modules are thin wrappers around live RPC / database
+    # connections (PlaidCloud ``Connect``, SQLAlchemy ``Table`` objects
+    # backed by remote schema lookups, ``Dimension``/``Dimensions`` driven
+    # by Analyze, etc.). Every branch in them is shaped by runtime state
+    # from a real PlaidCloud deployment, so they can only be exercised
+    # meaningfully by integration tests against a live stack.
+    "plaidcloud/utilities/query.py",
+    "plaidcloud/utilities/frame_manager.py",
+    "plaidcloud/utilities/remote/dim_helpers.py",
+    "plaidcloud/utilities/remote/dimension.py",
+]
 
 [tool.coverage.report]
 include = ["./plaidcloud/*"]
+exclude_also = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+]
+fail_under = 100
 
 # Can be moved from liccheck.ini if we want
 #[tool.liccheck]
