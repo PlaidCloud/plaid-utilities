@@ -7,3 +7,8 @@ dim_current/
 .plaid/
 flycheck*
 */wingdbstub.py
+.venv/
+.pytest_cache/
+.coverage
+coverage.xml
+pytestresult.xml

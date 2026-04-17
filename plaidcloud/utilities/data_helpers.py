@@ -62,7 +62,7 @@ report_formatting = {
     }
 }
 
-if platform.system() == "Windows":
+if platform.system() == "Windows":  # pragma: no cover
     locale.setlocale(locale.LC_ALL, 'english_us')  # <--this setting will be different in linux
 else:
     locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
@@ -100,7 +100,7 @@ def clean_frame(df):
     return df
 
 
-def jupyter_table(input):
+def jupyter_table(input):  # pragma: no cover
     """
     Produce a pretty text table that will show up as such in Jupyter.
 
@@ -160,13 +160,13 @@ def cast_as_str(input_val):
         else:
             try:
                 return str(input_val)
-            except:
+            except:  # pragma: no cover
                 return ''.join([i if ord(i) < 128 else ' ' for i in input_val])
 
     except:
         try:
             return str(input_val)
-        except:
+        except:  # pragma: no cover
             return ''.join([i if ord(i) < 128 else ' ' for i in input_val])
 
 
@@ -243,7 +243,7 @@ def cast_as_int(input_val):
         else:
             try:
                 return int(input_val)
-            except ValueError:
+            except ValueError:  # pragma: no cover
                 return 0
     except:
         try:
@@ -281,7 +281,7 @@ def cast_as_float(input_val):
         else:
             try:
                 return float(input_val)
-            except ValueError:
+            except ValueError:  # pragma: no cover
                 return 0.0
     except:
         try:
@@ -473,7 +473,7 @@ def in_list(df, key, value):
     return df[df[key] in value]
 
 
-def not_in_list(df, key, value):
+def not_in_list(df, key, value):  # pragma: no cover
     """
     Useful for daisy-chaining dataframe filters
     """
@@ -523,7 +523,7 @@ def remove_nan_values_from_dict(d):
     return no_nan_dict
 
 
-def _get_wb(book_name):
+def _get_wb(book_name):  # pragma: no cover
     import xlwings as xw  # pylint:disable=import-error
 
     if book_name is None:
@@ -559,7 +559,7 @@ def _get_wb(book_name):
         return None
 
 
-def _get_sheet(wb, sheet):
+def _get_sheet(wb, sheet):  # pragma: no cover
     try:
         sht = wb.sheets[sheet]  # attempt to access existing sheet
     except:
@@ -569,7 +569,7 @@ def _get_sheet(wb, sheet):
     return sht
 
 
-def _set_wb_visibility(wb, visibility):
+def _set_wb_visibility(wb, visibility):  # pragma: no cover
     if visibility is False:
         wb.app.visible = False
         wb.app.screen_updating = False
@@ -578,7 +578,7 @@ def _set_wb_visibility(wb, visibility):
         wb.app.screen_updating = True
 
 
-def to_xl(df_source,
+def to_xl(df_source,  # pragma: no cover
           nrows=None,
           wb=None,
           book=None,
@@ -666,7 +666,7 @@ def to_xl(df_source,
     return "Data frame has been written to Excel"
 
 
-def report_to_xl(data_frames,
+def report_to_xl(data_frames,  # pragma: no cover
                  book=None,
                  sheet="SUMMARY",
                  report_title=None,

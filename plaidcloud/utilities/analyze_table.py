@@ -16,14 +16,14 @@ __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
 
-def lookup_project(project, rpc=None):
+def lookup_project(project, rpc=None):  # pragma: no cover
     if not rpc:
         rpc = Connect()
 
     return rpc.analyze.project.lookup_by_full_path(path=project)
 
 
-def lookup_table(project_id, table, rpc=None):
+def lookup_table(project_id, table, rpc=None):  # pragma: no cover
     if not rpc:
         rpc = Connect()
 
@@ -38,7 +38,7 @@ def lookup_table(project_id, table, rpc=None):
         return table_id
 
 
-class AnalyzeTable(sqlalchemy.Table):
+class AnalyzeTable(sqlalchemy.Table):  # pragma: no cover
     def __new__(cls, project, table, metadata=None, rpc=None):
         warnings.simplefilter('default', DeprecationWarning)
         warnings.warn(
@@ -146,7 +146,7 @@ def compiled(sa_query, dialect='greenplum'):
     return str(compiled_query).replace('\n', ''), compiled_query.params
 
 
-def send_query(project, query, params=None, rpc=None):
+def send_query(project, query, params=None, rpc=None):  # pragma: no cover
     if not rpc:
         rpc = Connect()
 

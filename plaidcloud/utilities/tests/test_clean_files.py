@@ -1,24 +1,21 @@
 # coding=utf-8
+"""Tests for plaidcloud.utilities.clean_files."""
 
-import unittest
-import pytest
-import tempfile
-import os
-import time
+import csv
 import datetime
+import os
+import tempfile
+import time
+import unittest
+
+import pytest
 
 from plaidcloud.utilities import clean_files
 
-__author__ = "Pat Buxton"
-__copyright__ = "© Copyright 2009-2018, Tartan Solutions, Inc"
-__credits__ = ["Pat Buxton"]
-__license__ = "Apache 2.0"
-__maintainer__ = "Pat Buxton"
-__email__ = "patrick.buxton@tartansolutions.com"
-
 
 class TestShouldClean(unittest.TestCase):
-    """These tests validate the should_clean method"""
+    """These tests validate the should_clean method."""
+
     _temp_folder = ''
     _old_clean_file = ''
     _dirty_file = ''
@@ -41,13 +38,10 @@ class TestShouldClean(unittest.TestCase):
         dirty_time = time.mktime(dirty_date.timetuple())
         new_date = datetime.datetime(year=2019, month=9, day=1, hour=6, minute=0, second=2)
         new_time = time.mktime(new_date.timetuple())
-        # create clean file (old)
         cls._old_clean_file = cls.create_temp_file()
         os.utime(cls._old_clean_file, (old_time, old_time))
-        # create dirty file (new)
         cls._dirty_file = cls.create_temp_file()
         os.utime(cls._dirty_file, (dirty_time, dirty_time))
-        # create clean file (newest)
         cls._new_clean_file = cls.create_temp_file()
         os.utime(cls._new_clean_file, (new_time, new_time))
 
@@ -70,4 +64,81 @@ class TestShouldClean(unittest.TestCase):
             os.unlink(cls._old_clean_file)
             os.unlink(cls._dirty_file)
             os.unlink(cls._new_clean_file)
-            # os.unlink(cls._temp_folder)
+
+
+class TestCleanEmailAddressStr(unittest.TestCase):
+
+    def test_already_clean_passthrough(self):
+        self.assertEqual(
+            clean_files.clean_email_address_str('test_name@email.com'),
+            'test_name@email.com',
+        )
+
+    def test_strips_whitespace_and_control_chars(self):
+        dirty = '\rtest??  _name\t@email.com\n'
+        self.assertEqual(
+            clean_files.clean_email_address_str(dirty),
+            'test_name@email.com',
+        )
+
+    def test_removes_commas(self):
+        self.assertEqual(
+            clean_files.clean_email_address_str('a,b@example.com'),
+            'ab@example.com',
+        )
+
+
+class TestFindCleanPath(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.input_dir = os.path.join(self.tmp, 'input')
+        self.clean_dir = os.path.join(self.tmp, 'clean')
+        os.mkdir(self.input_dir)
+
+        self.config = {
+            'paths': {
+                'input_to_clean_dirs': {
+                    self.input_dir: self.clean_dir,
+                },
+            },
+            'options': {'PATHS_MODEL': 'MODEL'},
+        }
+
+    def tearDown(self):
+        for root, dirs, files in os.walk(self.tmp, topdown=False):
+            for f in files:
+                os.unlink(os.path.join(root, f))
+            for d in dirs:
+                os.rmdir(os.path.join(root, d))
+        os.rmdir(self.tmp)
+
+    def test_creates_clean_dir_and_returns_normalized_path(self):
+        original = os.path.join(self.input_dir, 'file.csv')
+        with open(original, 'w') as f:
+            f.write('x')
+
+        result = clean_files.find_clean_path('Q1', original, self.config)
+
+        self.assertTrue(os.path.isdir(self.clean_dir))
+        self.assertEqual(
+            result,
+            os.path.normpath(os.path.join(self.clean_dir, 'file.csv')),
+        )
+
+    def test_missing_input_mapping_raises(self):
+        original = os.path.join(self.tmp, 'unrelated', 'file.csv')
+        with self.assertRaises(KeyError):
+            clean_files.find_clean_path('Q1', original, self.config)
+
+    def test_missing_input_to_clean_dirs_key_raises(self):
+        bad_config = {
+            'paths': {},
+            'options': {'PATHS_MODEL': 'MODEL'},
+        }
+        with self.assertRaises(KeyError):
+            clean_files.find_clean_path('Q1', '/anything', bad_config)
+
+
+if __name__ == '__main__':
+    unittest.main()

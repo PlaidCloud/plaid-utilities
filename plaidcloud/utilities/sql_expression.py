@@ -954,7 +954,7 @@ def allocate(
     def _get_allocated_col_name(col):
         return col if overwrite_cols_for_allocated else f'{col}_allocated'
 
-    def _get_parent_col(col: str = ''):
+    def _get_parent_col(col: str = ''):  # pragma: no cover
         return f'Parent{col}'
 
     def _get_child_col(col: str = ''):

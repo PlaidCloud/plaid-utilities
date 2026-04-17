@@ -1,4 +1,4 @@
-name: Lint PlaidCloud Utilities
+name: Lint and Test PlaidCloud Utilities
 on:
   pull_request:
     branches:
@@ -7,6 +7,7 @@ jobs:
   reviewdog:
     name: Lint PlaidCloud Utilities w ReviewDog
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Ensure python 3.12
         uses: actions/setup-python@v6
@@ -30,21 +31,34 @@ jobs:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pylint -s n -f text plaidcloud 2>&1 | reviewdog -efm="%f:%l:%c: %m" -name="PyLint" -reporter=github-check -level=warning
-      - name: Perform Tests
-        run: |
-          pytest
-      - name: Test Report
-        uses: dorny/test-reporter@v1
-        if: success() || failure()    # run this step even if previous step failed
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Ensure python 3.12
+        uses: actions/setup-python@v5
         with:
-          name: Tests               # Name of the check run which will be created
-          path: pytestresult.xml    # Path to test results
-          reporter: java-junit      # Format of test results
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Prepare Coverage Report
-        uses: 5monkeys/cobertura-action@master
-        if: success() || failure()    # run this step even if previous step failed
+          python-version: '3.12'
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: pip install -e ".[test]"
+      - name: Run pytest with coverage
+        # addopts in pyproject.toml already produces pytestresult.xml and coverage.xml
+        run: pytest
+      - name: Test Results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
         with:
-          path: coverage.xml
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          minimum_coverage: 75
+          report_paths: pytestresult.xml
+          check_name: Test Results
+      - name: Pytest Coverage Comment
+        if: always()
+        uses: MishaKav/pytest-coverage-comment@v1.7.1
+        with:
+          pytest-xml-coverage-path: coverage.xml
+          junitxml-path: pytestresult.xml

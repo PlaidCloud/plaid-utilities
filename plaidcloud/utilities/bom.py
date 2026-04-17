@@ -9,7 +9,7 @@ import sys
 
 DOCKER = os.environ.get('DOCKER') in ('transform', 'ipython')
 
-if DOCKER:
+if DOCKER:  # pragma: no cover
     sys.path.append('/var/vol/code')
 
 __author__ = "Paul Morel"

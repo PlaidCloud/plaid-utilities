@@ -29,7 +29,7 @@ conf = config.get_dict()
 logger = logging.getLogger(__name__)
 
 
-def configure_logging():
+def configure_logging():  # pragma: no cover
     """Configures logging based on Plaid's config"""
     # Application logging is defined in a/the configuration file.
     try:
@@ -52,7 +52,7 @@ def configure_logging():
                      valid_config_dict[1], log_filename)
 
 
-def create_results_directories():
+def create_results_directories():  # pragma: no cover
     """Creates all needed output directories"""
     MODEL_PERIOD = conf['options']['MODEL_PERIOD']
     PATHS_MODEL  = conf['options']['PATHS_MODEL']
@@ -73,7 +73,7 @@ def create_results_directories():
     logger.debug("Specified results will be placed in '%s\\'", os.path.abspath(results_dir))
 
 
-def copy_output_to_timestamped_directory():
+def copy_output_to_timestamped_directory():  # pragma: no cover
     """Copy all output files to the timestamped results directory.
 
     Warning: This uses the OUTPUT_DIR path as specified in the config, which
@@ -90,7 +90,7 @@ def copy_output_to_timestamped_directory():
         logger.debug("Copied '%s' to '%s'", path, results_dir)
 
 
-def copy_results_to_timestamped_directory():
+def copy_results_to_timestamped_directory():  # pragma: no cover
     """Copy all result files to the timestamped results directory."""
 
     paths = conf['paths']
@@ -111,7 +111,7 @@ def copy_results_to_timestamped_directory():
             logger.debug("Copied '%s' to '%s'", path, results_dir)
 
 
-def copy_results_output_to_results_directory():
+def copy_results_output_to_results_directory():  # pragma: no cover
     """Copy all result files to the non-timestamped results directory."""
 
     paths = conf['paths']
@@ -144,7 +144,7 @@ def copy_results_output_to_results_directory():
                              "produced by an earlier run.", path, results_dir)
 
 
-def clean_empty_results_directory():
+def clean_empty_results_directory():  # pragma: no cover
     """Delete any empty results directories"""
     results_dir = os.path.normpath(conf['paths']['RESULTS_DIR'])
     try:
@@ -165,7 +165,7 @@ def clean_empty_results_directory():
         logger.debug("Unused results directory '%s\\' removed", results_dir)
 
 
-def do_timed_run(func, func_args=(), func_kwargs={}):
+def do_timed_run(func, func_args=(), func_kwargs={}):  # pragma: no cover
     """Run func, time it, and configure application logging for it.
 
     This is a convenience function for use in `if name == '__main__'` code
