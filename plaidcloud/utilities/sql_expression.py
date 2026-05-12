@@ -126,36 +126,85 @@ def on_clause(table_a: sqlalchemy.Table, table_b: sqlalchemy.Table, join_map: li
     ])
 
 
-def get_column_table(source_tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], table_numbering_start: int = 1):
-    """Find the source table associated with a column."""
+def get_column_table(
+    source_tables: list[sqlalchemy.Table],
+    target_column_config: dict,
+    source_column_configs: list[list[dict]],
+    table_numbering_start: int = 1,
+    *,
+    tables_by_alias: dict | None = None,
+):
+    """Find the source table associated with a column.
+
+    Precedence:
+        1. `source_alias` in target_column_config → look up in `tables_by_alias`.
+           Requires `tables_by_alias` to be passed; raises if alias not found.
+        2. Legacy `source_table: 'table1'|'table2'` AND len(source_tables) == 2 → positional.
+           Rejected when len(source_tables) > 2 (use source_alias instead).
+        3. `source_name` matches `tableN.col` → positional (existing behavior).
+        4. Name-intersect fallback: search source_column_configs. For len(source_tables) > 2,
+           rejects on ambiguity (column name in multiple sources). For len <= 2, returns
+           the first match (existing behavior, preserves binary-join backward compat).
+
+    Args:
+        tables_by_alias: keyword-only. Required when `source_alias` is used. None by default
+            so existing callers (which pass only positional `tables`) keep working unchanged.
+    """
 
     if len(source_tables) == 1:  # Shortcut for most simple cases
         return source_tables[0]
 
+    # Rule 1: explicit source_alias (new for frame_join_multi)
+    source_alias = target_column_config.get('source_alias')
+    if source_alias:
+        if tables_by_alias is None:
+            raise SQLExpressionError(
+                f"target_column references source_alias={source_alias!r} but tables_by_alias was not provided"
+            )
+        if source_alias not in tables_by_alias:
+            raise SQLExpressionError(
+                f"target_column source_alias={source_alias!r} not found in sources"
+            )
+        return tables_by_alias[source_alias]
+
+    # Rule 2: legacy source_table for binary joins
     if target_column_config.get('source_table'):
+        if len(source_tables) > 2:
+            raise SQLExpressionError(
+                "source_table='tableN' is only valid for 2-table joins; use source_alias instead"
+            )
         if target_column_config['source_table'].lower() in ('table a', 'table1'):
             return source_tables[0]
         if target_column_config['source_table'].lower() in ('table b', 'table2'):
             return source_tables[1]
 
-    source_name = target_column_config['source']
+    source_name = target_column_config.get('source')
 
-    match = table_dot_column_regex.match(source_name)
-    if match:  # They gave us a table number. Subtract 1 to find it's index
-        if source_name.startswith('table.'):  # special case for just 'table'
-            return source_tables[0]
+    # Rule 3: positional tableN.col reference
+    if source_name:
+        match = table_dot_column_regex.match(source_name)
+        if match:
+            if source_name.startswith('table.'):
+                return source_tables[0]
+            table_number = int(match.groups()[0])
+            return source_tables[table_number - table_numbering_start]
 
-        table_number = int(match.groups()[0])
-        return source_tables[table_number - table_numbering_start]
-
-    # None of our shortcuts worked, so look for the first table to have a
-    # column of that name.
+    # Rule 4: name-intersect fallback
+    matches = []
     for table, columns in zip(source_tables, source_column_configs):
         columnset = {c['source'] for c in columns}
         if source_name in columnset:
-            return table
+            matches.append(table)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1 and len(source_tables) > 2:
+        raise SQLExpressionError(
+            f"Column {source_name!r} exists in multiple sources; set source_alias explicitly"
+        )
+    if matches:
+        # 2 sources, column in both — preserve existing first-match behavior
+        return matches[0]
 
-    # If nothing found at all:
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
@@ -220,9 +269,13 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
     return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
 
 # TODO: write tests, though TestGetFromClause already covers this
-def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False):
+def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None):
     """Get a representation of a target column based on a source column."""
-    table = get_column_table(tables, target_column_config, source_column_configs, table_numbering_start=table_numbering_start)
+    table = get_column_table(
+        tables, target_column_config, source_column_configs,
+        table_numbering_start=table_numbering_start,
+        tables_by_alias=tables_by_alias,
+    )
 
     if '.' in source:
         source_without_table = source.split('.', 1)[1]
@@ -251,7 +304,8 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
-    sort_columns: list = None, use_row_number_for_serial: bool = True, trim_zeroes: bool = False
+    sort_columns: list = None, use_row_number_for_serial: bool = True, trim_zeroes: bool = False,
+    *, tables_by_alias: dict | None = None,
 ):
     """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
@@ -277,7 +331,7 @@ def get_from_clause(
     if expression:
         return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes)
     if source:
-        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes)
+        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias)
     if target_column_config.get('dtype') in {'serial', 'bigserial'}:
         if use_row_number_for_serial:
             return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
@@ -533,7 +587,8 @@ def get_select_query(
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
     use_target_slicer: bool = None, limit_target_start: int = None, limit_target_end: int = None,
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
-    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = False
+    use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = False,
+    *, tables_by_alias: dict | None = None,
 ):
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
@@ -607,7 +662,8 @@ def get_select_query(
                 variables=variables,
                 disable_variables=disable_variables,
                 table_numbering_start=table_numbering_start,
-                cast=cast
+                cast=cast,
+                tables_by_alias=tables_by_alias,
             )
             for tc in sort_order
         ]
@@ -631,6 +687,7 @@ def get_select_query(
                 use_row_number_for_serial=use_row_number_for_serial,
                 cast=cast,
                 trim_zeroes=trim_zeroes,
+                tables_by_alias=tables_by_alias,
             )
             for tc in target_columns
             if (use_row_number_for_serial or tc['dtype'] not in ('serial', 'bigserial'))
@@ -664,6 +721,7 @@ def get_select_query(
                 table_numbering_start=table_numbering_start,
                 use_row_number_for_serial=use_row_number_for_serial,
                 trim_zeroes=trim_zeroes,
+                tables_by_alias=tables_by_alias,
             )
             for tc in target_columns
             if (
@@ -1270,3 +1328,187 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     )
 
     return cte_rules, final_select
+
+
+# ---------------------------------------------------------------------------
+# frame_join_multi helpers
+#
+# These are imported by the workflow-runner executor for the `frame_join_multi`
+# transform. They are also imported by plaid's save-time validator hook for
+# config validation. See PLAN_multi_table_join_step.md for full design.
+# ---------------------------------------------------------------------------
+
+_FJM_COLUMN_REF_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*')
+
+
+def _fjm_resolve_column(expr: str, tables_by_alias: dict) -> sqlalchemy.ColumnElement:
+    """Resolve an `alias.column` string to a sqlalchemy column.
+
+    Caller is responsible for having validated `expr` matches the column-ref regex.
+    Raises SQLExpressionError if alias or column is missing (or expr is malformed).
+    """
+    # Defense in depth — the validator's regex enforces the dot, but bypass paths
+    # (flashback restore of pre-validator configs, hand-edited configs) could reach here
+    # with a no-dot string; tuple unpacking on `split` would raise ValueError otherwise.
+    if '.' not in expr:
+        raise SQLExpressionError(f"edge predicate column reference missing alias prefix: {expr!r}")
+    alias, col = expr.split('.', 1)
+    if alias not in tables_by_alias:
+        raise SQLExpressionError(f"edge predicate references unknown alias {alias!r}")
+    table = tables_by_alias[alias]
+    if col not in table.columns:
+        raise SQLExpressionError(f"edge predicate references unknown column {alias}.{col}")
+    return table.columns[col]
+
+
+def _fjm_resolve_bound(value, tables_by_alias: dict):
+    """A BETWEEN bound is either a column reference (alias.col) or a primitive literal."""
+    if isinstance(value, str) and _FJM_COLUMN_REF_RE.fullmatch(value):
+        return _fjm_resolve_column(value, tables_by_alias)
+    return sqlalchemy.literal(value)
+
+
+def edge_predicate(edge: dict, tables_by_alias: dict, dialect: str | None = None) -> sqlalchemy.ColumnElement:
+    """Build a sqlalchemy predicate from a frame_join_multi edge's conditions.
+
+    Returns an AND of the per-condition predicates. Caller (the executor) is responsible
+    for using this as the ON clause of a JOIN / OUTERJOIN. Callers must NOT pass `expr`-mode
+    or any operator outside the closed 13-op set — the validator rejects those at save time
+    and the executor re-runs the validator, so this function may assume well-formed input.
+
+    All user-supplied literals (`pattern`, `in_values`, `between_low`, scalar `right_expr`) are
+    bound via `sqlalchemy.literal(...)` so they become parameterized binds. Nothing in this
+    function calls `text()`, `eval`, or string-formats user input into SQL.
+
+    Args:
+        edge: dict with `conditions` (list of {operator, left_expr, ...}).
+        tables_by_alias: maps `alias` to a sqlalchemy `Table` or `Subquery` whose `.columns`
+            attribute exposes named columns.
+        dialect: reserved for future dialect-specific dispatch; unused today (all 13 operators
+            compile the same way on StarRocks and Databend).
+    """
+    if dialect is not None:
+        # Currently no operator in the 13-op set needs dialect dispatch. Keep the arg for the
+        # future (e.g., if <=> NULL-safe equality is added back, Databend may need emulation).
+        pass
+
+    predicates = []
+    for c in edge.get('conditions', []):
+        op = c['operator']
+        left = _fjm_resolve_column(c['left_expr'], tables_by_alias)
+
+        if op == '=':
+            predicates.append(left == _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == '<>':
+            predicates.append(left != _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == '<':
+            predicates.append(left < _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == '<=':
+            predicates.append(left <= _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == '>':
+            predicates.append(left > _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == '>=':
+            predicates.append(left >= _fjm_resolve_column(c['right_expr'], tables_by_alias))
+        elif op == 'IS NULL':
+            predicates.append(left.is_(None))
+        elif op == 'IS NOT NULL':
+            predicates.append(left.isnot(None))
+        elif op == 'IN':
+            predicates.append(left.in_([sqlalchemy.literal(v) for v in c['in_values']]))
+        elif op == 'NOT IN':
+            predicates.append(~left.in_([sqlalchemy.literal(v) for v in c['in_values']]))
+        elif op == 'LIKE':
+            predicates.append(left.like(sqlalchemy.literal(c['pattern'])))
+        elif op == 'NOT LIKE':
+            predicates.append(~left.like(sqlalchemy.literal(c['pattern'])))
+        elif op == 'BETWEEN':
+            low = _fjm_resolve_bound(c['between_low'], tables_by_alias)
+            high = _fjm_resolve_bound(c['right_expr'], tables_by_alias)
+            predicates.append(left.between(low, high))
+        else:
+            raise SQLExpressionError(f"edge predicate: unsupported operator {op!r}")
+
+    return sqlalchemy.and_(*predicates)
+
+
+def topo_sort_edges(edges: list[dict], root: str) -> list[dict]:
+    """Return edges in BFS-discovery order from `root`.
+
+    The validator guarantees a valid tree (no cycles, no diamonds, every alias reachable),
+    so this is a straightforward BFS. The executor's tree-fold loop requires `from_alias` of
+    each edge to already be in the joined accumulator — topo order from root guarantees this.
+
+    Defense in depth: the validator already asserts tree validity. This function tolerates
+    out-of-order YAML / hand-edited configs by re-deriving the order; it would raise only
+    if the validator was bypassed and the tree is malformed.
+    """
+    edges_by_from: dict[str, list[dict]] = {}
+    for e in edges:
+        edges_by_from.setdefault(e['from_alias'], []).append(e)
+
+    visited = {root}
+    queue = [root]
+    ordered: list[dict] = []
+    while queue:
+        node = queue.pop(0)
+        for e in edges_by_from.get(node, ()):
+            if e['to_alias'] in visited:
+                raise SQLExpressionError(
+                    f"topo_sort_edges: cycle or diamond detected at edge to {e['to_alias']!r}"
+                )
+            visited.add(e['to_alias'])
+            queue.append(e['to_alias'])
+            ordered.append(e)
+
+    if len(ordered) != len(edges):
+        raise SQLExpressionError(
+            f"topo_sort_edges: {len(edges) - len(ordered)} edges unreachable from root {root!r}"
+        )
+    return ordered
+
+
+def check_cartesian_explosion(
+    sources: list[dict],
+    edges: list[dict],
+    row_count_fn,
+    row_limit: int,
+    hard_limit: int = 500_000_000_000,
+) -> None:
+    """Walk the join tree and reject if cross-joins or zero-condition edges produce too many rows.
+
+    Mirrors `workflow-runner/frame_join_inner.py:65-98` for binary inner joins, extended to N tables.
+    For any edge where the cumulative cartesian product would exceed the limit, raises
+    SQLExpressionError with a clear message. Validator-side rules (zero conditions only allowed
+    for `cross`) already ensure most cartesian risks are explicit.
+
+    Args:
+        sources: list of {alias, source} dicts from config.
+        edges: list of edges (any order; topo-sorted internally).
+        row_count_fn: callable(table_id) -> int. Caller (executor) wraps
+            `self.rpc.analyze.table.table(...).get('row_count', 0)`. Tests pass a mock.
+        row_limit: per-step soft limit; raises if cumulative exceeds this.
+        hard_limit: absolute ceiling; raises regardless of caller-specified row_limit.
+
+    Raises:
+        SQLExpressionError with message naming the offending edge.
+    """
+    limit = min(row_limit, hard_limit)
+    row_counts_by_alias = {s['alias']: row_count_fn(s['source']) or 0 for s in sources}
+    ordered = topo_sort_edges(edges, sources[0]['alias'])
+
+    cumulative = row_counts_by_alias[sources[0]['alias']]
+    for e in ordered:
+        child_rows = row_counts_by_alias[e['to_alias']]
+        # For non-cross joins with conditions, the executor's predicate filters down; we can't
+        # statically estimate the post-predicate cardinality. We only flag cross / zero-condition
+        # edges where the product is the actual upper bound the engine will see.
+        is_unbounded = (e['join_type'] == 'cross') or not e.get('conditions')
+        if is_unbounded:
+            cumulative *= max(child_rows, 1)
+            if cumulative > limit:
+                raise SQLExpressionError(
+                    f"cartesian explosion: cross/unfiltered join at edge "
+                    f"{e['from_alias']!r} -> {e['to_alias']!r} would produce "
+                    f"{cumulative} rows, exceeding limit {limit}"
+                )
+        # For filtered joins, we don't update cumulative (predicates make the estimate meaningless).
