@@ -1,0 +1,1484 @@
+{
+  "_comment": "Cross-repo fixtures for frame_join_multi validator + executor. Imported via importlib.resources.files('plaidcloud.utilities.test_fixtures'). Each top-level key is a fixture name; 'valid' fixtures must pass validate_frame_join_multi_config; 'invalid_*' fixtures must raise JoinMultiValidationError with the documented reason token.",
+  "valid_two_source_inner": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "customer_id",
+            "dtype": "text"
+          },
+          {
+            "id": "total",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.customer_id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "sales",
+        "source": "sales.id",
+        "target": "sale_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "cust",
+        "source": "cust.name",
+        "target": "customer",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "valid_three_source_tree": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "customer_id",
+            "dtype": "text"
+          },
+          {
+            "id": "product_id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "prod",
+        "source": "tabProd01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "title",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "left",
+        "conditions": [
+          {
+            "left_expr": "sales.customer_id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "sales",
+        "to_alias": "prod",
+        "join_type": "left",
+        "conditions": [
+          {
+            "left_expr": "sales.product_id",
+            "operator": "=",
+            "right_expr": "prod.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "sales",
+        "source": "sales.id",
+        "target": "sale_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "cust",
+        "source": "cust.name",
+        "target": "customer",
+        "dtype": "text"
+      },
+      {
+        "source_alias": "prod",
+        "source": "prod.title",
+        "target": "product",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "valid_five_source_mixed_joins": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "b_id",
+            "dtype": "text"
+          },
+          {
+            "id": "c_id",
+            "dtype": "text"
+          },
+          {
+            "id": "amt",
+            "dtype": "text"
+          },
+          {
+            "id": "dt",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          },
+          {
+            "id": "score",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "c",
+        "source": "tabC01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "d_id",
+            "dtype": "text"
+          },
+          {
+            "id": "label",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "d",
+        "source": "tabD01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "tag",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "e",
+        "source": "tabE01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "a_id",
+            "dtype": "text"
+          },
+          {
+            "id": "category",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.b_id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "a",
+        "to_alias": "c",
+        "join_type": "left",
+        "conditions": [
+          {
+            "left_expr": "a.c_id",
+            "operator": "=",
+            "right_expr": "c.id"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": ">",
+            "right_expr": "c.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "c",
+        "to_alias": "d",
+        "join_type": "left",
+        "conditions": [
+          {
+            "left_expr": "c.d_id",
+            "operator": "=",
+            "right_expr": "d.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "a",
+        "to_alias": "e",
+        "join_type": "full",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "e.a_id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "a",
+        "source": "a.id",
+        "target": "a_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "b",
+        "source": "b.name",
+        "target": "b_name",
+        "dtype": "text"
+      },
+      {
+        "source_alias": "c",
+        "source": "c.label",
+        "target": "c_label",
+        "dtype": "text"
+      },
+      {
+        "source_alias": "d",
+        "source": "d.tag",
+        "target": "d_tag",
+        "dtype": "text"
+      },
+      {
+        "source_alias": "e",
+        "source": "e.category",
+        "target": "e_category",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "valid_all_operators": {
+    "_doc": "Exercises every one of the 13 operators across multiple edges.",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "amt",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          },
+          {
+            "id": "dt",
+            "dtype": "text"
+          },
+          {
+            "id": "low",
+            "dtype": "text"
+          },
+          {
+            "id": "high",
+            "dtype": "text"
+          },
+          {
+            "id": "code",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "amt",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          },
+          {
+            "id": "dt",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": "<>",
+            "right_expr": "b.amt"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": "<",
+            "right_expr": "b.amt"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": "<=",
+            "right_expr": "b.amt"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": ">",
+            "right_expr": "b.amt"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": ">=",
+            "right_expr": "b.amt"
+          },
+          {
+            "left_expr": "a.name",
+            "operator": "IS NULL"
+          },
+          {
+            "left_expr": "a.name",
+            "operator": "IS NOT NULL"
+          },
+          {
+            "left_expr": "a.code",
+            "operator": "IN",
+            "in_values": [
+              "x",
+              "y",
+              "z"
+            ]
+          },
+          {
+            "left_expr": "a.code",
+            "operator": "NOT IN",
+            "in_values": [
+              "q"
+            ]
+          },
+          {
+            "left_expr": "a.name",
+            "operator": "LIKE",
+            "pattern": "%foo%"
+          },
+          {
+            "left_expr": "a.name",
+            "operator": "NOT LIKE",
+            "pattern": "_bar"
+          },
+          {
+            "left_expr": "a.amt",
+            "operator": "BETWEEN",
+            "between_low": 10,
+            "right_expr": 100
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "a",
+        "source": "a.id",
+        "target": "id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "b",
+        "source": "b.name",
+        "target": "b_name",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "invalid_legacy_source_table_rejected": {
+    "_doc": "frame_join_multi rejects legacy source_table='table1'/'table2' uniformly. Per round-5 SQL F1 fix, source_alias is required for all multi-join target columns to avoid silent column-property-propagation loss.",
+    "_expected_reason": "source_alias_required",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "customer_id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.customer_id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_table": "table1",
+        "source": "id",
+        "target": "sale_id",
+        "dtype": "integer"
+      },
+      {
+        "source_table": "table2",
+        "source": "name",
+        "target": "customer",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "valid_cross_join": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "cross",
+        "conditions": []
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "a",
+        "source": "a.id",
+        "target": "a_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "b",
+        "source": "b.id",
+        "target": "b_id",
+        "dtype": "integer"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "invalid_root_used_as_to_alias": {
+    "_doc": "2-source cycle: a is root but appears as to_alias. (A full multi-edge cycle is structurally prevented by the edge-count rule, since cycles need >= N edges and trees have exactly N-1.)",
+    "_expected_reason": "root_used_as_to_alias",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "b",
+        "to_alias": "a",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "b.id",
+            "operator": "=",
+            "right_expr": "a.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_diamond": {
+    "_doc": "4 sources, 3 edges (matches count rule), where d is to_alias of two edges. c is orphan but to_alias_duplicate fires first.",
+    "_expected_reason": "to_alias_duplicate",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "c",
+        "source": "tabC01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "d",
+        "source": "tabD01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "b",
+        "to_alias": "d",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "b.id",
+            "operator": "=",
+            "right_expr": "d.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "c",
+        "to_alias": "d",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "c.id",
+            "operator": "=",
+            "right_expr": "d.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_edges_count_mismatch_too_many": {
+    "_doc": "More edges than sources-1 \u2014 proper cycle is impossible without violating count, so count rule catches it.",
+    "_expected_reason": "edges_count_mismatch",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_orphan_source": {
+    "_doc": "Three sources but only one edge \u2014 second source unreachable from root.",
+    "_expected_reason": "edges_count_mismatch",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "c",
+        "source": "tabC01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_alias_reserved": {
+    "_expected_reason": "alias_reserved",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "result",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "result",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "result.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_alias_duplicate": {
+    "_expected_reason": "alias_duplicate",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "x",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "x",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "x",
+        "to_alias": "x",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "x.id",
+            "operator": "=",
+            "right_expr": "x.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_source_not_table_id": {
+    "_doc": "source must be TABLE_PREFIX-prefixed UUID; path-style values rejected.",
+    "_expected_reason": "source_not_table_id",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "folder/path/to/table",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_source_with_format_chars": {
+    "_doc": "source containing { triggers str.format injection in apply_variables. Rejected.",
+    "_expected_reason": "source_not_table_id",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tab{secret}",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_cross_with_conditions": {
+    "_expected_reason": "cross_join_has_conditions",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "cross",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_left_expr_alias_self_compare": {
+    "_doc": "left_expr and right_expr both reference the same alias (sales.id = sales.id). Tautological cross product hidden as a condition.",
+    "_expected_reason": "same_alias_self_compare",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.id",
+            "operator": "=",
+            "right_expr": "sales.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_edge_conditions_do_not_bind_aliases": {
+    "_doc": "Edge sales->cust has a condition that doesn't reference cust at all.",
+    "_expected_reason": "edge_conditions_do_not_bind_aliases",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "x",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "prod",
+        "source": "tabProd01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.id",
+            "operator": "=",
+            "right_expr": "prod.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "sales",
+        "to_alias": "prod",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.x",
+            "operator": "=",
+            "right_expr": "prod.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_having_too_long": {
+    "_doc": "having > 4096 chars rejected. Test does not include the giant string; the test code constructs it.",
+    "_expected_reason": "having_too_long",
+    "_runtime_synth": "having_oversize",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_in_values_count": {
+    "_expected_reason": "in_values_count_out_of_range",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "IN",
+            "in_values": [],
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_source_alias_required_when_n_gt_2": {
+    "_doc": "target_column omits source_alias \u2014 required for all frame_join_multi configs regardless of n_sources (round-5 fix).",
+    "_expected_reason": "source_alias_required",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "b_id",
+            "dtype": "text"
+          },
+          {
+            "id": "c_id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "c",
+        "source": "tabC01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.b_id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      },
+      {
+        "from_alias": "a",
+        "to_alias": "c",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.c_id",
+            "operator": "=",
+            "right_expr": "c.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source": "a.id",
+        "target": "id",
+        "dtype": "integer"
+      }
+    ],
+    "target_frame": "tabOut01"
+  },
+  "invalid_left_expr_invalid_shape": {
+    "_doc": "left_expr has whitespace / no dot.",
+    "_expected_reason": "left_expr_invalid",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "a.id\n--",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_full_outer_on_databend": {
+    "_doc": "FULL join on Databend dialect rejected. Only fires when dialect='databend' passed.",
+    "_expected_reason": "full_outer_unsupported_on_dialect",
+    "_dialect": "databend",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "a",
+        "source": "tabA01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "b",
+        "source": "tabB01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "a",
+        "to_alias": "b",
+        "join_type": "full",
+        "conditions": [
+          {
+            "left_expr": "a.id",
+            "operator": "=",
+            "right_expr": "b.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "invalid_cross_source_where": {
+    "_doc": "source_where for source 'sales' references another alias's column.",
+    "_expected_reason": "cross_source_where_ref",
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          }
+        ],
+        "source_where": "cust.region == 'US'"
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "region",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [],
+    "target_frame": "tabOut01"
+  },
+  "valid_with_having_and_source_where": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "tabSales01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "customer_id",
+            "dtype": "text"
+          },
+          {
+            "id": "total",
+            "dtype": "text"
+          }
+        ],
+        "source_where": "table1.customer_id > 0"
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.customer_id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "sales",
+        "source": "sales.id",
+        "target": "sale_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "cust",
+        "source": "cust.name",
+        "target": "customer",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "tabOut01",
+    "having": "result.sale_id > 0"
+  }
+}
