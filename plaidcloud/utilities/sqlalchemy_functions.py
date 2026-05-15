@@ -149,16 +149,10 @@ def compile_import_col(element, compiler, **kw):
     dtype = dtype.value
     date_format = date_format.value
     trailing_negs = trailing_negs.value
-    # Wrap col in to_string() before regexp_replace so the function call
-    # succeeds regardless of the source column's actual type. The text
-    # import path puts everything in a temp table typed as text, but the
-    # bundle import path (parquet-based) preserves the source's native
-    # type. Without to_string, regexp_replace(Decimal, ...) fails the
-    # "no function matches signature" check on databend / starrocks.
     return compiler.process(
         import_cast(col, dtype, date_format, trailing_negs) if dtype == 'text' else
         case(
-            (func.regexp_replace(func.to_string(col), r'\s*', '') == '', 0.0 if dtype == 'numeric' else None),
+            (func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None),
             else_=import_cast(col, dtype, date_format, trailing_negs)
         ),
         **kw
@@ -264,12 +258,7 @@ def compile_import_cast_databend(element, compiler, **kw):
             **kw
         )
     elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
-        # Wrap col in to_string() before regexp_replace so the function
-        # call works for columns whose source dtype isn't text (e.g. a
-        # parquet/bundle import where the column came through as Decimal).
-        # Without this wrap, databend rejects the function with
-        # `no function matches signature regexp_replace(Decimal, …)`.
-        expr = func.regexp_replace(func.to_string(col), r'\s*', '')
+        expr = func.regexp_replace(col, r'\s*', '')
         if trailing_negs:
             expr = sqlalchemy.case(
                 (func.regexp_like(expr, '^[0-9]*\\.?[0-9]*-$'), func.concat('-', func.replace(expr, '-', ''))),
