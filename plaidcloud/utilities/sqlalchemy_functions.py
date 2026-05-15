@@ -1,7 +1,10 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
+import warnings
+
 import sqlalchemy
+from sqlalchemy.exc import SAWarning
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
 from sqlalchemy.types import Numeric, Boolean, Double
@@ -406,8 +409,17 @@ def compile_safe_to_timestamp_starrocks(element, compiler, **kw):
 #     return f"to_char({compiler.process(timestamp)}, {compiler.process(format)})"
 
 
-class safe_extract(GenericFunction):
-    name = 'extract'
+# Intentionally overrides SQLAlchemy's built-in `extract` so func.extract picks up
+# the timestamp-coercing variant below. Silence the expected override SAWarning.
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message="The GenericFunction 'extract' is already registered.*",
+        category=SAWarning,
+    )
+
+    class safe_extract(GenericFunction):
+        name = 'extract'
 
 
 # This one should work with databend, assuming timestamp types are the same
