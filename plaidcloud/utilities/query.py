@@ -53,6 +53,8 @@ class UDFParams(NamedTuple):
 
 class Connection:
 
+    _NOT_LOADED = object()
+
     def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None):
         """
 
@@ -92,12 +94,36 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls(paramstyle='pyformat')
-        try:
-            self.variables = self.refresh_variables()
-            self._load_udf_params()
-        except:
-            self.variables = {}
-            self.udf = None
+        self._variables = self._NOT_LOADED
+        self._udf = self._NOT_LOADED
+
+    @property
+    def variables(self):
+        if self._variables is self._NOT_LOADED:
+            try:
+                self.refresh_variables()
+            except Exception:
+                self._variables = {}
+        return self._variables
+
+    @variables.setter
+    def variables(self, value):
+        self._variables = value
+
+    @property
+    def udf(self):
+        if self._udf is self._NOT_LOADED:
+            try:
+                self._load_udf_params()
+            except Exception:
+                self._udf = None
+            if self._udf is self._NOT_LOADED:
+                self._udf = None
+        return self._udf
+
+    @udf.setter
+    def udf(self, value):
+        self._udf = value
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
@@ -736,14 +762,17 @@ class Connection:
 
     def refresh_variables(self) -> dict:
         if not isinstance(self.rpc.workflow_id, str):
-            return self.rpc.analyze.project.variable_values(
+            result = self.rpc.analyze.project.variable_values(
                 project_id=self._project_id,
             )
-        return self.rpc.analyze.workflow.variable_values(
-            project_id=self._project_id,
-            workflow_id=self.rpc.workflow_id,
-            include_project=True,
-        )
+        else:
+            result = self.rpc.analyze.workflow.variable_values(
+                project_id=self._project_id,
+                workflow_id=self.rpc.workflow_id,
+                include_project=True,
+            )
+        self._variables = result
+        return result
 
 
 class Table(sqlalchemy.Table):
