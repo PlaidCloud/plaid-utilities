@@ -69,6 +69,29 @@ line-length = 125
 target-version = ['py312']
 skip-string-normalization = true
 
+[tool.ruff]
+line-length = 125
+target-version = "py312"
+extend-exclude = ["plaidcloud/utilities/test_fixtures"]
+
+[tool.ruff.lint]
+# Start conservative -- mirrors the kinds of issues pylint was catching.
+# Expand the `select` list to ramp up strictness (e.g. add "B", "UP", "PL").
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (undefined names, unused imports, etc.)
+    "W",   # pycodestyle warnings
+    "I",   # isort
+]
+ignore = [
+    "E501",  # line-too-long -- handled by black at 125 chars
+    "E731",  # lambda assignments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"plaidcloud/utilities/tests/*" = ["F401", "F811"]  # tolerate unused imports / redefinitions in tests
+"**/__init__.py" = ["F401"]                        # re-exports
+
 [tool.pytest.ini_options]
 # addopts = "-v --maxfail=25 -p no:warnings -p no:logging --doctest-modules"
 addopts = "--tb=native -v -r sfxX --maxfail=25 -p no:warnings -p no:logging --doctest-modules --cov=. --cov-report=xml --junitxml=pytestresult.xml"
