@@ -82,7 +82,7 @@ class Connection:
                     # This is a name lookup
                     self._project_id = self.rpc.analyze.project.lookup_by_name(name=project)
         else:
-            self._project_id = rpc.project_id
+            self._project_id = self.rpc.project_id
 
         if self._project_id:
             self._project_name = self.rpc.analyze.project.project(project_id=self._project_id, keys=['name'])['name']
@@ -305,7 +305,7 @@ class Connection:
 
         def to_bool(val):
             if val in falsey_strings:
-                return True
+                return False
             return bool(val)
 
         def to_timedelta(val):
