@@ -1,0 +1,524 @@
+name: Claude PR Review
+
+# ------------------------------------------------------------------------------
+# Trigger policy (intentional):
+#   * `pull_request`         — opened / reopened / ready_for_review ONLY.
+#                              We deliberately do NOT include `synchronize`, so
+#                              new commits after the initial review do NOT cause
+#                              another automatic review. Re-engage Claude by
+#                              @-mentioning it instead.
+#   * `issue_comment`        — any new top-level PR comment containing `@claude`.
+#   * `pull_request_review_comment`
+#                            — any new inline review comment containing `@claude`.
+#
+# Pipeline:
+#   pull_request → triage → review        (triage chooses Haiku or Sonnet)
+#   comment with @claude → followup       (always Sonnet)
+#
+# Cost / noise guardrails:
+#   * `paths-ignore`        — docs/lockfile-only PRs never trigger the workflow.
+#   * Free pre-flight gate  — skip tiny diffs and mixed lockfile-only PRs before
+#                             any API call.
+#   * Haiku triage          — one cheap Haiku call decides skip / Haiku review /
+#                             Sonnet review.
+#   * Author filter         — `[bot]` authors are skipped (dependabot, etc.).
+#   * Draft filter          — drafts are skipped.
+#   * Concurrency           — cancels in-flight jobs on the same PR.
+#   * Self-call guard       — bot comments don't re-trigger the bot.
+# ------------------------------------------------------------------------------
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    # Deliberately NOT ignored: `**/*.md` (the reviewer's own playbook is .md
+    # and must be reviewed) and `**/*.txt` (requirements.txt dependency bumps
+    # are exactly the supply-chain change that needs review). Trivial doc-only
+    # PRs are dropped cheaply downstream by the pre-flight gate + Haiku triage.
+    paths-ignore:
+      - '**/*.rst'
+      - '**/*.adoc'
+      - '**/CHANGELOG*'
+      - '**/LICENSE*'
+      - '**.lock'
+      - '**/package-lock.json'
+      - '**/yarn.lock'
+      - '**/pnpm-lock.yaml'
+      - '**/poetry.lock'
+      - '**/uv.lock'
+      - '**/Pipfile.lock'
+      - '**/Cargo.lock'
+      - '**/Gemfile.lock'
+      - '**/composer.lock'
+      - '**/go.sum'
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  # No id-token: write — we authenticate with anthropic_api_key + github_token
+  # directly, not OIDC federation. Least-privilege matters here because this
+  # workflow hands Bash to an LLM reading untrusted PR content.
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  # false, not true: an @claude comment or a reopen while a review is still
+  # running must NOT cancel that in-flight review (it would never post). We
+  # don't trigger on `synchronize`, so rapid-fire runs aren't a cost concern.
+  cancel-in-progress: false
+
+jobs:
+  # ============================================================================
+  # Triage — pre-flight gate (free) + Haiku decision. Chooses skip / haiku /
+  # sonnet for the review job to consume.
+  # ============================================================================
+  triage:
+    # author_association gate: only OWNER/MEMBER/COLLABORATOR PRs are auto-
+    # reviewed. Fork PRs from outside contributors get no secrets anyway (so
+    # the review job is skipped via the missing-key guard); this also stops
+    # the triage API spend on untrusted PRs. Trade-off: external/OSS PRs are
+    # not auto-reviewed — re-engage with an @claude comment from a maintainer.
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      !endsWith(github.event.pull_request.user.login, '[bot]') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      verdict: ${{ steps.decide.outputs.verdict }}
+      reason:  ${{ steps.decide.outputs.reason }}
+      model:   ${{ steps.decide.outputs.model }}
+    steps:
+      # SECURITY: egress firewall — MUST be the first step. Blocks all
+      # outbound traffic except the allowlist, so a prompt-injected jailbreak
+      # cannot exfiltrate ANTHROPIC_API_KEY / the GitHub token to attacker
+      # infrastructure even though Claude has Bash. disable-sudo stops a
+      # jailbreak from tearing the firewall down. If a legitimate run is
+      # blocked, the run summary names the denied endpoint — add it below
+      # (or set egress-policy: audit briefly to learn the set).
+      - name: Harden runner (egress firewall)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      # ------------------------------------------------------------------------
+      # Free pre-flight: skip tiny diffs and lockfile-only PRs before spending
+      # any tokens.
+      # ------------------------------------------------------------------------
+      - name: Pre-flight gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+          PR:   ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          MIN_LINES: "10"
+        run: |
+          set -euo pipefail
+
+          info=$(gh pr view "$PR" --repo "$REPO" --json additions,deletions,files)
+          adds=$(jq -r '.additions' <<<"$info")
+          dels=$(jq -r '.deletions' <<<"$info")
+          total=$((adds + dels))
+          echo "Diff size: +$adds / -$dels  ($total lines)"
+
+          if [ "$total" -lt "$MIN_LINES" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=diff too small ($total lines)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          non_lock=$(jq -r '
+            [.files[] | select(.path |
+              test("(^|/)(package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml|poetry\\.lock|uv\\.lock|Pipfile\\.lock|Cargo\\.lock|Gemfile\\.lock|composer\\.lock|go\\.sum)$") | not
+            )] | length
+          ' <<<"$info")
+          if [ "$non_lock" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=lockfile-only PR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------------
+      # Haiku triage: one short API call. Decides verdict + which model the
+      # review job should use.
+      # ------------------------------------------------------------------------
+      - name: Haiku triage
+        id: haiku
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+          PR:   ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HAIKU_MODEL:  "claude-haiku-4-5-20251001"
+          SONNET_MODEL: "claude-sonnet-4-6"
+        run: |
+          set -euo pipefail
+
+          # No key → can't triage or review. Skip cleanly instead of making a
+          # doomed API call (and cascading into a failing review job).
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::warning::ANTHROPIC_API_KEY not configured; skipping Claude review."
+            echo "verdict=skip"                                 >> "$GITHUB_OUTPUT"
+            echo "reason=ANTHROPIC_API_KEY not configured"       >> "$GITHUB_OUTPUT"
+            echo "model="                                        >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          info=$(gh pr view "$PR" --repo "$REPO" \
+            --json title,body,additions,deletions,files)
+          title=$(jq -r '.title // ""' <<<"$info")
+          body=$(jq -r '.body  // ""' <<<"$info")
+          adds=$(jq -r '.additions' <<<"$info")
+          dels=$(jq -r '.deletions' <<<"$info")
+          files=$(jq -r '[.files[].path] | join(", ")' <<<"$info")
+          # Capture then truncate in-shell. Piping to `head -c` closes the
+          # pipe early, killing `gh` with SIGPIPE (exit 141) under
+          # `set -o pipefail` on any diff larger than the cap.
+          diff=$(gh pr diff "$PR" --repo "$REPO")
+          diff=${diff:0:8000}
+
+          user_msg=$(printf 'Triage this pull request. Pick one verdict.\n\nTitle: %s\nFiles: %s\nSize: +%s / -%s\nDescription:\n%s\n\nDiff preview (first 8KB):\n%s\n\nReply with ONLY a JSON object, no prose:\n{"verdict":"skip|haiku-review|sonnet-review","reason":"<one short sentence>"}\n\nGuidance:\n- skip: trivial — pure formatting, dependency bump, generated code, no real logic change.\n- haiku-review: small, low-risk — style cleanup with tests, simple refactor in internal helpers, isolated bug fix in a leaf module.\n- sonnet-review: anything with control flow changes, security boundaries, schema/API changes, concurrency, new features, error handling, or non-trivial bug fixes.\n\nWhen in doubt, prefer sonnet-review.' \
+            "$title" "$files" "$adds" "$dels" "$body" "$diff")
+
+          payload=$(jq -n \
+            --arg model "$HAIKU_MODEL" \
+            --arg content "$user_msg" \
+            '{model: $model, max_tokens: 300, messages: [{role:"user", content:$content}]}')
+
+          resp=$(curl -sS https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d "$payload")
+
+          raw=$(jq -r '.content[0].text // ""' <<<"$resp")
+          echo "Haiku raw output: $raw"
+
+          # Robust JSON extraction (handles markdown fences and stray prose).
+          parsed=$(python3 - <<'PY' "$raw"
+          import json, re, sys
+          t = sys.argv[1].strip()
+          if t.startswith("```"):
+              t = re.sub(r'^```(?:json)?', '', t)
+              t = re.sub(r'```$', '', t).strip()
+          m = re.search(r'\{.*\}', t, re.DOTALL)
+          if m:
+              t = m.group(0)
+          try:
+              obj = json.loads(t)
+              v = obj.get("verdict", "sonnet-review")
+              r = obj.get("reason", "(no reason)")
+          except Exception:
+              v, r = "sonnet-review", "triage parse failed; defaulting to Sonnet"
+          if v not in ("skip", "haiku-review", "sonnet-review"):
+              v, r = "sonnet-review", f"unknown verdict; defaulting ({r})"
+          # `r` is model output shaped by attacker-controllable PR content.
+          # Collapse whitespace/newlines and cap length so it can't smuggle
+          # extra lines into $GITHUB_OUTPUT or break the tab-delimited parse.
+          r = " ".join(str(r).split())[:200]
+          print(f"{v}\t{r}")
+          PY
+          )
+
+          verdict=$(cut -f1 <<<"$parsed")
+          reason=$(cut -f2 <<<"$parsed")
+
+          case "$verdict" in
+            haiku-review)  model="$HAIKU_MODEL"  ;;
+            sonnet-review) model="$SONNET_MODEL" ;;
+            skip)          model="" ;;
+            *)             model="$SONNET_MODEL" ;;
+          esac
+
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason"   >> "$GITHUB_OUTPUT"
+          echo "model=$model"     >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------------------
+      # Consolidate gate + Haiku outputs into job-level outputs.
+      # ------------------------------------------------------------------------
+      - name: Decide final verdict
+        id: decide
+        # Pass step outputs via env, never inline `${{ }}` into the script
+        # body: `reason` is model-derived from attacker-controllable PR
+        # content, and inline interpolation would let it execute as shell.
+        # Env expansion does not re-enter the shell parser.
+        env:
+          GATE_SKIP:     ${{ steps.gate.outputs.skip }}
+          GATE_REASON:   ${{ steps.gate.outputs.reason }}
+          HAIKU_VERDICT: ${{ steps.haiku.outputs.verdict }}
+          HAIKU_REASON:  ${{ steps.haiku.outputs.reason }}
+          HAIKU_MODEL:   ${{ steps.haiku.outputs.model }}
+        run: |
+          set -euo pipefail
+          if [ "$GATE_SKIP" = "true" ]; then
+            verdict=skip
+            reason="$GATE_REASON"
+            model=""
+          else
+            verdict="$HAIKU_VERDICT"
+            reason="$HAIKU_REASON"
+            model="$HAIKU_MODEL"
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason"   >> "$GITHUB_OUTPUT"
+          echo "model=$model"     >> "$GITHUB_OUTPUT"
+          echo "::notice::Triage verdict: $verdict — $reason (model: ${model:-none})"
+
+  # ============================================================================
+  # Review — runs the model the triage job selected. Skipped if triage said
+  # `skip` (or didn't run because event wasn't `pull_request`).
+  # ============================================================================
+  review:
+    needs: triage
+    if: needs.triage.outputs.verdict != 'skip' && needs.triage.outputs.verdict != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # SECURITY: egress firewall — see rationale in the triage job. This is
+      # the primary exfil control for the Bash + secrets review context.
+      - name: Harden runner (egress firewall)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude review (${{ needs.triage.outputs.verdict }})
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+          # SECURITY: `Bash` is required for the `gh pr view/diff/api` calls
+          # the review flow makes. The egress firewall (harden-runner, first
+          # step, block + disable-sudo) is the PRIMARY exfil control: a
+          # jailbroken Claude cannot reach attacker infra and cannot tear the
+          # firewall down. Defense-in-depth: CLAUDE_REVIEWER_TOKEN MUST be a
+          # fine-grained token scoped to THIS repo only, permissions Pull
+          # requests: read/write, Contents: read, Metadata: read — nothing
+          # else (no Contents write, no admin). Residual:
+          # exfil via an allowed host (e.g. posting a secret into a PR comment)
+          # is still possible but noisy, visible, and token-scope-limited.
+          claude_args: >-
+            --model ${{ needs.triage.outputs.model }}
+            --max-turns 12
+            --allowedTools Read,Grep,Glob,Bash
+          prompt: |
+            You are reviewing pull request #${{ github.event.pull_request.number }}
+            in ${{ github.repository }}.
+
+            Triage tier: ${{ needs.triage.outputs.verdict }}
+
+            STEP 1 — Load your reviewer playbook and repo-specific context:
+              a. Read .github/claude-review-guidelines.md (reviewer persona,
+                 quality bar, verdict policy). REQUIRED.
+              b. Read CLAUDE.md at the repo root if it exists (repo-specific
+                 conventions, architecture notes, style rules, do-not-touch
+                 areas). Apply it on top of the shared guidelines.
+
+              Precedence when they conflict:
+                * Repo-specific rules in CLAUDE.md win for repo-specific facts
+                  (e.g. "this module is being deprecated, don't suggest fixes").
+                * The shared guidelines win for review style and verdict policy
+                  (e.g. tone, what NOT to do, APPROVE vs. REQUEST_CHANGES).
+
+            STEP 2 — Gather PR context:
+              gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
+                --json title,body,baseRefName,headRefName,author,files,additions,deletions
+              gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }}
+
+            STEP 3 — Investigate. Use Read / Grep / Glob to look at surrounding
+            code: callers of changed functions, related tests, adjacent modules.
+            Don't review the diff in isolation. Skip investigation for trivial
+            changes (haiku-review tier).
+
+            STEP 4 — Decide a verdict:
+              APPROVE          — correct; any feedback is clearly minor.
+              COMMENT          — substantive feedback, nothing blocks merge.
+              REQUEST_CHANGES  — at least one real correctness, security, or
+                                 contract-breaking issue.
+
+            STEP 5 — Post a REAL GitHub Review (not a plain comment) so the
+            verdict shows up properly and inline comments anchor to the diff.
+            Use `gh api` directly:
+
+              cat > /tmp/review.json <<'JSON'
+              {
+                "event": "<APPROVE|COMMENT|REQUEST_CHANGES>",
+                "body": "<markdown summary — 2-5 sentences>\n\n_Reply with `@claude <question>` to follow up._",
+                "comments": [
+                  {"path": "<file>", "line": <int>, "side": "RIGHT", "body": "<markdown>"}
+                ]
+              }
+              JSON
+              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+                --method POST --input /tmp/review.json
+
+            Rules:
+              - `line` MUST be a line that appears on the new (RIGHT) side of the
+                diff. Use `gh pr diff` as the source of truth; do not invent line
+                numbers — invalid lines cause the API to reject the entire review.
+              - Cap inline comments at 8. Pick the highest-signal issues.
+              - Do not approve if there's an unresolved correctness or security
+                concern.
+              - haiku-review tier: keep the summary short and comments minimal.
+                Aim for at most 3 inline comments unless there's a clear reason.
+
+            STEP 6 — When done, reply to me with exactly one line, e.g.:
+              "Posted REQUEST_CHANGES review with 3 inline comments."
+            Keep it short — the action will post this as a follow-up status
+            comment, and we don't want it to duplicate the review summary.
+
+            LOOP GUARD — end every comment you post (the GitHub Review body
+            AND this status line) with this exact marker on its own final
+            line. The followup job ignores any comment containing it, so the
+            bot can never re-trigger itself:
+              <!-- claude-reviewer -->
+
+  # ============================================================================
+  # Follow-up — only path that re-engages Claude after the initial review.
+  # Always uses Sonnet (no triage); humans @-mentioning Claude expect quality.
+  # ============================================================================
+  followup:
+    # author_association gate closes the anonymous public-repo vector: anyone
+    # could otherwise comment `@claude <injection>` and trigger this secrets-
+    # bearing job. Only OWNER/MEMBER/COLLABORATOR may invoke it. The marker
+    # exclusion is the loop guard — the bot stamps every comment it posts with
+    # `<!-- claude-reviewer -->`, so its own messages never re-trigger it
+    # regardless of whether the token's account carries a `[bot]` suffix.
+    if: |
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, '@claude') &&
+       !contains(github.event.comment.body, '<!-- claude-reviewer -->') &&
+       !endsWith(github.event.comment.user.login, '[bot]') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+       contains(github.event.comment.body, '@claude') &&
+       !contains(github.event.comment.body, '<!-- claude-reviewer -->') &&
+       !endsWith(github.event.comment.user.login, '[bot]') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # SECURITY: egress firewall — see rationale in the triage job. Primary
+      # exfil control for the Bash + secrets follow-up context.
+      - name: Harden runner (egress firewall)
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      # Mirror the triage key guard: skip cleanly (no failed-run noise) when
+      # ANTHROPIC_API_KEY isn't configured for this repo.
+      - name: Require ANTHROPIC_API_KEY
+        id: keycheck
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::warning::ANTHROPIC_API_KEY not configured; skipping @claude follow-up."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Claude follow-up
+        if: steps.keycheck.outputs.present == 'true'
+        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+          # SECURITY: same Bash/token rationale as the review job above.
+          claude_args: >-
+            --model claude-sonnet-4-6
+            --max-turns 10
+            --allowedTools Read,Grep,Glob,Bash
+          prompt: |
+            You were @-mentioned in a PR thread on ${{ github.repository }}.
+            Load your context:
+              a. Read .github/claude-review-guidelines.md for your reviewer
+                 persona and quality bar. REQUIRED.
+              b. Read CLAUDE.md at the repo root if it exists, for
+                 repo-specific conventions and architecture notes.
+            Repo-specific facts in CLAUDE.md override the shared guidelines
+            when they conflict on repo-specific matters.
+
+            The action provides the triggering comment and thread context. Use
+            `gh pr view` / `gh pr diff` if you need the latest PR state or diff
+            (it may have changed since the initial review — this is a follow-up).
+            Use Read / Grep / Glob to investigate the code if the question
+            requires it.
+
+            If the user is asking a question, answer it concisely and technically
+            in your reply. The action will post your reply in the same thread.
+
+            If the user is explicitly asking for a re-review of the PR (phrases
+            like "please re-review", "review again", "look at the new commits"),
+            run the full review flow from
+            .github/claude-review-guidelines.md and post a real GitHub Review:
+
+              gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }}/reviews \
+                --method POST --input /tmp/review.json
+
+            with `event`, `body`, and `comments[]` as in the initial review job.
+
+            Be direct. No filler. No emojis.
+
+            LOOP GUARD — end every comment you post with this exact marker on
+            its own final line. The followup job ignores any comment that
+            contains it, so you can never re-trigger yourself:
+              <!-- claude-reviewer -->
