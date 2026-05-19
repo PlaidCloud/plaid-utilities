@@ -203,7 +203,7 @@ class Connection:
 
                 yield row
 
-    def get_data(self, data_source: "Table|str", return_type='df', encoding='utf-8', clean=True):
+    def get_data(self, data_source: "Table|str|sqlalchemy.sql.Select", return_type='df', encoding='utf-8', clean=True) -> "str|pd.DataFrame":
         if return_type == 'df':
             if isinstance(data_source, Table):
                 return self.get_dataframe(data_source, encoding=encoding, clean=clean)
