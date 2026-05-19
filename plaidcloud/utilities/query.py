@@ -114,10 +114,8 @@ class Connection:
     def udf(self):
         if self._udf is self._NOT_LOADED:
             try:
-                self._load_udf_params()
+                self._udf = self._load_udf_params()
             except Exception:
-                self._udf = None
-            if self._udf is self._NOT_LOADED:
                 self._udf = None
         return self._udf
 
@@ -731,10 +729,9 @@ class Connection:
     def get_table(self, table_name):
         return Table(self, table_name)
 
-    def _load_udf_params(self):
-        self.udf = None
+    def _load_udf_params(self) -> "UDFParams | None":
         if not isinstance(self.rpc.step_id, str):
-            return
+            return None
         config = self.rpc.analyze.step.step(
             project_id=self._project_id,
             step_id=self.rpc.step_id
@@ -751,7 +748,7 @@ class Connection:
             (apply_variables(v['value'], self.variables), v['name'])
             for v in config.get('variables', [])
         ]
-        self.udf= UDFParams(
+        return UDFParams(
             source_by_name={s[1]: s[0] for s in _sources},
             sources=[s[0] for s in _sources],
             target_by_name={t[1]: t[0] for t in _targets},
