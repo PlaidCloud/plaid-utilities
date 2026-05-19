@@ -320,7 +320,7 @@ jobs:
     needs: triage
     if: needs.triage.outputs.verdict == 'haiku-review' || needs.triage.outputs.verdict == 'sonnet-review'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       # SECURITY: egress firewall — see rationale in the triage job. This is
       # the primary exfil control for the Bash + secrets review context.
@@ -363,7 +363,7 @@ jobs:
           # is still possible but noisy, visible, and token-scope-limited.
           claude_args: >-
             --model ${{ needs.triage.outputs.model }}
-            --max-turns 12
+            --max-turns 30
             --allowedTools Read,Grep,Glob,Bash
           prompt: |
             You are reviewing pull request #${{ github.event.pull_request.number }}
