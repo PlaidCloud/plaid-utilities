@@ -12,15 +12,19 @@ name: Claude PR Review
 #                            — any new inline review comment containing `@claude`.
 #
 # Pipeline:
-#   pull_request → triage → review        (triage chooses Haiku or Sonnet)
+#   pull_request → triage → review        (every eligible PR gets a review)
+#   review can't run     → status         (posts a "did not run" comment)
 #   comment with @claude → followup       (always Sonnet)
+#
+# Review policy: every eligible PR gets a posted GitHub Review — no silent
+# skip. Trivial PRs (tiny diff / lockfile-only) still get a cheap Haiku review
+# that APPROVEs only after reading the diff and finding no real issues.
 #
 # Cost / noise guardrails:
 #   * `paths-ignore`        — docs/lockfile-only PRs never trigger the workflow.
-#   * Free pre-flight gate  — skip tiny diffs and mixed lockfile-only PRs before
-#                             any API call.
-#   * Haiku triage          — one cheap Haiku call decides skip / Haiku review /
-#                             Sonnet review.
+#   * Free pre-flight gate  — routes tiny / lockfile-only PRs to the cheap
+#                             Haiku tier (no triage API call); never skips.
+#   * Haiku triage          — one cheap Haiku call picks Haiku vs Sonnet review.
 #   * Author filter         — `[bot]` authors are skipped (dependabot, etc.).
 #   * Draft filter          — drafts are skipped.
 #   * Concurrency           — cancels in-flight jobs on the same PR.
@@ -33,7 +37,7 @@ on:
     # Deliberately NOT ignored: `**/*.md` (the reviewer's own playbook is .md
     # and must be reviewed) and `**/*.txt` (requirements.txt dependency bumps
     # are exactly the supply-chain change that needs review). Trivial doc-only
-    # PRs are dropped cheaply downstream by the pre-flight gate + Haiku triage.
+    # PRs are handled cheaply by the Haiku tier, not dropped.
     paths-ignore:
       - '**/*.rst'
       - '**/*.adoc'
@@ -72,8 +76,9 @@ concurrency:
 
 jobs:
   # ============================================================================
-  # Triage — pre-flight gate (free) + Haiku decision. Chooses skip / haiku /
-  # sonnet for the review job to consume.
+  # Triage — free pre-flight gate (classifies trivial vs normal) + Haiku
+  # decision. Outputs the review tier (haiku-review / sonnet-review) or
+  # `no-key` when no API key is configured. Never emits a skip.
   # ============================================================================
   triage:
     # author_association gate: only OWNER/MEMBER/COLLABORATOR PRs are auto-
@@ -121,8 +126,9 @@ jobs:
           fetch-depth: 0
 
       # ------------------------------------------------------------------------
-      # Free pre-flight: skip tiny diffs and lockfile-only PRs before spending
-      # any tokens.
+      # Free pre-flight: classify the PR. Tiny diffs and lockfile-only PRs are
+      # routed to the cheap Haiku tier (skipping the triage API call), never
+      # dropped — every eligible PR still gets a posted review.
       # ------------------------------------------------------------------------
       - name: Pre-flight gate
         id: gate
@@ -140,9 +146,11 @@ jobs:
           total=$((adds + dels))
           echo "Diff size: +$adds / -$dels  ($total lines)"
 
+          # `exit 0` ends THIS step successfully; it does not skip the job.
+          # Later steps gate on steps.gate.outputs.tier.
           if [ "$total" -lt "$MIN_LINES" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "reason=diff too small ($total lines)" >> "$GITHUB_OUTPUT"
+            echo "tier=trivial" >> "$GITHUB_OUTPUT"
+            echo "reason=small diff ($total lines)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -152,20 +160,21 @@ jobs:
             )] | length
           ' <<<"$info")
           if [ "$non_lock" -eq 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "tier=trivial" >> "$GITHUB_OUTPUT"
             echo "reason=lockfile-only PR" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tier=normal" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------------------
       # Haiku triage: one short API call. Decides verdict + which model the
-      # review job should use.
+      # review job should use. Only runs for the `normal` tier — trivial PRs
+      # skip straight to a cheap Haiku review (no triage call needed).
       # ------------------------------------------------------------------------
       - name: Haiku triage
         id: haiku
-        if: steps.gate.outputs.skip == 'false'
+        if: steps.gate.outputs.tier == 'normal'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
@@ -176,11 +185,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # No key → can't triage or review. Skip cleanly instead of making a
-          # doomed API call (and cascading into a failing review job).
+          # No key → can't triage or review. Emit `no-key`; the Decide step
+          # also independently checks key presence so the trivial path (which
+          # skips this step) is covered too.
           if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "::warning::ANTHROPIC_API_KEY not configured; skipping Claude review."
-            echo "verdict=skip"                                 >> "$GITHUB_OUTPUT"
+            echo "::warning::ANTHROPIC_API_KEY not configured; cannot run Claude review."
+            echo "verdict=no-key"                                >> "$GITHUB_OUTPUT"
             echo "reason=ANTHROPIC_API_KEY not configured"       >> "$GITHUB_OUTPUT"
             echo "model="                                        >> "$GITHUB_OUTPUT"
             exit 0
@@ -199,7 +209,7 @@ jobs:
           diff=$(gh pr diff "$PR" --repo "$REPO")
           diff=${diff:0:8000}
 
-          user_msg=$(printf 'Triage this pull request. Pick one verdict.\n\nTitle: %s\nFiles: %s\nSize: +%s / -%s\nDescription:\n%s\n\nDiff preview (first 8KB):\n%s\n\nReply with ONLY a JSON object, no prose:\n{"verdict":"skip|haiku-review|sonnet-review","reason":"<one short sentence>"}\n\nGuidance:\n- skip: trivial — pure formatting, dependency bump, generated code, no real logic change.\n- haiku-review: small, low-risk — style cleanup with tests, simple refactor in internal helpers, isolated bug fix in a leaf module.\n- sonnet-review: anything with control flow changes, security boundaries, schema/API changes, concurrency, new features, error handling, or non-trivial bug fixes.\n\nWhen in doubt, prefer sonnet-review.' \
+          user_msg=$(printf 'Triage this pull request. Pick one verdict.\n\nTitle: %s\nFiles: %s\nSize: +%s / -%s\nDescription:\n%s\n\nDiff preview (first 8KB):\n%s\n\nReply with ONLY a JSON object, no prose:\n{"verdict":"haiku-review|sonnet-review","reason":"<one short sentence>"}\n\nGuidance:\n- haiku-review: small, low-risk — trivial or formatting-only changes, dependency/lockfile bumps, style cleanup, simple refactor in internal helpers, isolated bug fix in a leaf module.\n- sonnet-review: anything with control flow changes, security boundaries, schema/API changes, concurrency, new features, error handling, or non-trivial bug fixes.\n\nWhen in doubt, prefer sonnet-review.' \
             "$title" "$files" "$adds" "$dels" "$body" "$diff")
 
           payload=$(jq -n \
@@ -232,7 +242,7 @@ jobs:
               r = obj.get("reason", "(no reason)")
           except Exception:
               v, r = "sonnet-review", "triage parse failed; defaulting to Sonnet"
-          if v not in ("skip", "haiku-review", "sonnet-review"):
+          if v not in ("haiku-review", "sonnet-review"):
               v, r = "sonnet-review", f"unknown verdict; defaulting ({r})"
           # `r` is model output shaped by attacker-controllable PR content.
           # Collapse whitespace/newlines and cap length so it can't smuggle
@@ -248,7 +258,6 @@ jobs:
           case "$verdict" in
             haiku-review)  model="$HAIKU_MODEL"  ;;
             sonnet-review) model="$SONNET_MODEL" ;;
-            skip)          model="" ;;
             *)             model="$SONNET_MODEL" ;;
           esac
 
@@ -264,23 +273,38 @@ jobs:
         # Pass step outputs via env, never inline `${{ }}` into the script
         # body: `reason` is model-derived from attacker-controllable PR
         # content, and inline interpolation would let it execute as shell.
-        # Env expansion does not re-enter the shell parser.
+        # Env expansion does not re-enter the shell parser. HAVE_KEY is the
+        # boolean result of a secret-presence test — the secret itself is
+        # never exposed.
         env:
-          GATE_SKIP:     ${{ steps.gate.outputs.skip }}
-          GATE_REASON:   ${{ steps.gate.outputs.reason }}
-          HAIKU_VERDICT: ${{ steps.haiku.outputs.verdict }}
-          HAIKU_REASON:  ${{ steps.haiku.outputs.reason }}
-          HAIKU_MODEL:   ${{ steps.haiku.outputs.model }}
+          GATE_TIER:         ${{ steps.gate.outputs.tier }}
+          GATE_REASON:       ${{ steps.gate.outputs.reason }}
+          HAIKU_VERDICT:     ${{ steps.haiku.outputs.verdict }}
+          HAIKU_REASON:      ${{ steps.haiku.outputs.reason }}
+          HAIKU_MODEL:       ${{ steps.haiku.outputs.model }}
+          HAVE_KEY:          ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAIKU_MODEL_NAME:  "claude-haiku-4-5-20251001"
+          SONNET_MODEL_NAME: "claude-sonnet-4-6"
         run: |
           set -euo pipefail
-          if [ "$GATE_SKIP" = "true" ]; then
-            verdict=skip
-            reason="$GATE_REASON"
+          if [ "$HAVE_KEY" != "true" ]; then
+            # No key anywhere → review job is skipped; the status job posts a
+            # visible "did not run" comment so there is never a silent skip.
+            verdict=no-key
+            reason="ANTHROPIC_API_KEY not configured"
             model=""
+          elif [ "$GATE_TIER" = "trivial" ]; then
+            # Trivial tier still gets a real (cheap) Haiku review that decides
+            # APPROVE only after reading the diff — not a blind size approve.
+            verdict=haiku-review
+            reason="trivial — $GATE_REASON"
+            model="$HAIKU_MODEL_NAME"
           else
-            verdict="$HAIKU_VERDICT"
-            reason="$HAIKU_REASON"
-            model="$HAIKU_MODEL"
+            # Normal tier: trust the Haiku triage, but never silently skip —
+            # fail safe to a Sonnet review if triage produced no output.
+            verdict="${HAIKU_VERDICT:-sonnet-review}"
+            reason="${HAIKU_REASON:-haiku triage produced no output; defaulting to Sonnet}"
+            model="${HAIKU_MODEL:-$SONNET_MODEL_NAME}"
           fi
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
           echo "reason=$reason"   >> "$GITHUB_OUTPUT"
@@ -288,12 +312,13 @@ jobs:
           echo "::notice::Triage verdict: $verdict — $reason (model: ${model:-none})"
 
   # ============================================================================
-  # Review — runs the model the triage job selected. Skipped if triage said
-  # `skip` (or didn't run because event wasn't `pull_request`).
+  # Review — runs the model the triage job selected. Every eligible PR reaches
+  # here; only `no-key` (or triage not running, e.g. draft / fork) skips it,
+  # and the status job then posts a visible "did not run" comment.
   # ============================================================================
   review:
     needs: triage
-    if: needs.triage.outputs.verdict != 'skip' && needs.triage.outputs.verdict != ''
+    if: needs.triage.outputs.verdict == 'haiku-review' || needs.triage.outputs.verdict == 'sonnet-review'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -366,14 +391,22 @@ jobs:
 
             STEP 3 — Investigate. Use Read / Grep / Glob to look at surrounding
             code: callers of changed functions, related tests, adjacent modules.
-            Don't review the diff in isolation. Skip investigation for trivial
-            changes (haiku-review tier).
+            Don't review the diff in isolation. Keep investigation light for
+            trivial changes (haiku-review tier) — but still actually read the
+            full diff before deciding.
 
             STEP 4 — Decide a verdict:
               APPROVE          — correct; any feedback is clearly minor.
               COMMENT          — substantive feedback, nothing blocks merge.
               REQUEST_CHANGES  — at least one real correctness, security, or
                                  contract-breaking issue.
+
+              Trivial-change rule (haiku-review tier): after actually reading
+              the diff, if you find no real correctness/security/contract
+              issue, you MUST post APPROVE — do not downgrade to COMMENT over
+              nits or style. Approval is earned by inspecting the diff, never
+              by size alone; still REQUEST_CHANGES if a real issue exists even
+              in a tiny diff.
 
             STEP 5 — Post a REAL GitHub Review (not a plain comment) so the
             verdict shows up properly and inline comments anchor to the diff.
@@ -382,7 +415,7 @@ jobs:
               cat > /tmp/review.json <<'JSON'
               {
                 "event": "<APPROVE|COMMENT|REQUEST_CHANGES>",
-                "body": "<markdown summary — 2-5 sentences>\n\n_Reply with `@claude <question>` to follow up._",
+                "body": "Automated Claude review (${{ needs.triage.outputs.verdict }}) — <APPROVE|COMMENT|REQUEST_CHANGES>.\n\n<markdown summary — 2-5 sentences>\n\n_Reply with `@claude <question>` to follow up._",
                 "comments": [
                   {"path": "<file>", "line": <int>, "side": "RIGHT", "body": "<markdown>"}
                 ]
@@ -392,6 +425,9 @@ jobs:
                 --method POST --input /tmp/review.json
 
             Rules:
+              - Always post the review (this is the visible "review completed"
+                signal — there is no silent path). The body MUST open with the
+                `Automated Claude review (<tier>) — <verdict>.` status line.
               - `line` MUST be a line that appears on the new (RIGHT) side of the
                 diff. Use `gh pr diff` as the source of truth; do not invent line
                 numbers — invalid lines cause the API to reject the entire review.
@@ -411,6 +447,50 @@ jobs:
             line. The followup job ignores any comment containing it, so the
             bot can never re-trigger itself:
               <!-- claude-reviewer -->
+
+  # ============================================================================
+  # Status — guarantees there is never a silent skip. Runs only when the
+  # review job did NOT post (no API key, triage skipped for draft/fork, or a
+  # workflow error) and posts a single plain comment saying so. No secrets,
+  # no LLM, default token only.
+  # ============================================================================
+  status:
+    needs: [triage, review]
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      needs.review.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post "review did not run" comment
+        env:
+          GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
+          PR:   ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TRIAGE_RESULT: ${{ needs.triage.result }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+          VERDICT: ${{ needs.triage.outputs.verdict }}
+          REASON:  ${{ needs.triage.outputs.reason }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIAGE_RESULT" != "success" ]; then
+            why="triage did not run (ineligible author, or a workflow error)"
+          elif [ "$VERDICT" = "no-key" ]; then
+            why="ANTHROPIC_API_KEY is not configured for this repository"
+          elif [ "$REVIEW_RESULT" = "failure" ]; then
+            why="the review job failed — see the workflow run logs"
+          else
+            why="review did not complete (verdict: ${VERDICT:-none} — ${REASON:-n/a})"
+          fi
+          # `why` is built from our own fixed strings plus the triage reason,
+          # which the triage step already collapses/caps. Pass via stdin
+          # (--body-file -) so nothing re-enters a shell parser.
+          printf '%s\n\n%s\n' \
+            "Automated Claude review did not run: ${why}." \
+            "<!-- claude-reviewer -->" \
+          | gh pr comment "$PR" --repo "$REPO" --body-file -
 
   # ============================================================================
   # Follow-up — only path that re-engages Claude after the initial review.
