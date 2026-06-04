@@ -2306,7 +2306,6 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
                 extrasaction='ignore',
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"'
             )
             if writeheader:
                 wr.writeheader()
@@ -2424,12 +2423,12 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
     )
 
 
 def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, date_format: str = 'YYYY-MM-DD"T"HH:MI:SS'):
-    with open(avro_file_name, 'r') as infile:
+    # Avro is a binary container; fastavro.reader needs a binary stream.
+    with open(avro_file_name, 'rb') as infile:
         with open(csv_file_name, 'w') as outfile:
             reader = avro.reader(infile)
             if start_row:
@@ -2446,7 +2445,6 @@ def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, dat
                 fieldnames=header,
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"',
             )
             writer.writeheader()
             writer.writerows(reader)
@@ -2461,7 +2459,6 @@ def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
         date_format=postgres_to_python_date_format(date_format),
     )
 
@@ -2492,20 +2489,27 @@ def yxdb_to_csv(
     """
 
     try:
-        import yxdb
+        from yxdb.yxdb_reader import YxdbReader
     except ImportError:
         raise ImportError(
             "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
         )
 
-    # read all records via the public API described on PyPI
-    reader = yxdb.YxdbReader(path=yxdb_file_name)
-    fields = reader.list_fields()
-    data = []
-    while reader.next():
-        data.append([reader.read_name(f) for f in fields])
+    # `yxdb` exposes the reader in the yxdb.yxdb_reader submodule (the top-level
+    # package is empty), and list_fields() returns YxdbField objects -- use
+    # their .name for read_name() and the frame columns.
+    reader = YxdbReader(path=yxdb_file_name)
+    try:
+        field_names = [field.name for field in reader.list_fields()]
+        data = []
+        while reader.next():
+            data.append([reader.read_name(name) for name in field_names])
+    finally:
+        # YxdbReader has no context manager; close explicitly so a mid-read
+        # error can't leak the file handle in a long-lived import worker.
+        reader.close()
 
-    df = pd.DataFrame(data, columns=fields)
+    df = pd.DataFrame(data, columns=field_names)
     if start_row:
         df = df.iloc[start_row:]
 
@@ -2514,7 +2518,9 @@ def yxdb_to_csv(
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
+        # No escapechar: pandas rejects escapechar == quotechar, and the default
+        # QUOTE_MINIMAL already doubles embedded quotes, matching the importer's
+        # escape='"' convention.
         date_format=postgres_to_python_date_format(date_format),
     )
 

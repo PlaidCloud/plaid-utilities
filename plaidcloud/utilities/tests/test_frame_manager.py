@@ -270,50 +270,86 @@ class TestFrameManager(unittest.TestCase):
 #        pass
 
     def test_yxdb_to_csv(self):
-        """Verify that yxdb_to_csv correctly delegates to pandas when a
-        lightweight ``yxdb`` reader is available.  The test doesn't require an
-        actual YXDB file; we install a fake module in ``sys.modules`` that
-        yields a predictable set of rows and fields.
+        """Convert a real YXDB fixture to CSV.
+
+        Uses an actual ``.yxdb`` file rather than a fake module so the test
+        exercises the real ``yxdb`` library API (``yxdb.yxdb_reader.YxdbReader``,
+        ``list_fields()`` returning ``YxdbField`` objects). A prior fake-module
+        version asserted the code's own (wrong) assumptions and masked an
+        ``AttributeError: module 'yxdb' has no attribute 'YxdbReader'``.
         """
-        import sys
-        import types
+        pytest.importorskip("yxdb")
+        import os
+        import tempfile
 
-        # simple fake reader mimicking public API documented on PyPI
-        class FakeReader:
-            def __init__(self, path=None, stream=None):
-                # two rows with two columns each
-                self._fields = ["a", "b"]
-                self._rows = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
-                self._idx = -1
-
-            def list_fields(self):
-                return self._fields
-
-            def next(self):
-                self._idx += 1
-                return self._idx < len(self._rows)
-
-            def read_name(self, name):
-                return self._rows[self._idx][name]
-
-            # read_index not needed for this test
-
-        fake_module = types.SimpleNamespace(YxdbReader=FakeReader)
-        sys.modules["yxdb"] = fake_module
-
-        try:
-            yxdb_path = "dummy.yxdb"
-            csv_path = "out.csv"
-            # call the conversion; our fake reader ignores file contents
-            frame_manager.yxdb_to_csv(yxdb_path, csv_path)
-            # read result and assert contents
+        # Iris80.yxdb is Alteryx's bundled sample: the 80% training split of the
+        # 150-row Iris dataset = 120 rows (the name is the split %, not the count).
+        fixture = os.path.join(os.path.dirname(__file__), "fixtures", "Iris80.yxdb")
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = os.path.join(tmp, "iris.csv")
+            frame_manager.yxdb_to_csv(fixture, csv_path)
             df = pd.read_csv(csv_path, sep="\t")
-            assert list(df.columns) == ["a", "b"]
-            assert df.iloc[0].to_dict() == {"a": 1, "b": 2}
-            assert df.iloc[1].to_dict() == {"a": 3, "b": 4}
-        finally:
-            # clean up the fake module so subsequent tests are unaffected
-            del sys.modules["yxdb"]
+
+        assert list(df.columns) == [
+            "Id", "SepalLengthCm", "SepalWidthCm", "PetalLengthCm", "PetalWidthCm", "Species",
+        ]
+        assert len(df) == 120
+        assert df["Species"].iloc[0] == "Iris-setosa"
+
+    def test_json_to_csv_handles_embedded_quotes(self):
+        """csv.DictWriter path (json/avro): dropping escapechar (== quotechar)
+        avoids the ValueError and doubles embedded quotes, so values round-trip."""
+        import json as json_mod
+        import os
+        import tempfile
+
+        records = [{"name": 'say "hi"', "n": 1}, {"name": "a\tb", "n": 2}]
+        with tempfile.TemporaryDirectory() as tmp:
+            jpath = os.path.join(tmp, "in.json")
+            cpath = os.path.join(tmp, "out.csv")
+            with open(jpath, "w") as fh:
+                json_mod.dump(records, fh)
+            frame_manager.json_to_csv(jpath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
+
+    def test_parquet_to_csv_handles_embedded_quotes(self):
+        """pandas to_csv path (parquet/fixedwidth): same fix as yxdb -- embedded
+        quotes/tabs round-trip without the escapechar==quotechar ValueError."""
+        import os
+        import tempfile
+
+        src = pd.DataFrame({"name": ['say "hi"', "a\tb"], "n": [1, 2]})
+        with tempfile.TemporaryDirectory() as tmp:
+            ppath = os.path.join(tmp, "in.parquet")
+            cpath = os.path.join(tmp, "out.csv")
+            src.to_parquet(ppath)
+            frame_manager.parquet_to_csv(ppath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
+
+    def test_avro_to_csv_handles_embedded_quotes(self):
+        """Avro path: binary-mode read + csv.DictWriter without escapechar."""
+        fastavro = pytest.importorskip("fastavro")
+        import os
+        import tempfile
+
+        schema = {
+            "type": "record", "name": "r",
+            "fields": [{"name": "name", "type": "string"}, {"name": "n", "type": "int"}],
+        }
+        records = [{"name": 'say "hi"', "n": 1}, {"name": "a\tb", "n": 2}]
+        with tempfile.TemporaryDirectory() as tmp:
+            apath = os.path.join(tmp, "in.avro")
+            cpath = os.path.join(tmp, "out.csv")
+            with open(apath, "wb") as fh:
+                fastavro.writer(fh, schema, records)
+            frame_manager.avro_to_csv(apath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
 
     def test_lookup(self):
         """Tests to verify lookup capability"""
