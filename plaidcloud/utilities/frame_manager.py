@@ -2306,7 +2306,6 @@ def json_to_csv(json_file_name, csv_file_name, columns=None, writeheader=True):
                 extrasaction='ignore',
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"'
             )
             if writeheader:
                 wr.writeheader()
@@ -2424,7 +2423,6 @@ def fixedwidth_to_csv(fixed_width_file_name, csv_file_name, colspecs):
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
     )
 
 
@@ -2446,7 +2444,6 @@ def avro_to_csv(avro_file_name: str, csv_file_name: str, start_row: int = 0, dat
                 fieldnames=header,
                 delimiter='\t',
                 quotechar='"',
-                escapechar='"',
             )
             writer.writeheader()
             writer.writerows(reader)
@@ -2461,7 +2458,6 @@ def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
         date_format=postgres_to_python_date_format(date_format),
     )
 

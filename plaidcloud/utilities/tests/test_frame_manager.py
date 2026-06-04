@@ -294,6 +294,40 @@ class TestFrameManager(unittest.TestCase):
         assert len(df) == 120
         assert df["Species"].iloc[0] == "Iris-setosa"
 
+    def test_json_to_csv_handles_embedded_quotes(self):
+        """csv.DictWriter path (json/avro): dropping escapechar (== quotechar)
+        avoids the ValueError and doubles embedded quotes, so values round-trip."""
+        import json as json_mod
+        import os
+        import tempfile
+
+        records = [{"name": 'say "hi"', "n": 1}, {"name": "a\tb", "n": 2}]
+        with tempfile.TemporaryDirectory() as tmp:
+            jpath = os.path.join(tmp, "in.json")
+            cpath = os.path.join(tmp, "out.csv")
+            with open(jpath, "w") as fh:
+                json_mod.dump(records, fh)
+            frame_manager.json_to_csv(jpath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
+
+    def test_parquet_to_csv_handles_embedded_quotes(self):
+        """pandas to_csv path (parquet/fixedwidth): same fix as yxdb -- embedded
+        quotes/tabs round-trip without the escapechar==quotechar ValueError."""
+        import os
+        import tempfile
+
+        src = pd.DataFrame({"name": ['say "hi"', "a\tb"], "n": [1, 2]})
+        with tempfile.TemporaryDirectory() as tmp:
+            ppath = os.path.join(tmp, "in.parquet")
+            cpath = os.path.join(tmp, "out.csv")
+            src.to_parquet(ppath)
+            frame_manager.parquet_to_csv(ppath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
+
     def test_lookup(self):
         """Tests to verify lookup capability"""
         # x = frame_manager.lookup(self.df, self.df6, ['Age'], None, ['Age', 'Title'])
