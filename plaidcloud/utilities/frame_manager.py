@@ -2492,20 +2492,23 @@ def yxdb_to_csv(
     """
 
     try:
-        import yxdb
+        from yxdb.yxdb_reader import YxdbReader
     except ImportError:
         raise ImportError(
             "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
         )
 
-    # read all records via the public API described on PyPI
-    reader = yxdb.YxdbReader(path=yxdb_file_name)
-    fields = reader.list_fields()
+    # `yxdb` exposes the reader in the yxdb.yxdb_reader submodule (the top-level
+    # package is empty), and list_fields() returns YxdbField objects -- use
+    # their .name for read_name() and the frame columns.
+    reader = YxdbReader(path=yxdb_file_name)
+    field_names = [field.name for field in reader.list_fields()]
     data = []
     while reader.next():
-        data.append([reader.read_name(f) for f in fields])
+        data.append([reader.read_name(name) for name in field_names])
+    reader.close()
 
-    df = pd.DataFrame(data, columns=fields)
+    df = pd.DataFrame(data, columns=field_names)
     if start_row:
         df = df.iloc[start_row:]
 
@@ -2514,7 +2517,9 @@ def yxdb_to_csv(
         index=False,
         sep='\t',
         quotechar='"',
-        escapechar='"',
+        # No escapechar: pandas rejects escapechar == quotechar, and the default
+        # QUOTE_MINIMAL already doubles embedded quotes, matching the importer's
+        # escape='"' convention.
         date_format=postgres_to_python_date_format(date_format),
     )
 
