@@ -580,6 +580,10 @@ class Connection:
                         sep='\t',
                         encoding='UTF-8',
                         quoting=csv.QUOTE_MINIMAL,
+                        # TODO: escapechar == quotechar ('"') raises ValueError on
+                        # pandas >=2 (same bug fixed in frame_manager's *_to_csv).
+                        # Deferred: audit this path's _load_csv escape convention
+                        # before changing, since it's a broad export path.
                         escapechar='"',
                         compression='zip',
                         date_format='%Y-%m-%dT%H:%M:%S', # This needs to match format passed in _load_csv below

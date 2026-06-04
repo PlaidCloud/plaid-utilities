@@ -282,6 +282,8 @@ class TestFrameManager(unittest.TestCase):
         import os
         import tempfile
 
+        # Iris80.yxdb is Alteryx's bundled sample: the 80% training split of the
+        # 150-row Iris dataset = 120 rows (the name is the split %, not the count).
         fixture = os.path.join(os.path.dirname(__file__), "fixtures", "Iris80.yxdb")
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = os.path.join(tmp, "iris.csv")
@@ -324,6 +326,27 @@ class TestFrameManager(unittest.TestCase):
             cpath = os.path.join(tmp, "out.csv")
             src.to_parquet(ppath)
             frame_manager.parquet_to_csv(ppath, cpath)
+            df = pd.read_csv(cpath, sep="\t")
+        assert df["name"].tolist() == ['say "hi"', "a\tb"]
+        assert df["n"].tolist() == [1, 2]
+
+    def test_avro_to_csv_handles_embedded_quotes(self):
+        """Avro path: binary-mode read + csv.DictWriter without escapechar."""
+        fastavro = pytest.importorskip("fastavro")
+        import os
+        import tempfile
+
+        schema = {
+            "type": "record", "name": "r",
+            "fields": [{"name": "name", "type": "string"}, {"name": "n", "type": "int"}],
+        }
+        records = [{"name": 'say "hi"', "n": 1}, {"name": "a\tb", "n": 2}]
+        with tempfile.TemporaryDirectory() as tmp:
+            apath = os.path.join(tmp, "in.avro")
+            cpath = os.path.join(tmp, "out.csv")
+            with open(apath, "wb") as fh:
+                fastavro.writer(fh, schema, records)
+            frame_manager.avro_to_csv(apath, cpath)
             df = pd.read_csv(cpath, sep="\t")
         assert df["name"].tolist() == ['say "hi"', "a\tb"]
         assert df["n"].tolist() == [1, 2]
