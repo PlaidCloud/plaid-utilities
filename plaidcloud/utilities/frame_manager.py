@@ -2464,6 +2464,37 @@ def parquet_to_csv(parquet_file_name: str, csv_file_name: str, start_row: int = 
 
 
 
+def _geojson_to_wkt(geojson: dict) -> str:
+    """Minimal GeoJSON -> WKT for Alteryx SpatialObj geometry.
+
+    Avoids a shapely dependency. Handles the geometry types the ``yxdb`` library's
+    ``spatial.to_geojson`` emits (Point, MultiPoint, LineString, MultiLineString,
+    Polygon, MultiPolygon).
+    """
+    geom_type = geojson.get('type')
+    coords = geojson.get('coordinates')
+
+    def ring(points):
+        return '(' + ', '.join(f'{x} {y}' for x, y in points) + ')'
+
+    if geom_type == 'Point':
+        return f'POINT ({coords[0]} {coords[1]})'
+    if geom_type == 'MultiPoint':
+        # OGC/ISO form parenthesizes each point -- strict WKT parsers require it.
+        return 'MULTIPOINT (' + ', '.join(f'({x} {y})' for x, y in coords) + ')'
+    if geom_type == 'LineString':
+        return 'LINESTRING ' + ring(coords)
+    if geom_type == 'MultiLineString':
+        return 'MULTILINESTRING (' + ', '.join(ring(line) for line in coords) + ')'
+    if geom_type == 'Polygon':
+        return 'POLYGON (' + ', '.join(ring(r) for r in coords) + ')'
+    if geom_type == 'MultiPolygon':
+        return 'MULTIPOLYGON (' + ', '.join(
+            '(' + ', '.join(ring(r) for r in poly) + ')' for poly in coords
+        ) + ')'
+    raise ValueError(f'Unsupported GeoJSON geometry type: {geom_type!r}')
+
+
 def yxdb_to_csv(
     yxdb_file_name: str,
     csv_file_name: str,
@@ -2494,6 +2525,10 @@ def yxdb_to_csv(
         raise ImportError(
             "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
         )
+    try:
+        from yxdb import spatial as yxdb_spatial
+    except ImportError:
+        yxdb_spatial = None
 
     # `yxdb` exposes the reader in the yxdb.yxdb_reader submodule (the top-level
     # package is empty), and list_fields() returns YxdbField objects -- use
@@ -2501,9 +2536,36 @@ def yxdb_to_csv(
     reader = YxdbReader(path=yxdb_file_name)
     try:
         field_names = [field.name for field in reader.list_fields()]
+
+        # Alteryx SpatialObj fields read back as a binary blob (shapefile-shape
+        # layout). Decode ONLY those to WKT, so converted spatial workflows read
+        # .yxdb geometry the same way they read .TAB / executor geometry. Gate on
+        # the raw Alteryx type ("SpatialObj") rather than "value is bytes" so a
+        # generic Blob is never handed to the shape parser -- arbitrary bytes can
+        # make it raise (struct.error) or spin on a bogus point count. The raw
+        # type lives on the reader's internal metainfo fields; degrade to
+        # no-decode if that internal shape ever changes.
+        spatial_names = set()
+        if yxdb_spatial is not None:
+            try:
+                spatial_names = {
+                    f.name for f in reader._fields
+                    if getattr(f, 'data_type', '') == 'SpatialObj'
+                }
+            except Exception:
+                spatial_names = set()
+
+        def decode(name, value):
+            if name not in spatial_names or not isinstance(value, (bytes, bytearray)):
+                return value
+            try:
+                return _geojson_to_wkt(json.loads(yxdb_spatial.to_geojson(bytes(value))))
+            except Exception:
+                return value  # malformed spatial blob -- leave the raw value
+
         data = []
         while reader.next():
-            data.append([reader.read_name(name) for name in field_names])
+            data.append([decode(name, reader.read_name(name)) for name in field_names])
     finally:
         # YxdbReader has no context manager; close explicitly so a mid-read
         # error can't leak the file handle in a long-lived import worker.

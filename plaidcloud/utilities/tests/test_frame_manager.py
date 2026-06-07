@@ -296,6 +296,33 @@ class TestFrameManager(unittest.TestCase):
         assert len(df) == 120
         assert df["Species"].iloc[0] == "Iris-setosa"
 
+    def test_geojson_to_wkt_point(self):
+        assert frame_manager._geojson_to_wkt(
+            {"type": "Point", "coordinates": [1.0, 2.0]}) == "POINT (1.0 2.0)"
+
+    def test_geojson_to_wkt_polygon(self):
+        assert frame_manager._geojson_to_wkt({
+            "type": "Polygon",
+            "coordinates": [[[-105.5, 44.2], [-105.4, 44.2], [-105.4, 44.3], [-105.5, 44.2]]],
+        }) == "POLYGON ((-105.5 44.2, -105.4 44.2, -105.4 44.3, -105.5 44.2))"
+
+    def test_yxdb_spatialobj_decodes_to_wkt(self):
+        """An Alteryx SpatialObj blob decodes to WKT (so .yxdb geometry reads like
+        .TAB/executor geometry), rather than landing in the CSV as raw bytes."""
+        import struct
+        import json as json_mod
+        spatial = pytest.importorskip("yxdb.spatial")
+        pts = [(-105.5, 44.2), (-105.4, 44.2), (-105.4, 44.3), (-105.5, 44.2)]
+        blob = (
+            struct.pack("<i", 5)                                  # shape type 5 = Polygon
+            + struct.pack("<4d", -105.5, 44.2, -105.4, 44.3)      # bbox
+            + struct.pack("<i", 1)                                # 1 part
+            + struct.pack("<q", len(pts))                         # point count
+            + b"".join(struct.pack("<2d", x, y) for x, y in pts)
+        )
+        wkt = frame_manager._geojson_to_wkt(json_mod.loads(spatial.to_geojson(blob)))
+        assert wkt == "POLYGON ((-105.5 44.2, -105.4 44.2, -105.4 44.3, -105.5 44.2))"
+
     def test_json_to_csv_handles_embedded_quotes(self):
         """csv.DictWriter path (json/avro): dropping escapechar (== quotechar)
         avoids the ValueError and doubles embedded quotes, so values round-trip."""
