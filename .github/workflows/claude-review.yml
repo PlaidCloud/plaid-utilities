@@ -345,7 +345,7 @@ jobs:
           fetch-depth: 0
 
       - name: Claude review (${{ needs.triage.outputs.verdict }})
-        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1
+        uses: anthropics/claude-code-action@fbda2eb1bdc90d319b8d853f5deb53bca199a7c1 # v1
         env:
           GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
         with:
@@ -569,7 +569,7 @@ jobs:
 
       - name: Claude follow-up
         if: steps.keycheck.outputs.present == 'true'
-        uses: anthropics/claude-code-action@51ea8ea73a139f2a74ff649e3092c25a904aed7e # v1
+        uses: anthropics/claude-code-action@fbda2eb1bdc90d319b8d853f5deb53bca199a7c1 # v1
         env:
           GH_TOKEN: ${{ secrets.CLAUDE_REVIEWER_TOKEN || secrets.GITHUB_TOKEN }}
         with:
