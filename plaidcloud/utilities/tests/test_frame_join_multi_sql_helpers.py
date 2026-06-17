@@ -11,7 +11,9 @@ from plaidcloud.utilities.sql_expression import (
     SQLExpressionError,
     check_cartesian_explosion,
     edge_predicate,
+    eval_expression,
     get_column_table,
+    get_safe_dict,
     topo_sort_edges,
 )
 
@@ -421,6 +423,47 @@ class TestGetColumnTableExtension(unittest.TestCase):
         tc = {'source_alias': 'whatever', 'source': 'anything'}
         result = get_column_table([self.a], tc, [self.columns[0]])
         self.assertIs(result, self.a)
+
+
+class TestExpressionAliasExposure(unittest.TestCase):
+    """frame_join_multi target-column expressions reference join aliases (`mdp.name`), not
+    positional `table1`/`table2`. get_safe_dict must expose each alias from tables_by_alias so
+    eval_expression can resolve them; without this the alias raises NameError at execute time."""
+
+    def setUp(self):
+        self.a = _make_table('analyzetable_aaa', ['id', 'firstname']).alias('up')
+        self.b = _make_table('analyzetable_bbb', ['id', 'name']).alias('mdp')
+        self.tables = [self.a, self.b]
+        self.tables_by_alias = {'up': self.a, 'mdp': self.b}
+
+    def test_get_safe_dict_exposes_aliases(self):
+        safe = get_safe_dict(self.tables, tables_by_alias=self.tables_by_alias)
+        # Aliases present in addition to the positional table1/table2 keys.
+        self.assertIn('up', safe)
+        self.assertIn('mdp', safe)
+        self.assertIn('table1', safe)
+        self.assertIs(safe['mdp'], self.b.columns)
+
+    def test_alias_qualified_expression_resolves(self):
+        # The smoking-gun expression shape from the ToS Collections join.
+        expr = "case((mdp.name.isnot(None), mdp.name), else_=up.firstname)"
+        rendered = eval_expression(expr, None, self.tables, tables_by_alias=self.tables_by_alias)
+        sql = _compile_sql(rendered)
+        self.assertIn('CASE', sql.upper())
+        self.assertIn('mdp.name', sql)
+        self.assertIn('up.firstname', sql)
+
+    def test_alias_unknown_without_tables_by_alias(self):
+        # Without alias exposure the alias name is undefined — the pre-fix failure mode.
+        expr = "mdp.name"
+        with self.assertRaises(SQLExpressionError):
+            eval_expression(expr, None, self.tables)
+
+    def test_builtins_win_alias_name_clash(self):
+        # A pathological alias named like a builtin must not shadow the builtin.
+        clash = {'func': self.b}
+        safe = get_safe_dict(self.tables, tables_by_alias=clash)
+        self.assertIs(safe['func'], sqlalchemy.func)
 
 
 if __name__ == '__main__':

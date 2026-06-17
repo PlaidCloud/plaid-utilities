@@ -42,8 +42,17 @@ RESERVED_ALIASES = frozenset({
     'union', 'table', 'inner', 'left', 'right', 'full', 'cross', 'on',
 })
 
-_TABLE_PREFIX_RE = re.compile(r'tab[A-Za-z0-9_-]{1,64}')
+# A source/target table reference is the canonical `analyzetable_<uuid>` id that table_find/
+# table_upsert return and that frame_extract and frame_join_inner/outer also accept (get_frame()
+# resolves it). This is an identifier-shape safety gate only — it keeps dots, quotes, and
+# whitespace out of the SQL the executor emits; the real existence check is get_frame() at execute
+# time. Match the same id shape the rest of the platform uses (cf. core query.py _TABLE_ID_RE)
+# rather than the old `tab`-prefix that never matched a real `analyzetable_` id.
+_TABLE_ID_RE = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,127}')
 _ALIAS_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
+# Positional table names the executor's expression namespace reserves (`table1`, `table2`, ...);
+# the bare `table` is in RESERVED_ALIASES. An alias matching these would be silently shadowed.
+_POSITIONAL_TABLE_RE = re.compile(r'table\d+')
 _COLUMN_REF_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*')
 _COLUMN_ID_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
 
@@ -152,14 +161,18 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         alias = s.get('alias')
         if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias):
             _err('alias_invalid', f'{sfield}.alias')
-        if alias.lower() in RESERVED_ALIASES:
+        # `table` and `table1`/`table2`/... are the positional names the executor exposes in the
+        # expression namespace (get_safe_dict). An alias colliding with one would be silently
+        # shadowed by the positional table — an expression `table1.col` would read the FIRST
+        # source, not this alias — so reject those names (the bare `table` is in RESERVED_ALIASES).
+        if alias.lower() in RESERVED_ALIASES or _POSITIONAL_TABLE_RE.fullmatch(alias.lower()):
             _err('alias_reserved', f'{sfield}.alias')
         if alias.lower() in aliases_lower_to_alias:
             _err('alias_duplicate', f'{sfield}.alias')
         aliases_lower_to_alias[alias.lower()] = alias
 
         source = s.get('source')
-        if not isinstance(source, str) or not _TABLE_PREFIX_RE.fullmatch(source):
+        if not isinstance(source, str) or not _TABLE_ID_RE.fullmatch(source):
             _err('source_not_table_id', f'{sfield}.source')
 
         source_columns = s.get('source_columns')
@@ -342,32 +355,50 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         if agg is not None and (not isinstance(agg, str) or agg not in _AGG_ENUM):
             _err('target_column_agg_invalid', f'{tfield}.agg')
 
-        # Mode key: exactly one of (`source` for column-ref, `expression`, `constant`) must be
-        # set — unless dtype is a 'serial'/'bigserial' or magic-column type. `expression` is
-        # NOT allowed in frame_join_multi (it routes through eval_expression which is the
-        # pre-existing P0 risk in source_where/having; this step intentionally doesn't
-        # extend that surface to target columns).
-        if 'expression' in tc and tc.get('expression'):
-            _err('target_column_expression_not_allowed', f'{tfield}.expression')
+        # Mode key: exactly one of (`source` for a column-ref, `expression`, `constant`) must be
+        # set — unless dtype is a 'serial'/'bigserial' magic-column type. `expression` columns
+        # route through the executor's eval_expression (the same surface as source_where/having)
+        # and may reference the join aliases, which the executor exposes in the expression
+        # namespace. A multi-table CASE like `collectedbyname` can only be expressed this way.
+        # The executor selects "expression mode" with a truthy `if expression:` check
+        # (get_from_clause), so the validator mirrors that truthiness. An empty string is falsy
+        # in both (treated as no expression); a whitespace-only string is truthy but would crash
+        # compile() at execute time, so reject it here (same as `having`/`source_where`).
+        expression = tc.get('expression')
+        if expression is not None and not isinstance(expression, str):
+            _err('target_column_expression_not_string', f'{tfield}.expression')
+        has_expression = bool(expression)
+        if has_expression:
+            if not expression.strip():
+                _err('target_column_expression_empty', f'{tfield}.expression')
+            if len(expression) > 4096:
+                _err('target_column_expression_too_long', f'{tfield}.expression')
         mode_keys = [k for k in ('source', 'constant') if tc.get(k) not in (None, '')]
+        if has_expression:
+            mode_keys.append('expression')
         is_magic = dtype.lower() in {'serial', 'bigserial'} if isinstance(dtype, str) else False
         if not is_magic and len(mode_keys) != 1:
             _err('target_column_mode_required', tfield)
 
-        source_alias = tc.get('source_alias')
-        # source_alias must be a non-empty string. isinstance check first so we don't leak
-        # TypeError from the `in aliases_set` lookup when given a list/dict (round-6 R6-8).
-        if not isinstance(source_alias, str) or not source_alias:
-            _err('source_alias_required', f'{tfield}.source_alias')
-        if source_alias not in aliases_set:
-            _err('source_alias_unknown', f'{tfield}.source_alias')
-        # Cross-check: the target column's `source` must reference a column that exists in
-        # the chosen alias's source_columns. Round-6 caught the column-existence half; round-7
-        # closes the prefix-mismatch half (silent wrong-result if `source = 'a.col'` but
-        # `source_alias = 'b'` and `col` exists in both aliases — executor emits `b.col`).
+        # `source_alias` binds a source-column target to one source (the executor filters
+        # target_columns by source_alias when propagating column properties). Required for
+        # `source`-mode columns; `expression`/`constant`/magic columns aren't tied to a single
+        # source so they don't carry one. Round-5 required it uniformly to close a legacy
+        # `source_table` propagation hole — that hole only ever affected source-mode columns,
+        # so scoping the requirement to source-mode keeps it closed.
         src_field = tc.get('source')
         if isinstance(src_field, str) and src_field:
-            # `source` may be `alias.col` or just `col` per existing get_column_table conventions.
+            source_alias = tc.get('source_alias')
+            # isinstance check first so we don't leak TypeError from the `in aliases_set` lookup
+            # when given a list/dict (round-6 R6-8).
+            if not isinstance(source_alias, str) or not source_alias:
+                _err('source_alias_required', f'{tfield}.source_alias')
+            if source_alias not in aliases_set:
+                _err('source_alias_unknown', f'{tfield}.source_alias')
+            # Cross-check: the target column's `source` must reference a column that exists in
+            # the chosen alias's source_columns. Round-6 caught the column-existence half; round-7
+            # closes the prefix-mismatch half (silent wrong-result if `source = 'a.col'` but
+            # `source_alias = 'b'` and `col` exists in both aliases — executor emits `b.col`).
             if '.' in src_field:
                 prefix, col_part = src_field.split('.', 1)
                 if prefix != source_alias:
@@ -443,7 +474,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
     # target_frame: the destination table id. Required by the executor's get_frame() call.
     # Validator round-11 closed the gap (was unchecked).
     target_frame = config.get('target_frame')
-    if not isinstance(target_frame, str) or not _TABLE_PREFIX_RE.fullmatch(target_frame):
+    if not isinstance(target_frame, str) or not _TABLE_ID_RE.fullmatch(target_frame):
         _err('target_frame_invalid', 'target_frame')
 
     # datastore_dialect: derived server-side from tenant context, NOT user config. Save-time
