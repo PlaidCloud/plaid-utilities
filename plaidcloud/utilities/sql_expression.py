@@ -3,6 +3,7 @@
 
 """Utility library for sqlalchemy metaprogramming used in analyze transforms"""
 
+import ast
 import re
 import uuid
 from copy import deepcopy
@@ -50,6 +51,41 @@ class SQLExpressionError(Exception):
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
 
+# User-authored expressions are compiled and eval()'d. Even with a curated
+# namespace, CPython auto-injects the real builtins when globals lacks a
+# '__builtins__' key, and any reachable object can be walked back to them via
+# dunder attributes (``().__class__.__bases__[0].__subclasses__()``). That is a
+# remote-code-execution path. We close it two ways: get_safe_dict pins
+# '__builtins__' to {}, and this AST gate rejects dunder access and a denylist
+# of dangerous names before the expression is ever compiled.
+_FORBIDDEN_EVAL_NAMES = frozenset({
+    'eval', 'exec', 'compile', 'open', 'input', 'breakpoint', 'help',
+    'getattr', 'setattr', 'delattr', 'globals', 'locals', 'vars',
+    'memoryview', 'exit', 'quit', '__import__',
+})
+
+
+def assert_eval_safe(source: str) -> ast.Expression:
+    """Parse a user expression and reject Python-sandbox escape vectors.
+
+    Blocks dunder name/attribute access (the classic subclass-walk and
+    ``__import__``/``__builtins__`` routes) and a denylist of dangerous
+    builtins. Returns the parsed AST so the caller compiles the validated
+    tree rather than re-parsing the string. Raises ``SyntaxError`` on bad
+    syntax (callers already handle that) and ``SQLExpressionError`` on a
+    disallowed construct.
+    """
+    tree = ast.parse(source, mode='eval')
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr.startswith('__'):
+            raise SQLExpressionError(f'Disallowed attribute access: {node.attr!r}')
+        if isinstance(node, ast.Name) and (
+            node.id.startswith('__') or node.id in _FORBIDDEN_EVAL_NAMES
+        ):
+            raise SQLExpressionError(f'Disallowed name in expression: {node.id!r}')
+    return tree
+
+
 def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
 
@@ -61,7 +97,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
         else:
             raise
 
-    compiled_expression = compile(expression_with_variables, '<string>', 'eval')
+    compiled_expression = compile(assert_eval_safe(expression_with_variables), '<string>', 'eval')
 
     try:
         return eval(compiled_expression, safe_dict)
@@ -401,6 +437,11 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
         raise SQLExpressionError(f'Could not run get_column: column {repr(col)} does not exist.')
 
     default_keys = {
+        # Pin builtins to empty so eval() can't fall back to the real
+        # builtins (CPython injects them when this key is absent). The
+        # expression language is SQLAlchemy — `func.*`, `cast`, type
+        # constants — and needs no Python builtins.
+        '__builtins__': {},
         'sqlalchemy': sqlalchemy,
         'and_': sqlalchemy.and_,
         'or_': sqlalchemy.or_,
@@ -1219,7 +1260,7 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
         else:
             raise
 
-    compiled_expression = compile(expression_with_variables, '<string>', 'eval')
+    compiled_expression = compile(assert_eval_safe(expression_with_variables), '<string>', 'eval')
 
     try:
         return eval(compiled_expression, safe_dict)

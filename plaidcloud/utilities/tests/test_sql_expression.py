@@ -1877,5 +1877,37 @@ class TestGetUpdateQuery(TestSQLExpression):
         )
 
 
+class TestEvalSandbox(TestSQLExpression):
+    """User expressions are compiled and eval()'d; guard against escape."""
+    def setUp(self):
+        self.table = sqlalchemy.table('t', sqlalchemy.column('amount'), sqlalchemy.column('x'))
+
+    def test_blocks_import_rce(self):
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("__import__('os').popen('id').read()", None, [self.table])
+
+    def test_blocks_dunder_subclass_walk(self):
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("().__class__.__bases__[0].__subclasses__()", None, [self.table])
+
+    def test_blocks_forbidden_builtin(self):
+        for expr in ("getattr(table, 'amount')", "eval('1')", "open('/etc/passwd')"):
+            with self.assertRaises(se.SQLExpressionError):
+                se.eval_expression(expr, None, [self.table])
+
+    def test_no_builtins_in_namespace(self):
+        self.assertEqual(se.get_safe_dict([self.table])['__builtins__'], {})
+
+    def test_allows_legitimate_expressions(self):
+        for expr in (
+            "table.amount * 2",
+            "func.coalesce(table.x, 0)",
+            "cast(table.amount, Text)",
+            "get_column(table, 'amount')",
+            "and_(table.amount > 0, table.x < 10)",
+        ):
+            self.assertIsNotNone(se.eval_expression(expr, None, [self.table]))
+
+
 if __name__ == '__main__':
     unittest.main()
