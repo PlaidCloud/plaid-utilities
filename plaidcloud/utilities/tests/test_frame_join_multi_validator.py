@@ -161,10 +161,26 @@ class TestAliasRules(unittest.TestCase):
                     validate_frame_join_multi_config(cfg)
                 self.assertEqual(ctx.exception.reason, 'alias_reserved')
 
+    def test_positional_table_alias_rejected(self):
+        # `table1`/`table2`/... are positional names the executor exposes in the expression
+        # namespace; an alias matching one would be silently shadowed (an expression `table1.col`
+        # would read the first source, not this alias). Reject them.
+        for word in ('table1', 'table2', 'TABLE1', 'table42'):
+            cfg = self._base()
+            cfg['sources'][0]['alias'] = word
+            cfg['edges'][0]['from_alias'] = word
+            cfg['edges'][0]['conditions'][0]['left_expr'] = f'{word}.customer_id'
+            with self.subTest(word=word):
+                with self.assertRaises(JoinMultiValidationError) as ctx:
+                    validate_frame_join_multi_config(cfg)
+                self.assertEqual(ctx.exception.reason, 'alias_reserved')
+
 
 class TestSourceField(unittest.TestCase):
-    """source must be a strict TABLE_PREFIX UUID — closes the apply_variables + path-lookup
-    surface in workflow_runner's transform_handler.get_frame."""
+    """source must be an identifier-shaped table id — accepts the canonical analyzetable_<uuid>
+    that table_find/table_upsert return (and every other step uses), while still closing the
+    apply_variables + path-lookup surface in workflow_runner's transform_handler.get_frame
+    (no dots, slashes, braces, or whitespace reach SQL emit)."""
 
     def _base(self):
         return copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
@@ -190,12 +206,13 @@ class TestSourceField(unittest.TestCase):
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'source_not_table_id')
 
-    def test_source_without_tab_prefix_rejected(self):
+    def test_canonical_analyzetable_source_accepted(self):
+        # Regression for the reported bug: the canonical analyzetable_<uuid> id that
+        # table_find/table_upsert return — and that frame_extract/frame_join_inner|outer
+        # already accept — must validate. The old `tab`-prefix regex rejected it.
         cfg = self._base()
-        cfg['sources'][0]['source'] = 'someUUID123'
-        with self.assertRaises(JoinMultiValidationError) as ctx:
-            validate_frame_join_multi_config(cfg)
-        self.assertEqual(ctx.exception.reason, 'source_not_table_id')
+        cfg['sources'][0]['source'] = 'analyzetable_53867b49-c8d9-4ceb-8272-79017344b3bb'
+        validate_frame_join_multi_config(cfg)  # no raise
 
     def test_valid_table_prefix_accepted(self):
         cfg = self._base()
@@ -339,12 +356,17 @@ class TestRound11ContractGaps(unittest.TestCase):
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'target_frame_invalid')
 
-    def test_target_frame_must_match_table_prefix(self):
+    def test_target_frame_rejects_non_identifier(self):
         cfg = self._base()
-        cfg['target_frame'] = 'not_a_table_id'
+        cfg['target_frame'] = 'folder/path/table'  # slash isn't an identifier char
         with self.assertRaises(JoinMultiValidationError) as ctx:
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'target_frame_invalid')
+
+    def test_target_frame_canonical_id_accepted(self):
+        cfg = self._base()
+        cfg['target_frame'] = 'analyzetable_27d0dd09-971f-4392-a84a-9426ba76342a'
+        validate_frame_join_multi_config(cfg)  # no raise
 
     def test_target_columns_target_required(self):
         cfg = self._base()
@@ -381,12 +403,40 @@ class TestRound11ContractGaps(unittest.TestCase):
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'target_column_agg_invalid')
 
-    def test_target_columns_expression_not_allowed(self):
+    def test_target_column_expression_accepted(self):
+        # Expression target columns are allowed: they render via the executor's eval_expression
+        # with the join aliases in scope, so a multi-alias CASE can be expressed. No source_alias
+        # is required (an expression isn't tied to a single source).
         cfg = self._base()
-        cfg['target_columns'][0]['expression'] = 'sales.id * 2'
+        cfg['target_columns'].append({
+            'target': 'computed', 'dtype': 'text',
+            'expression': "case((sales.id.isnot(None), sales.id), else_='x')",
+        })
+        validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_target_column_expression_with_source_rejected(self):
+        # An expression AND a source on the same column is two modes — must be exactly one.
+        cfg = self._base()
+        cfg['target_columns'][0]['expression'] = 'sales.id * 2'  # tc[0] already has `source`
         with self.assertRaises(JoinMultiValidationError) as ctx:
             validate_frame_join_multi_config(cfg)
-        self.assertEqual(ctx.exception.reason, 'target_column_expression_not_allowed')
+        self.assertEqual(ctx.exception.reason, 'target_column_mode_required')
+
+    def test_target_column_whitespace_expression_rejected(self):
+        # A whitespace-only expression is truthy, so the executor's `if expression:` would select
+        # it and crash compile() with SyntaxError. Reject it at validation (matches having).
+        cfg = self._base()
+        cfg['target_columns'][0]['expression'] = '   '
+        with self.assertRaises(JoinMultiValidationError) as ctx:
+            validate_frame_join_multi_config(cfg)
+        self.assertEqual(ctx.exception.reason, 'target_column_expression_empty')
+
+    def test_target_column_empty_string_expression_ignored(self):
+        # Empty string is falsy in the executor too (`if expression:`), so it's treated as no
+        # expression — the column stays valid on its existing `source` mode.
+        cfg = self._base()
+        cfg['target_columns'][0]['expression'] = ''
+        validate_frame_join_multi_config(cfg)  # no raise
 
     def test_target_columns_mode_required(self):
         cfg = self._base()

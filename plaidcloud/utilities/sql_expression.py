@@ -50,8 +50,8 @@ class SQLExpressionError(Exception):
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
 
-def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1):
-    safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start)
+def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1, tables_by_alias: dict|None = None):
+    safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start, tables_by_alias=tables_by_alias)
 
     try:
         expression_with_variables = apply_variables(expression, variables)
@@ -257,7 +257,7 @@ def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalch
     return process_fn(sort_type, cast_type, None, name, trim_zeroes)(const)
 
 # TODO: write tests, though TestGetFromClause already covers this
-def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False):
+def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None):
     """Get a representation of a target column based on an expression."""
     expr = eval_expression(
         expression.strip(),
@@ -265,6 +265,7 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
         tables,
         disable_variables=disable_variables,
         table_numbering_start=table_numbering_start,
+        tables_by_alias=tables_by_alias,
     )
     return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
 
@@ -329,7 +330,7 @@ def get_from_clause(
     if constant:
         return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables, trim_zeroes)
     if expression:
-        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes)
+        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias)
     if source:
         return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias)
     if target_column_config.get('dtype') in {'serial', 'bigserial'}:
@@ -387,7 +388,7 @@ class Result(object):
         }
 
 
-def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, table_numbering_start: int = 1):
+def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, table_numbering_start: int = 1, tables_by_alias: dict|None = None):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
     extra_keys = extra_keys or {}
@@ -474,7 +475,13 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
     # Generate table1, table2, ...
     table_keys = {f'table{n}': table.columns for n, table in enumerate(tables, start=table_numbering_start)}
 
-    return merge(default_keys, table_keys, extra_keys)
+    # Expose each join source by its alias for steps (frame_join_multi) whose expressions
+    # reference aliases (`mdp.name`) rather than positions (`table1.name`). Merged first so the
+    # builtins, dtype names, and positional table keys always win a name clash — a pathological
+    # alias like `func` resolves to the builtin and never shadows it.
+    alias_keys = {alias: rep.columns for alias, rep in (tables_by_alias or {}).items()}
+
+    return merge(alias_keys, default_keys, table_keys, extra_keys)
 
 
 def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
