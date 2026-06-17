@@ -129,7 +129,10 @@ class Connection:
         compiled_query = sa_query.compile(dialect=self.dialect, compile_kwargs={"render_postcompile": True})
         logger.info(self.dialect.name)
         logger.info(str(compiled_query))
-        return str(compiled_query).replace('\n', ''), compiled_query.params
+        # Flatten to one line with a SPACE, not '': dropping the newline outright
+        # welds tokens across clause boundaries on multi-line SQL (`"col"FROM`,
+        # `aliasJOIN`), producing invalid SQL.
+        return str(compiled_query).replace('\n', ' '), compiled_query.params
 
     def get_csv(self, table: "str|Table", encoding="utf-8", clean=False):
         """Returns a file path to the entire table as a CSV file.
