@@ -323,6 +323,18 @@ class TestCompiled(unittest.TestCase):
         self.assertIn('a', q)
         self.assertIn(5, params.values())
 
+    def test_compile_flattens_embedded_newlines_with_space(self):
+        # Raw multi-line SQL (e.g. an AI/hand-authored extract) carries newlines
+        # with NO trailing space. Flattening must replace each newline with a
+        # space, not drop it, or tokens weld across clause boundaries
+        # (`"driver_name"FROM`) and the statement no longer parses.
+        conn = make_connection()
+        raw = sqlalchemy.text('SELECT a."driver_name"\nFROM t a\nWHERE a.x > 0')
+        q, _params = conn._compiled(raw)
+        self.assertNotIn('\n', q)
+        self.assertNotIn('"driver_name"FROM', q)
+        self.assertIn('"driver_name" FROM', q)
+
 
 # ---------------------------------------------------------------------------
 # Connection.get_csv / get_csv_by_query
