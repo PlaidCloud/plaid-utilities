@@ -379,6 +379,19 @@ def compile_safe_to_timestamp_starrocks(element, compiler, **kw):
 
     return f"str_to_date({compiler.process(text)}, {compiler.process(datetime_format)})"
 
+
+# parse_date_time / str_to_date are aliases for to_timestamp — they parse a
+# formatted string into a datetime (e.g. func.parse_date_time(col, '%m/%d/%Y')).
+# Subclassing safe_to_timestamp reuses its per-dialect compilers (including the
+# postgres↔python format-string conversion).
+class parse_date_time(safe_to_timestamp):
+    name = 'parse_date_time'
+
+
+class str_to_date(safe_to_timestamp):
+    name = 'str_to_date'
+
+
 # Disabling safe_to_char - input can be date, integer, float, interval (not just date)
 # class safe_to_char(GenericFunction):
 #     name = 'to_char'

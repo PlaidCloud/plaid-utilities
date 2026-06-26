@@ -624,3 +624,27 @@ class TestSafeDivideSR(StarrocksTest):
         self.assertEqual(100, compiled.params['safe_divide_3'])
         self.assertEqual(0, compiled.params['nullif_1'])
 
+
+class TestParseDateTime(BaseTest):
+    # parse_date_time / str_to_date are aliases for to_timestamp: each must compile
+    # to the same SQL as to_timestamp (only the function-name-derived bind prefix
+    # differs), on every dialect.
+    def _assert_aliases_to_timestamp(self):
+        reference = str(sqlalchemy.func.to_timestamp('05/14/2024', '%m/%d/%Y').compile(
+            dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True}))
+        for alias in ('parse_date_time', 'str_to_date'):
+            compiled = str(getattr(sqlalchemy.func, alias)('05/14/2024', '%m/%d/%Y').compile(
+                dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True}))
+            self.assertEqual(reference.replace('to_timestamp_', f'{alias}_'), compiled)
+
+    def test_aliases(self):
+        self._assert_aliases_to_timestamp()
+
+
+class TestParseDateTimeDB(TestParseDateTime, DatabendTest):
+    pass
+
+
+class TestParseDateTimeSR(TestParseDateTime, StarrocksTest):
+    pass
+
