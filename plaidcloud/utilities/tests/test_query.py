@@ -889,6 +889,26 @@ class TestTable(unittest.TestCase):
         self.assertEqual(tbl.schema, SCHEMA_PREFIX + 'something')
         rpc.analyze.project.get_project_schema.assert_not_called()
 
+    def test_project_schema_resolved_once_per_connection(self):
+        """The physical schema is stable per connection, so instantiating several
+        tables must not re-fetch it (one RPC, not one-per-table)."""
+        Table(self.conn, 'some_table')
+        Table(self.conn, 'some_table')
+        self.assertEqual(self.rpc.analyze.project.get_project_schema.call_count, 1)
+
+    def test_write_path_touches_once(self):
+        """When columns are supplied the physical table is (re)created by a single
+        touch; the constructor must not touch a second time (a redundant recreate
+        + update_shape)."""
+        Table(self.conn, 'some_table', columns=[{'id': 'c', 'dtype': 'numeric'}])
+        self.assertEqual(self.rpc.analyze.table.touch.call_count, 1)
+
+    def test_read_path_still_ensures_table(self):
+        """get_table-style construction (no input columns) still touches once to
+        ensure the physical table exists."""
+        Table(self.conn, 'some_table')
+        self.assertEqual(self.rpc.analyze.table.touch.call_count, 1)
+
     def test_fully_qualified_name_uses_dialect(self):
         tbl = Table(self.conn, 'some_table')
         result = tbl.fully_qualified_name(self.conn.dialect)

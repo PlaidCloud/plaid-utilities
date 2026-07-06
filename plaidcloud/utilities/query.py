@@ -96,6 +96,7 @@ class Connection:
         self.dialect = dialect_cls(paramstyle='pyformat')
         self._variables = self._NOT_LOADED
         self._udf = self._NOT_LOADED
+        self._project_schema = self._NOT_LOADED
 
     @property
     def variables(self):
@@ -730,6 +731,18 @@ class Connection:
             raise Exception('Project Id has not been set')
         return self._project_name
 
+    @property
+    def project_schema(self):
+        # The physical schema is stable for the life of the connection, so cache
+        # it rather than paying an RPC on every Table instantiation (there are
+        # ~10-15 per allocation step).
+        if self._project_schema is self._NOT_LOADED:
+            if self._project_id.startswith(SCHEMA_PREFIX):
+                self._project_schema = self._project_id
+            else:
+                self._project_schema = self.rpc.analyze.project.get_project_schema(project_id=self._project_id)
+        return self._project_schema
+
     def get_dimension(self, dimension_name):
         return self.dims.get_dimension(name=dimension_name, replace=False).hierarchy_table()
 
@@ -840,13 +853,20 @@ class Table(sqlalchemy.Table):
             # Only try to create a physical table if columns have been defined
             _rpc.analyze.table.touch(project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite)
 
+        # Whether the caller supplied columns decides which touch created the
+        # physical table (see the ensure-create below). Capture it before
+        # table_meta reassigns `columns` to the reflected metadata.
+        had_input_columns = bool(columns)
+
         columns = _rpc.analyze.table.table_meta(
             project_id=_project_id, table_id=_table_id,
         )
         if not columns:
             columns = []  # If the table doesn't actually exist, we assume it's got no columns
 
-        if _project_id.startswith(SCHEMA_PREFIX):
+        if isinstance(conn, Connection):
+            _schema = conn.project_schema
+        elif _project_id.startswith(SCHEMA_PREFIX):
             _schema = _project_id
         else:
             _schema = _rpc.analyze.project.get_project_schema(project_id=_project_id)
@@ -875,8 +895,11 @@ class Table(sqlalchemy.Table):
         table_object._table_id = _table_id
         table_object._schema = _schema
 
-        # table must be created in database, if it doesn't already exist
-        if columns:
+        # Ensure the physical table exists for the read path (e.g. get_table with
+        # no input columns). When the caller supplied columns the touch above
+        # already (re)created it with the intended schema, so a second touch here
+        # would only recreate the same table again (and re-run update_shape).
+        if columns and not had_input_columns:
             _rpc.analyze.table.touch(
                 project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite
             )
