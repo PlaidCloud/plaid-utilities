@@ -2616,6 +2616,16 @@ def yxdb_to_csv(
         except Exception:
             alteryx_types = []
         if len(alteryx_types) != len(field_names):
+            # Untyped fallback keeps the import working (bytes still hex, strings
+            # still pass through) but silently disables the CP1252 and
+            # FixedDecimal fidelity fixes -- warn loudly so a future yxdb release
+            # that reshapes `_fields` doesn't degrade the whole fleet unnoticed.
+            logger.info(
+                f'WARNING: yxdb reader exposed {len(alteryx_types)} internal field '
+                f'types for {len(field_names)} fields in {yxdb_file_name}; falling '
+                'back to untyped conversion (CP1252/FixedDecimal fidelity disabled). '
+                'The yxdb library internals may have changed.'
+            )
             alteryx_types = [''] * len(field_names)
 
         data = []

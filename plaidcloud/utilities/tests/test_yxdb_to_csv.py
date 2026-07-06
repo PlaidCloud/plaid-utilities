@@ -62,6 +62,14 @@ def test_fixed_decimal_extractor_null_flag():
     assert _yxdb_fixed_decimal_extractor(0, 22)(buffer) is None
 
 
+def test_fixed_decimal_extractor_negative_value_exact():
+    # Leading '-' sign must survive verbatim, not be lost or reformatted.
+    raw = b'-9876543210.987654321'
+    length = 22
+    buffer = memoryview(raw + b'\x00' * (length - len(raw)) + b'\x00')
+    assert _yxdb_fixed_decimal_extractor(0, length)(buffer) == '-9876543210.987654321'
+
+
 # --- Blob / SpatialObj bytes (F21) ---------------------------------------------
 
 def test_blob_bytes_become_hex_never_bytes_repr():
