@@ -898,16 +898,28 @@ class TestTable(unittest.TestCase):
 
     def test_write_path_touches_once(self):
         """When columns are supplied the physical table is (re)created by a single
-        touch; the constructor must not touch a second time (a redundant recreate
-        + update_shape)."""
+        touch carrying the caller's schema; the constructor must not touch a second
+        time (a redundant recreate + update_shape)."""
         Table(self.conn, 'some_table', columns=[{'id': 'c', 'dtype': 'numeric'}])
         self.assertEqual(self.rpc.analyze.table.touch.call_count, 1)
+        # The surviving touch is the input-meta one, so the table is created with
+        # the caller's intended schema (not the reflected table_meta).
+        self.assertEqual(
+            self.rpc.analyze.table.touch.call_args.kwargs['meta'],
+            [{'id': 'c', 'dtype': 'numeric'}],
+        )
 
     def test_read_path_still_ensures_table(self):
-        """get_table-style construction (no input columns) still touches once to
-        ensure the physical table exists."""
+        """get_table-style construction (no input columns) still touches once, with
+        the reflected schema, to ensure the physical table exists."""
         Table(self.conn, 'some_table')
         self.assertEqual(self.rpc.analyze.table.touch.call_count, 1)
+        # No input columns, so the surviving touch is the ensure-exists one built
+        # from the reflected table_meta.
+        self.assertEqual(
+            self.rpc.analyze.table.touch.call_args.kwargs['meta'],
+            [{'id': 'col1', 'dtype': 'numeric'}],
+        )
 
     def test_fully_qualified_name_uses_dialect(self):
         tbl = Table(self.conn, 'some_table')
