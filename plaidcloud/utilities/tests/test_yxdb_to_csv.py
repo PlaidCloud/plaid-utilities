@@ -153,6 +153,16 @@ def test_yxdb_to_csv_end_to_end(tmp_path):
     assert payload == '01abff'
 
 
+def test_amp_format_file_raises_actionable_error(tmp_path):
+    pytest.importorskip('yxdb')
+    yxdb_path = str(tmp_path / 'amp.yxdb')
+    with open(yxdb_path, 'wb') as f:
+        f.write(b'Alteryx e2 Database file' + b'\x00' * 488)
+
+    with pytest.raises(ValueError, match='AMP'):
+        yxdb_to_csv(yxdb_path, str(tmp_path / 'amp.csv'))
+
+
 def test_yxdb_fixed_decimal_override_is_restored(tmp_path):
     yxdb_extractors = pytest.importorskip('yxdb._extractors')
     original = yxdb_extractors.new_fixed_decimal_extractor
