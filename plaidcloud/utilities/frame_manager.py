@@ -17,6 +17,11 @@ try:
 except ImportError:
     import avro
 
+try:
+    from yxdb import spatial as _yxdb_spatial  # SpatialObj blob -> GeoJSON (optional 'xray' extra)
+except ImportError:
+    _yxdb_spatial = None
+
 import pandas as pd
 from pandas.api.types import is_string_dtype
 from pandas.io.parsers.base_parser import STR_NA_VALUES
@@ -2495,6 +2500,55 @@ def _geojson_to_wkt(geojson: dict) -> str:
     raise ValueError(f'Unsupported GeoJSON geometry type: {geom_type!r}')
 
 
+def _yxdb_fixed_decimal_extractor(start: int, length: int):
+    """Replacement for the ``yxdb`` library's FixedDecimal extractor.
+
+    The library converts the on-disk value -- a null-terminated ASCII decimal
+    string -- to a float, silently destroying anything past ~15-16 significant
+    digits before the Decimal-typed table column ever sees it. Return the raw
+    decimal string instead; the typed cast on import parses it into the
+    Decimal column exactly.
+    """
+    def extract(buffer):
+        if buffer[start + length] == 1:  # null flag
+            return None
+        raw = buffer[start:start + length].tobytes()
+        return raw.split(b'\x00', 1)[0].decode('latin-1').strip()
+
+    return extract
+
+
+def _convert_yxdb_value(value, alteryx_type):
+    """Normalize one value read by the ``yxdb`` library for CSV staging.
+
+    * String/V_String: the library decodes narrow strings as latin-1, but
+      Alteryx narrow strings are CP1252 in practice -- bytes 0x80-0x9F (euro
+      sign, curly quotes, en/em dashes) come through as C1 control characters.
+      latin-1 encode is a lossless byte round-trip, so re-decoding as CP1252
+      recovers the intended characters. errors='replace' because five bytes
+      (0x81 0x8D 0x8F 0x90 0x9D) are undefined in CP1252 and a bad byte must
+      not abort a whole import.
+    * SpatialObj: decode the Alteryx shape blob to WKT via the library's own
+      parser, so converted spatial workflows read .yxdb geometry the same way
+      they read .TAB / executor geometry.
+    * Any remaining bytes (generic Blob, undecodable spatial): hex string --
+      never the Python ``repr`` that ``DataFrame.to_csv`` would otherwise write.
+    """
+    if value is None:
+        return None
+    if alteryx_type in ('String', 'V_String'):
+        return value.encode('latin-1').decode('cp1252', errors='replace')
+    if isinstance(value, (bytes, bytearray)):
+        value = bytes(value)
+        if alteryx_type == 'SpatialObj' and _yxdb_spatial is not None:
+            try:
+                return _geojson_to_wkt(json.loads(_yxdb_spatial.to_geojson(value)))
+            except Exception:
+                pass  # malformed spatial blob still lands as hex below
+        return value.hex()
+    return value
+
+
 def yxdb_to_csv(
     yxdb_file_name: str,
     csv_file_name: str,
@@ -2521,51 +2575,65 @@ def yxdb_to_csv(
 
     try:
         from yxdb.yxdb_reader import YxdbReader
+        from yxdb import _extractors as yxdb_extractors
     except ImportError:
         raise ImportError(
             "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
         )
-    try:
-        from yxdb import spatial as yxdb_spatial
-    except ImportError:
-        yxdb_spatial = None
 
-    # `yxdb` exposes the reader in the yxdb.yxdb_reader submodule (the top-level
-    # package is empty), and list_fields() returns YxdbField objects -- use
-    # their .name for read_name() and the frame columns.
-    reader = YxdbReader(path=yxdb_file_name)
+    # The extractor factories are wired up while the reader parses the file
+    # metadata, and the record builder looks the FixedDecimal factory up on
+    # the _extractors module at that moment -- so a scoped override during
+    # construction is enough to make FixedDecimal values flow through as
+    # exact decimal strings (see _yxdb_fixed_decimal_extractor).
+    #
+    # THREAD-SAFETY: this override mutates a process-global module attribute
+    # for the duration of YxdbReader() construction. It is safe under the only
+    # production caller (ProcessPoolExecutor -> separate OS processes), but a
+    # future *threaded* caller constructing readers concurrently could have one
+    # thread's finally-restore revert another mid-construction, silently
+    # dropping back to lossy float FixedDecimals. Guard with a lock if you add
+    # a threaded caller.
+    original_fixed_decimal = yxdb_extractors.new_fixed_decimal_extractor
+    yxdb_extractors.new_fixed_decimal_extractor = _yxdb_fixed_decimal_extractor
     try:
+        # `yxdb` exposes the reader in the yxdb.yxdb_reader submodule (the
+        # top-level package is empty).
+        reader = YxdbReader(path=yxdb_file_name)
+    finally:
+        yxdb_extractors.new_fixed_decimal_extractor = original_fixed_decimal
+
+    try:
+        # list_fields() returns YxdbField objects whose data_type collapses the
+        # Alteryx types (FixedDecimal -> DOUBLE, V_String/V_WString -> STRING),
+        # so take the raw type strings from the reader's internal metainfo
+        # fields -- parallel to the field list by construction. Degrade to
+        # untyped conversion (bytes still become hex, strings pass through)
+        # if that internal shape ever changes.
         field_names = [field.name for field in reader.list_fields()]
-
-        # Alteryx SpatialObj fields read back as a binary blob (shapefile-shape
-        # layout). Decode ONLY those to WKT, so converted spatial workflows read
-        # .yxdb geometry the same way they read .TAB / executor geometry. Gate on
-        # the raw Alteryx type ("SpatialObj") rather than "value is bytes" so a
-        # generic Blob is never handed to the shape parser -- arbitrary bytes can
-        # make it raise (struct.error) or spin on a bogus point count. The raw
-        # type lives on the reader's internal metainfo fields; degrade to
-        # no-decode if that internal shape ever changes.
-        spatial_names = set()
-        if yxdb_spatial is not None:
-            try:
-                spatial_names = {
-                    f.name for f in reader._fields
-                    if getattr(f, 'data_type', '') == 'SpatialObj'
-                }
-            except Exception:
-                spatial_names = set()
-
-        def decode(name, value):
-            if name not in spatial_names or not isinstance(value, (bytes, bytearray)):
-                return value
-            try:
-                return _geojson_to_wkt(json.loads(yxdb_spatial.to_geojson(bytes(value))))
-            except Exception:
-                return value  # malformed spatial blob -- leave the raw value
+        try:
+            alteryx_types = [f.data_type for f in reader._fields]
+        except Exception:
+            alteryx_types = []
+        if len(alteryx_types) != len(field_names):
+            # Untyped fallback keeps the import working (bytes still hex, strings
+            # still pass through) but silently disables the CP1252 and
+            # FixedDecimal fidelity fixes -- warn loudly so a future yxdb release
+            # that reshapes `_fields` doesn't degrade the whole fleet unnoticed.
+            logger.info(
+                f'WARNING: yxdb reader exposed {len(alteryx_types)} internal field '
+                f'types for {len(field_names)} fields in {yxdb_file_name}; falling '
+                'back to untyped conversion (CP1252/FixedDecimal fidelity disabled). '
+                'The yxdb library internals may have changed.'
+            )
+            alteryx_types = [''] * len(field_names)
 
         data = []
         while reader.next():
-            data.append([decode(name, reader.read_name(name)) for name in field_names])
+            data.append([
+                _convert_yxdb_value(reader.read_index(i), alteryx_types[i])
+                for i in range(len(field_names))
+            ])
     finally:
         # YxdbReader has no context manager; close explicitly so a mid-read
         # error can't leak the file handle in a long-lived import worker.
