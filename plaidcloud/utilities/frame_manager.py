@@ -2571,6 +2571,8 @@ def yxdb_to_csv(
 
     Raises:
         :class:`ImportError`: if the ``yxdb`` package is not installed.
+        :class:`ValueError`: if the file is in the unsupported AMP-engine
+            ("Alteryx e2 Database file") format.
     """
 
     try:
@@ -2580,6 +2582,20 @@ def yxdb_to_csv(
         raise ImportError(
             "yxdb package is required for yxdb_to_csv; install with `pip install yxdb`"
         )
+
+    # Alteryx's AMP engine writes a different .yxdb format (header "Alteryx e2
+    # Database file") whose spec is unpublished; the yxdb library only reads
+    # the classic format and dies on AMP files with a cryptic IOError, so
+    # detect it up front and explain how to get a readable file.
+    with open(yxdb_file_name, 'rb') as f:
+        if f.read(21).startswith(b'Alteryx e2 Database'):
+            raise ValueError(
+                f'{yxdb_file_name} was written by the Alteryx AMP engine, whose .yxdb format is '
+                'proprietary and unpublished, so it cannot be read here. In Alteryx, re-save the '
+                'file using the Output Data tool\'s "compatible with Designer 18.1 and older" '
+                'option (AMP can read and write both formats), or export the data to CSV, then '
+                're-import.'
+            )
 
     # The extractor factories are wired up while the reader parses the file
     # metadata, and the record builder looks the FixedDecimal factory up on
