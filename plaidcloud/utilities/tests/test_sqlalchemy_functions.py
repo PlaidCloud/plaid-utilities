@@ -169,6 +169,18 @@ class TestImportColStarrocks(TestImportCol, StarrocksTest):
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
 
+    def test_import_col_numeric_trailing_negatives(self):
+        # StarRocks has no to_number(); the trailing-negatives import_cast path
+        # therefore falls through to the wide-decimal cast (to_number specializes
+        # to CAST(... AS DECIMAL(38, 10)) on StarRocks). Trailing-minus handling
+        # is lost — bad input yields NULL rather than a hard error.
+        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+                          'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual(0.0, compiled.params['param_1'])
+
 
 class TestZfill(BaseTest):
     def test_zfill(self):
@@ -725,3 +737,169 @@ class TestConverterRenamesStarrocks(StarrocksTest):
                          self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
         self.assertEqual("months_diff('d1', 'd2')",
                          self._sql(sqlalchemy.func.date_diff('month', 'd2', 'd1')))
+
+
+# ---------------------------------------------------------------------------
+# StarRocks specializations for the remaining non-spatial converter functions.
+# Each keeps the Databend/default form and adds only a StarRocks form (verified
+# live on paul-dev). Databend byte-identity is asserted alongside.
+# ---------------------------------------------------------------------------
+
+class TestToCharStarrocks(StarrocksTest):
+    def test_to_char_date(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('date_format(%(to_char_1)s, %(param_1)s)', str(compiled))
+        self.assertEqual(dt, compiled.params['to_char_1'])
+        self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
+
+    def test_to_char_number_casts_to_char(self):
+        # StarRocks cannot honor a Postgres numeric mask; value is cast to CHAR.
+        expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(to_char_1)s AS CHAR)', str(compiled))
+        self.assertEqual(123456.789, compiled.params['to_char_1'])
+
+    def test_to_char_no_format_casts_to_char(self):
+        expr = sqlalchemy.func.to_char(sqlalchemy.column('c'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(c AS CHAR)', str(compiled))
+
+
+class TestToNumberStarrocks(StarrocksTest):
+    def test_to_number_casts_to_decimal(self):
+        expr = sqlalchemy.func.to_number('12345', '999999')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(to_number_1)s AS DECIMAL(38, 10))', str(compiled))
+        self.assertEqual('12345', compiled.params['to_number_1'])
+
+
+class TestToNumberDatabendUnchanged(DatabendTest):
+    def test_to_number_still_to_int64(self):
+        expr = sqlalchemy.func.to_number('12345', '999999')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_int64(%(to_number_1)s)', str(compiled))
+
+
+class TestTransactionTimestampStarrocks(StarrocksTest):
+    def test_transaction_timestamp_is_now(self):
+        expr = sqlalchemy.func.transaction_timestamp()
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('now()', str(compiled))
+
+
+class TestStringToArrayStarrocks(StarrocksTest):
+    def test_string_to_array_split(self):
+        expr = sqlalchemy.func.string_to_array('1,2,3,4', ',')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'split(%(string_to_array_1)s, CASE WHEN (%(string_to_array_2)s = %(param_1)s OR %(string_to_array_2)s IS NULL) THEN %(param_2)s ELSE %(string_to_array_2)s END)',
+            str(compiled)
+        )
+        self.assertEqual('1,2,3,4', compiled.params['string_to_array_1'])
+        self.assertEqual(',', compiled.params['string_to_array_2'])
+
+
+class TestOnlyAsciiStarrocks(StarrocksTest):
+    def test_only_ascii_three_arg(self):
+        # StarRocks rejects the 4-arg regexp_replace(varchar x4) the default emits.
+        expr = sqlalchemy.func.ascii('abc')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'regexp_replace(CAST(%(ascii_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            str(compiled),
+        )
+        self.assertEqual('abc', compiled.params['ascii_1'])
+        self.assertEqual(r'[^[:ascii:]]+', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+
+
+class TestNormalizeWhitespaceStarrocks(StarrocksTest):
+    def test_normalize_whitespace_three_arg_x_escapes(self):
+        # RE2 rejects `\uXXXX`; the StarRocks regex spells code points `\x{XXXX}`.
+        expr = sqlalchemy.func.normalize_whitespace('foobar')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'regexp_replace(CAST(%(normalize_whitespace_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            str(compiled),
+        )
+        self.assertEqual('foobar', compiled.params['normalize_whitespace_1'])
+        self.assertEqual(sf.STARROCKS_WW_RE, compiled.params['regexp_replace_1'])
+        self.assertEqual('[\\n\\r\\f\\x{000B}\\x{0085}\\x{2028}\\x{2029}\\x{00A0}]+', compiled.params['regexp_replace_1'])
+        self.assertEqual(' ', compiled.params['regexp_replace_2'])
+
+
+# ---------------------------------------------------------------------------
+# Dialect-neutral spatial (geometry) functions
+# ---------------------------------------------------------------------------
+# Databend renders the current Databend ST_* spelling byte-for-byte; StarRocks
+# renders the verified equivalent, or raises CompileError for ops with no
+# StarRocks equivalent (so wave-2b degrades them to the shapely executor).
+
+#: neutral name -> Databend spelling (byte-identical) / StarRocks spelling.
+_GEOM_TRANSLATABLE = [
+    ('geom_from_wkt', "st_geometryfromwkt('POINT(1 2)')", "st_geometryfromtext('POINT(1 2)')",
+     lambda: sqlalchemy.func.geom_from_wkt('POINT(1 2)')),
+    ('geom_point', 'st_makegeompoint(1, 2)', 'st_point(1, 2)',
+     lambda: sqlalchemy.func.geom_point(1, 2)),
+    ('geom_as_wkt', 'st_aswkt(g)', 'st_astext(g)',
+     lambda: sqlalchemy.func.geom_as_wkt(sqlalchemy.column('g'))),
+    ('geom_contains', 'st_contains(a, b)', 'st_contains(a, b)',
+     lambda: sqlalchemy.func.geom_contains(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+    ('geom_x', 'st_x(p)', 'st_x(p)',
+     lambda: sqlalchemy.func.geom_x(sqlalchemy.column('p'))),
+    ('geom_y', 'st_y(p)', 'st_y(p)',
+     lambda: sqlalchemy.func.geom_y(sqlalchemy.column('p'))),
+    # within(a, b): StarRocks has no st_within → st_contains with swapped args.
+    ('geom_within', 'st_within(a, b)', 'st_contains(b, a)',
+     lambda: sqlalchemy.func.geom_within(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+]
+
+#: neutral name -> Databend spelling; StarRocks raises (no equivalent).
+_GEOM_UNSUPPORTED = [
+    ('geom_area', 'st_area(g)', lambda: sqlalchemy.func.geom_area(sqlalchemy.column('g'))),
+    ('geom_length', 'st_length(g)', lambda: sqlalchemy.func.geom_length(sqlalchemy.column('g'))),
+    ('geom_intersects', 'st_intersects(a, b)',
+     lambda: sqlalchemy.func.geom_intersects(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+    ('geom_createline', 'st_createline(a, b)',
+     lambda: sqlalchemy.func.geom_createline(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+    ('geom_centroid', 'st_centroid(g)', lambda: sqlalchemy.func.geom_centroid(sqlalchemy.column('g'))),
+    ('geom_distance', 'st_distance(a, b)',
+     lambda: sqlalchemy.func.geom_distance(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+]
+
+
+class TestGeomFunctionsDatabend(DatabendTest):
+    """Databend keeps the current ST_* spelling byte-for-byte (no regression)."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_translatable_render_databend_names(self):
+        for name, databend_sql, _sr, make in _GEOM_TRANSLATABLE:
+            with self.subTest(fn=name):
+                self.assertEqual(databend_sql, self._sql(make()))
+
+    def test_unsupported_still_render_on_databend(self):
+        for name, databend_sql, make in _GEOM_UNSUPPORTED:
+            with self.subTest(fn=name):
+                self.assertEqual(databend_sql, self._sql(make()))
+
+
+class TestGeomFunctionsStarrocks(StarrocksTest):
+    """StarRocks renders the verified equivalent, or raises for unsupported ops."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_translatable_render_starrocks_names(self):
+        for name, _db, starrocks_sql, make in _GEOM_TRANSLATABLE:
+            with self.subTest(fn=name):
+                self.assertEqual(starrocks_sql, self._sql(make()))
+
+    def test_unsupported_raise_compile_error(self):
+        for name, _db, make in _GEOM_UNSUPPORTED:
+            with self.subTest(fn=name):
+                with self.assertRaises(sqlalchemy.exc.CompileError):
+                    self._sql(make())
