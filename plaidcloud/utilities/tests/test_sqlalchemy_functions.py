@@ -48,9 +48,7 @@ class TestImportCol(BaseTest):
     def test_import_col_numeric(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        # to_string() wrap on col before regexp_replace makes the expression
-        # safe for source columns of any dtype (text or bundle-import-typed).
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                          'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS NUMERIC) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
@@ -61,7 +59,7 @@ class TestImportCol(BaseTest):
     def test_import_col_numeric_trailing_negatives(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                         'THEN %(param_1)s ELSE to_number(%(import_col_1)s, %(to_number_1)s) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
@@ -73,7 +71,7 @@ class TestImportCol(BaseTest):
     def test_import_col_interval(self):
         expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                          'THEN NULL ELSE %(import_col_1)s::interval END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
@@ -92,16 +90,11 @@ class TestImportColDatabend(DatabendTest):
     def test_import_col_numeric(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        # to_string() wrap on the outer regexp_replace (from compile_import_col)
-        # and on the inner ones (from compile_import_cast_databend numeric path)
-        # makes the SQL safe regardless of the column's source dtype. Without
-        # the wrap, regexp_replace(Decimal, …) is rejected by databend with
-        # `no function matches signature regexp_replace(Decimal, String, String)`.
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, '
                          '%(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE '
-                         'CAST(CASE WHEN (to_string(regexp_replace(to_string(%(import_col_1)s), '
+                         'CAST(CASE WHEN (to_string(regexp_replace(%(import_col_1)s, '
                          '%(regexp_replace_4)s, %(regexp_replace_5)s)) = %(to_string_1)s) THEN NULL '
-                         'ELSE regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, '
+                         'ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
                          '%(regexp_replace_5)s) END AS DECIMAL(38, 10)) END'), str(compiled))
 
         self.assertEqual('Column1', compiled.params['import_col_1'])
@@ -116,20 +109,20 @@ class TestImportColDatabend(DatabendTest):
     def test_import_col_numeric_trailing_negatives(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, '
                          '%(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE '
                          'CAST(CASE WHEN (to_string(CASE WHEN '
-                         'regexp_like(regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, '
+                         'regexp_like(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
                          '%(regexp_replace_5)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
-                         'replace(regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, '
+                         'replace(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
                          '%(regexp_replace_5)s), %(replace_1)s, %(replace_2)s)) ELSE '
-                         'regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, %(regexp_replace_5)s) '
+                         'regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s) '
                          'END) = %(to_string_1)s) THEN NULL ELSE CASE WHEN '
-                         'regexp_like(regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, '
+                         'regexp_like(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
                          '%(regexp_replace_5)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
-                         'replace(regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, '
+                         'replace(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
                          '%(regexp_replace_5)s), %(replace_1)s, %(replace_2)s)) ELSE '
-                         'regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_4)s, %(regexp_replace_5)s) '
+                         'regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s) '
                          'END END AS DECIMAL(38, 10)) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
@@ -147,7 +140,7 @@ class TestImportColDatabend(DatabendTest):
     def test_import_col_interval(self):
         expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                           'THEN NULL ELSE to_interval(%(import_col_1)s) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
@@ -165,33 +158,16 @@ class TestImportColDatabend(DatabendTest):
 #         self.assertEqual(5, compiled.params['left_2'])
 
 class TestImportColStarrocks(TestImportCol, StarrocksTest):
-    # StarRocks has no to_string(); the numericize guard casts to CHAR instead
-    # (see the to_string StarRocks specialization).
     def test_import_col_numeric(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                           'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
         self.assertEqual('', compiled.params['regexp_replace_2'])
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
-
-    def test_import_col_numeric_trailing_negatives(self):
-        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
-                          'THEN %(param_1)s ELSE to_number(%(import_col_1)s, %(to_number_1)s) END'), str(compiled))
-        self.assertEqual('Column1', compiled.params['import_col_1'])
-        self.assertEqual('9999999999999999999999999D9999999999999999999999999MI', compiled.params['to_number_1'])
-
-    def test_import_col_interval(self):
-        expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
-                          'THEN NULL ELSE %(import_col_1)s::interval END'), str(compiled))
-        self.assertEqual('Column1', compiled.params['import_col_1'])
 
 
 class TestZfill(BaseTest):

@@ -53,6 +53,8 @@ class UDFParams(NamedTuple):
 
 class Connection:
 
+    _NOT_LOADED = object()
+
     def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None):
         """
 
@@ -80,7 +82,7 @@ class Connection:
                     # This is a name lookup
                     self._project_id = self.rpc.analyze.project.lookup_by_name(name=project)
         else:
-            self._project_id = rpc.project_id
+            self._project_id = self.rpc.project_id
 
         if self._project_id:
             self._project_name = self.rpc.analyze.project.project(project_id=self._project_id, keys=['name'])['name']
@@ -92,12 +94,35 @@ class Connection:
         except:
             dialect_cls = registry.load('postgresql')
         self.dialect = dialect_cls(paramstyle='pyformat')
-        try:
-            self.variables = self.refresh_variables()
-            self._load_udf_params()
-        except:
-            self.variables = {}
-            self.udf = None
+        self._variables = self._NOT_LOADED
+        self._udf = self._NOT_LOADED
+        self._project_schema = self._NOT_LOADED
+
+    @property
+    def variables(self):
+        if self._variables is self._NOT_LOADED:
+            try:
+                self.refresh_variables()
+            except Exception:
+                self._variables = {}
+        return self._variables
+
+    @variables.setter
+    def variables(self, value):
+        self._variables = value
+
+    @property
+    def udf(self):
+        if self._udf is self._NOT_LOADED:
+            try:
+                self._udf = self._load_udf_params()
+            except Exception:
+                self._udf = None
+        return self._udf
+
+    @udf.setter
+    def udf(self, value):
+        self._udf = value
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
@@ -105,7 +130,10 @@ class Connection:
         compiled_query = sa_query.compile(dialect=self.dialect, compile_kwargs={"render_postcompile": True})
         logger.info(self.dialect.name)
         logger.info(str(compiled_query))
-        return str(compiled_query).replace('\n', ''), compiled_query.params
+        # Flatten to one line with a SPACE, not '': dropping the newline outright
+        # welds tokens across clause boundaries on multi-line SQL (`"col"FROM`,
+        # `aliasJOIN`), producing invalid SQL.
+        return str(compiled_query).replace('\n', ' '), compiled_query.params
 
     def get_csv(self, table: "str|Table", encoding="utf-8", clean=False):
         """Returns a file path to the entire table as a CSV file.
@@ -203,7 +231,7 @@ class Connection:
 
                 yield row
 
-    def get_data(self, data_source: "Table|str", return_type='df', encoding='utf-8', clean=True):
+    def get_data(self, data_source: "Table|str|sqlalchemy.sql.Select", return_type='df', encoding='utf-8', clean=True) -> "str|pd.DataFrame":
         if return_type == 'df':
             if isinstance(data_source, Table):
                 return self.get_dataframe(data_source, encoding=encoding, clean=clean)
@@ -279,7 +307,7 @@ class Connection:
 
         def to_bool(val):
             if val in falsey_strings:
-                return True
+                return False
             return bool(val)
 
         def to_timedelta(val):
@@ -556,6 +584,10 @@ class Connection:
                         sep='\t',
                         encoding='UTF-8',
                         quoting=csv.QUOTE_MINIMAL,
+                        # TODO: escapechar == quotechar ('"') raises ValueError on
+                        # pandas >=2 (same bug fixed in frame_manager's *_to_csv).
+                        # Deferred: audit this path's _load_csv escape convention
+                        # before changing, since it's a broad export path.
                         escapechar='"',
                         compression='zip',
                         date_format='%Y-%m-%dT%H:%M:%S', # This needs to match format passed in _load_csv below
@@ -699,16 +731,27 @@ class Connection:
             raise Exception('Project Id has not been set')
         return self._project_name
 
+    @property
+    def project_schema(self):
+        # The physical schema is stable for the life of the connection, so cache
+        # it rather than paying an RPC on every Table instantiation (there are
+        # ~10-15 per allocation step).
+        if self._project_schema is self._NOT_LOADED:
+            if self._project_id.startswith(SCHEMA_PREFIX):
+                self._project_schema = self._project_id
+            else:
+                self._project_schema = self.rpc.analyze.project.get_project_schema(project_id=self._project_id)
+        return self._project_schema
+
     def get_dimension(self, dimension_name):
         return self.dims.get_dimension(name=dimension_name, replace=False).hierarchy_table()
 
     def get_table(self, table_name):
         return Table(self, table_name)
 
-    def _load_udf_params(self):
-        self.udf = None
+    def _load_udf_params(self) -> "UDFParams | None":
         if not isinstance(self.rpc.step_id, str):
-            return
+            return None
         config = self.rpc.analyze.step.step(
             project_id=self._project_id,
             step_id=self.rpc.step_id
@@ -725,7 +768,7 @@ class Connection:
             (apply_variables(v['value'], self.variables), v['name'])
             for v in config.get('variables', [])
         ]
-        self.udf= UDFParams(
+        return UDFParams(
             source_by_name={s[1]: s[0] for s in _sources},
             sources=[s[0] for s in _sources],
             target_by_name={t[1]: t[0] for t in _targets},
@@ -736,14 +779,17 @@ class Connection:
 
     def refresh_variables(self) -> dict:
         if not isinstance(self.rpc.workflow_id, str):
-            return self.rpc.analyze.project.variable_values(
+            result = self.rpc.analyze.project.variable_values(
                 project_id=self._project_id,
             )
-        return self.rpc.analyze.workflow.variable_values(
-            project_id=self._project_id,
-            workflow_id=self.rpc.workflow_id,
-            include_project=True,
-        )
+        else:
+            result = self.rpc.analyze.workflow.variable_values(
+                project_id=self._project_id,
+                workflow_id=self.rpc.workflow_id,
+                include_project=True,
+            )
+        self._variables = result
+        return result
 
 
 class Table(sqlalchemy.Table):
@@ -807,13 +853,20 @@ class Table(sqlalchemy.Table):
             # Only try to create a physical table if columns have been defined
             _rpc.analyze.table.touch(project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite)
 
+        # Whether the caller supplied columns decides which touch created the
+        # physical table (see the ensure-create below). Capture it before
+        # table_meta reassigns `columns` to the reflected metadata.
+        had_input_columns = bool(columns)
+
         columns = _rpc.analyze.table.table_meta(
             project_id=_project_id, table_id=_table_id,
         )
         if not columns:
             columns = []  # If the table doesn't actually exist, we assume it's got no columns
 
-        if _project_id.startswith(SCHEMA_PREFIX):
+        if isinstance(conn, Connection):
+            _schema = conn.project_schema
+        elif _project_id.startswith(SCHEMA_PREFIX):
             _schema = _project_id
         else:
             _schema = _rpc.analyze.project.get_project_schema(project_id=_project_id)
@@ -842,8 +895,11 @@ class Table(sqlalchemy.Table):
         table_object._table_id = _table_id
         table_object._schema = _schema
 
-        # table must be created in database, if it doesn't already exist
-        if columns:
+        # Ensure the physical table exists for the read path (e.g. get_table with
+        # no input columns). When the caller supplied columns the touch above
+        # already (re)created it with the intended schema, so a second touch here
+        # would only recreate the same table again (and re-run update_shape).
+        if columns and not had_input_columns:
             _rpc.analyze.table.touch(
                 project_id=_project_id, table_id=_table_id, meta=columns, overwrite=overwrite
             )

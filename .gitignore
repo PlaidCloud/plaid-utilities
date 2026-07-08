@@ -7,3 +7,4 @@ dim_current/
 .plaid/
 flycheck*
 */wingdbstub.py
+.coverage
