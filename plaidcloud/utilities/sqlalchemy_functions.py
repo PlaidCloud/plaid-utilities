@@ -4,7 +4,7 @@
 import warnings
 
 import sqlalchemy
-from sqlalchemy.exc import SAWarning
+from sqlalchemy.exc import SAWarning, CompileError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
 from sqlalchemy.types import Numeric, Boolean, Double
@@ -744,6 +744,23 @@ def compile_sql_normalize_whitespace(element, compiler, **kw):
         func.regexp_replace(field, ww_re, ' ', 1, 0)
     )
 
+#: StarRocks uses RE2, which rejects Java/PCRE `\uXXXX` escapes and spells
+#: code points `\x{XXXX}`. The single-letter control escapes (\n \r \f) are
+#: valid as-is.
+STARROCKS_WW_RE = '[' + ''.join(
+    '\\' + c if len(c) == 1 else '\\x{' + c[1:] + '}'
+    for c in WEIRD_WHITESPACE_CHARS
+) + ']+'
+
+@compiles(sql_normalize_whitespace, 'starrocks')
+def compile_sql_normalize_whitespace_starrocks(element, compiler, **kw):
+    field, *args = list(element.clauses)
+    field = func.cast(field, sqlalchemy.Text)
+
+    return compiler.process(
+        func.regexp_replace(field, STARROCKS_WW_RE, ' ')
+    )
+
 class safe_unix_to_timestamp(GenericFunction):
     name = 'unix_to_timestamp'
 
@@ -935,6 +952,19 @@ def compile_sql_only_ascii_databend(element, compiler, **kw):
         **kw
     )
 
+@compiles(sql_only_ascii, 'starrocks')
+def compile_sql_only_ascii_starrocks(element, compiler, **kw):
+    # Remove non-ascii characters. StarRocks rejects the 4-arg
+    # regexp_replace(varchar, varchar, varchar, varchar) form the default emits,
+    # so use the 3-arg form. The `[[:ascii:]]` POSIX class is supported by RE2.
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    return compiler.process(
+        func.regexp_replace(text, r'[^[:ascii:]]+', ''),
+        **kw
+    )
+
 
 class safe_upper(GenericFunction):
     name = 'upper'
@@ -1095,6 +1125,28 @@ def compile_to_char_databend(element, compiler, **kw):
         )
 
 
+@compiles(sql_to_char, 'starrocks')
+def compile_to_char_starrocks(element, compiler, **kw):
+    # StarRocks has no Postgres-style to_char. Dates render via date_format
+    # (MySQL specifiers); everything else casts to a string. StarRocks cannot
+    # honor a Postgres numeric mask (grouping/currency/fixed decimals), so a
+    # numeric mask degrades to the value cast to CHAR — the numeric value is
+    # preserved, only cosmetic formatting is dropped.
+    source, *args = list(element.clauses)
+    if args:
+        format_, *args = args
+        format_ = format_.effective_value
+    else:
+        format_ = None
+
+    if format_ is None or '0' in format_ or '9' in format_:
+        return f"CAST({compiler.process(source)} AS CHAR)"
+
+    if format_ and '%' not in format_:
+        format_ = postgres_to_python_date_format(format_)
+    return f"date_format({compiler.process(source)}, {compiler.process(sqlalchemy.literal(format_))})"
+
+
 class sql_to_number(GenericFunction):
     name = 'to_number'
 
@@ -1107,12 +1159,30 @@ def compile_to_number(element, compiler, **kw):
         func.to_int64(string)
     )
 
+@compiles(sql_to_number, 'starrocks')
+def compile_to_number_starrocks(element, compiler, **kw):
+    # StarRocks has no to_number(); the format mask is advisory only. Cast to a
+    # wide decimal (unparseable input yields NULL). Also the target for the
+    # import_cast trailing-negatives path, which would otherwise emit a
+    # nonexistent to_number() on StarRocks.
+    string = list(element.clauses)[0]
+    return compiler.process(
+        func.cast(string, Numeric(38, 10))
+    )
+
 class sql_transaction_timestamp(GenericFunction):
     name = 'transaction_timestamp'
 
 @compiles(sql_transaction_timestamp, 'databend')
 def compile_transaction_timestamp(element, compiler, **kw):
     # Not available in databend
+    return compiler.process(
+        func.now()
+    )
+
+@compiles(sql_transaction_timestamp, 'starrocks')
+def compile_transaction_timestamp_starrocks(element, compiler, **kw):
+    # StarRocks has no transaction_timestamp(); now() is the equivalent.
     return compiler.process(
         func.now()
     )
@@ -1130,15 +1200,16 @@ def compile_strpos(element, compiler, **kw):
 class sql_string_to_array(GenericFunction):
     name = 'string_to_array'
 
-@compiles(sql_string_to_array, 'databend')
+@compiles(sql_string_to_array, 'databend', 'starrocks')
 def compile_string_to_array(element, compiler, **kw):
+    # split() returns an ARRAY on both Databend and StarRocks; null_string is
+    # not supported on either.
     string, delimiter, *args = list(element.clauses)
-    # null_string is not supported
 
     split_array = func.split(
         string,
         sqlalchemy.case(
-            (sqlalchemy.or_(delimiter == '', delimiter == None), ''),
+            (sqlalchemy.or_(delimiter == '', delimiter.is_(None)), ''),
             else_=delimiter
         )
     )
@@ -1299,3 +1370,89 @@ def compile_date_diff_starrocks(element, compiler, **kw):
         return compiler.visit_function(element)
     # clauses are (unit, dt2, dt1); <unit>s_diff(dt1, dt2) = dt1 - dt2.
     return compiler.process(getattr(func, starrocks_fn)(clauses[2], clauses[1]), **kw)
+
+
+# ---------------------------------------------------------------------------
+# Dialect-neutral spatial (geometry) functions
+# ---------------------------------------------------------------------------
+# The Alteryx converter/mapper and the wfr geo executors emit Databend ST_*
+# names directly, none of which exist verbatim on StarRocks (MySQL-protocol).
+# These custom GenericFunctions give each spatial op ONE dialect-neutral name
+# with a per-dialect @compiles: the default/databend form renders the current
+# Databend spelling byte-for-byte (so existing Databend SQL is unchanged) and
+# the StarRocks form renders the verified StarRocks equivalent. Callers (the
+# mapper, wave-2b) emit the neutral name and stop hardcoding a dialect.
+#
+# StarRocks spellings were verified live (paul-dev, StarRocks 3):
+#   st_point, st_geometryfromtext, st_astext, st_contains, st_x, st_y all
+#   execute; st_within does NOT exist (use st_contains with swapped args).
+#
+# Ops with no transparent StarRocks equivalent raise CompileError on StarRocks
+# rather than emit a wrong/nonexistent function: the value must be produced by
+# degrading to the shapely executor path (wave-2b) BEFORE reaching SQL. Failing
+# loud at compile time is the signal that the emission site still needs that
+# degradation, and it keeps the Databend path fully working in the meantime.
+
+def _register_geom_fn(neutral_name, databend_name, starrocks_name=None,
+                      *, swap_starrocks_args=False, starrocks_unsupported=None):
+    func_cls = type(neutral_name, (GenericFunction,),
+                    {'name': neutral_name, 'inherit_cache': True})
+
+    @compiles(func_cls)
+    def _compile_default(element, compiler, _name=databend_name, **kw):
+        rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+        return f"{_name}({rendered})"
+
+    if starrocks_unsupported is not None:
+        @compiles(func_cls, 'starrocks')
+        def _compile_starrocks(element, compiler, _msg=starrocks_unsupported, **kw):
+            raise CompileError(_msg)
+    else:
+        @compiles(func_cls, 'starrocks')
+        def _compile_starrocks(element, compiler, _name=starrocks_name,
+                               _swap=swap_starrocks_args, **kw):
+            clauses = list(element.clauses)
+            if _swap:
+                clauses = list(reversed(clauses))
+            rendered = ', '.join(compiler.process(c, **kw) for c in clauses)
+            return f"{_name}({rendered})"
+
+    return func_cls
+
+
+# Transparently translatable: databend spelling ↔ verified StarRocks spelling.
+geom_from_wkt = _register_geom_fn('geom_from_wkt', 'st_geometryfromwkt', 'st_geometryfromtext')
+geom_point = _register_geom_fn('geom_point', 'st_makegeompoint', 'st_point')
+geom_as_wkt = _register_geom_fn('geom_as_wkt', 'st_aswkt', 'st_astext')
+geom_contains = _register_geom_fn('geom_contains', 'st_contains', 'st_contains')
+geom_x = _register_geom_fn('geom_x', 'st_x', 'st_x')
+geom_y = _register_geom_fn('geom_y', 'st_y', 'st_y')
+# within(a, b) = "a is within b" = b contains a; StarRocks has no st_within, so
+# emit st_contains with the arguments swapped.
+geom_within = _register_geom_fn('geom_within', 'st_within', 'st_contains', swap_starrocks_args=True)
+
+# No transparent StarRocks equivalent — raise on StarRocks so wave-2b degrades
+# the emission to the shapely executor (or, for createline, a python builder).
+geom_area = _register_geom_fn(
+    'geom_area', 'st_area',
+    starrocks_unsupported='st_area has no StarRocks equivalent; degrade to the shapely area executor.')
+geom_length = _register_geom_fn(
+    'geom_length', 'st_length',
+    starrocks_unsupported='st_length has no StarRocks equivalent; degrade to the shapely length executor.')
+geom_intersects = _register_geom_fn(
+    'geom_intersects', 'st_intersects',
+    starrocks_unsupported='st_intersects has no StarRocks equivalent; degrade to the shapely intersects executor.')
+geom_createline = _register_geom_fn(
+    'geom_createline', 'st_createline',
+    starrocks_unsupported='st_createline has no StarRocks equivalent; build the LINESTRING via st_linefromtext or the python executor.')
+geom_centroid = _register_geom_fn(
+    'geom_centroid', 'st_centroid',
+    starrocks_unsupported='st_centroid has no StarRocks equivalent; degrade to the shapely centroid executor.')
+# Distance is NOT a transparent rename: Databend st_distance is PLANAR over two
+# geometries, while StarRocks only ships st_distance_sphere(lat0, lon0, lat1,
+# lon1) — SPHERICAL and taking four scalars, not two geometries. The emission
+# site (wave-2b) must supply the coordinate scalars and reconcile the degree↔
+# meter unit factor; a blind @compiles here would silently change semantics.
+geom_distance = _register_geom_fn(
+    'geom_distance', 'st_distance',
+    starrocks_unsupported='st_distance (planar, two geometries) has no transparent StarRocks equivalent; emit st_distance_sphere(lat0, lon0, lat1, lon1) with unit reconciliation at the call site.')
