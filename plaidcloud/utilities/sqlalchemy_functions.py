@@ -1187,3 +1187,115 @@ class quantile_tdigest_weighted(GenericFunction):
 def default_quantile_tdigest_weighted(element, compiler, **kw):
     level, expr, weight = list(element.clauses)
     return f"{element.name}({compiler.process(level, **kw)})({compiler.process(expr, **kw)}, {compiler.process(weight, **kw)})"
+
+
+# ---------------------------------------------------------------------------
+# Alteryx-converter cross-dialect functions
+# ---------------------------------------------------------------------------
+# The Alteryx expression converter (plaid app/analyze/utility/
+# alteryx_expression_converter.py) emits Databend function names. StarRocks is
+# MySQL-protocol and spells, arg-orders, or lacks several of them. Each function
+# below leaves the Databend/default spelling untouched (built-in GenericFunction
+# rendering) and adds only a StarRocks specialization — so existing Databend SQL
+# is byte-for-byte preserved while StarRocks gets valid SQL. StarRocks behavior
+# of every emission here was verified live (paul-dev, StarRocks 3 / MySQL 8.0.33
+# protocol).
+
+#: Databend function name → StarRocks name, when the only difference is the
+#: spelling (same arguments, same order).
+_STARROCKS_FUNCTION_RENAMES = {
+    'modulo': 'mod',           # Alteryx Mod()
+    'ord': 'ascii',            # Alteryx CharToInt() (StarRocks has no ord)
+    'today': 'current_date',   # Alteryx DateTimeToday()
+    'regexp_instr': 'regexp',  # REGEX_Match(): emitted as `regexp_instr(col, pat) > 0`; regexp() returns 1/0
+    'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
+    'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
+    'add_years': 'years_add', 'add_months': 'months_add', 'add_days': 'days_add',
+    'add_hours': 'hours_add', 'add_minutes': 'minutes_add', 'add_seconds': 'seconds_add',
+}
+
+
+def _register_starrocks_rename(databend_name, starrocks_name):
+    func_cls = type(databend_name, (GenericFunction,),
+                    {'name': databend_name, 'inherit_cache': True})
+
+    @compiles(func_cls, 'starrocks')
+    def _compile(element, compiler, _name=starrocks_name, **kw):
+        rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+        return f"{_name}({rendered})"
+
+
+for _db_name, _sr_name in _STARROCKS_FUNCTION_RENAMES.items():
+    _register_starrocks_rename(_db_name, _sr_name)
+
+
+class to_string(GenericFunction):
+    name = 'to_string'
+    inherit_cache = True
+
+@compiles(to_string, 'starrocks')
+def compile_to_string_starrocks(element, compiler, **kw):
+    # StarRocks has no to_string(); CAST(... AS CHAR) is the MySQL-protocol
+    # equivalent. Alteryx ToString(number, decimals) rounds to that many places.
+    # Rendered by hand (not via func.round/func.cast) so literal_binds — used for
+    # view DDL — reaches every argument; safe_round drops it on the digits arg.
+    clauses = list(element.clauses)
+    rendered = compiler.process(clauses[0], **kw)
+    if len(clauses) >= 2:
+        rendered = f"round({rendered}, {compiler.process(clauses[1], **kw)})"
+    return f"CAST({rendered} AS CHAR)"
+
+
+class try_to_float64(GenericFunction):
+    name = 'try_to_float64'
+    inherit_cache = True
+
+@compiles(try_to_float64, 'starrocks')
+def compile_try_to_float64_starrocks(element, compiler, **kw):
+    # StarRocks CAST(... AS DOUBLE) yields NULL on unparseable text — the lenient
+    # coercion Alteryx ToNumber (and Databend try_to_float64) provides. Rendered
+    # explicitly because the StarRocks dialect drops a func.cast(..., Double) as a
+    # perceived no-op.
+    value = list(element.clauses)[0]
+    return f"CAST({compiler.process(value, **kw)} AS DOUBLE)"
+
+
+class regexp_substr(GenericFunction):
+    name = 'regexp_substr'
+    inherit_cache = True
+
+@compiles(regexp_substr, 'starrocks')
+def compile_regexp_substr_starrocks(element, compiler, **kw):
+    # StarRocks spells first-match extraction regexp_extract(str, pat, 0).
+    clauses = list(element.clauses)
+    col, pattern = clauses[0], clauses[1]
+    return compiler.process(func.regexp_extract(col, pattern, 0), **kw)
+
+
+#: Databend date_diff(unit, start, end) = end - start. StarRocks has no such
+#: unit-parameterized diff but ships <unit>s_diff(a, b) = a - b. The converter
+#: emits date_diff(unit, dt2, dt1) to get dt1 - dt2, so map to
+#: <unit>s_diff(dt1, dt2). Only these base units appear (the converter composes
+#: week/quarter from day/month before calling date_diff); an out-of-contract
+#: unit falls through to the default rendering and fails loudly on StarRocks
+#: rather than returning a silently mis-scaled count.
+_STARROCKS_DATE_DIFF = {
+    'second': 'seconds_diff', 'minute': 'minutes_diff', 'hour': 'hours_diff',
+    'day': 'days_diff', 'month': 'months_diff', 'year': 'years_diff',
+}
+
+class date_diff(GenericFunction):
+    name = 'date_diff'
+    inherit_cache = True
+
+@compiles(date_diff, 'starrocks')
+def compile_date_diff_starrocks(element, compiler, **kw):
+    clauses = list(element.clauses)
+    if len(clauses) != 3:
+        return compiler.visit_function(element)
+    unit = str(clauses[0].value).strip().strip("'\"").lower()
+    starrocks_fn = _STARROCKS_DATE_DIFF.get(unit)
+    if starrocks_fn is None:
+        return compiler.visit_function(element)
+    # clauses are (unit, dt2, dt1); <unit>s_diff(dt1, dt2) = dt1 - dt2.
+    return compiler.process(getattr(func, starrocks_fn)(clauses[2], clauses[1]), **kw)
