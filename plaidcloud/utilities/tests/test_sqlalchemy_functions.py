@@ -165,16 +165,33 @@ class TestImportColDatabend(DatabendTest):
 #         self.assertEqual(5, compiled.params['left_2'])
 
 class TestImportColStarrocks(TestImportCol, StarrocksTest):
+    # StarRocks has no to_string(); the numericize guard casts to CHAR instead
+    # (see the to_string StarRocks specialization).
     def test_import_col_numeric(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(to_string(%(import_col_1)s), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
                           'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
         self.assertEqual('', compiled.params['regexp_replace_2'])
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
+
+    def test_import_col_numeric_trailing_negatives(self):
+        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+                          'THEN %(param_1)s ELSE to_number(%(import_col_1)s, %(to_number_1)s) END'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('9999999999999999999999999D9999999999999999999999999MI', compiled.params['to_number_1'])
+
+    def test_import_col_interval(self):
+        expr = sqlalchemy.func.import_col('Column1', 'interval', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CASE WHEN (regexp_replace(CAST(%(import_col_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
+                          'THEN NULL ELSE %(import_col_1)s::interval END'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
 
 
 class TestZfill(BaseTest):
@@ -631,3 +648,104 @@ class TestSafeDivideSR(StarrocksTest):
         self.assertEqual(100, compiled.params['safe_divide_3'])
         self.assertEqual(0, compiled.params['nullif_1'])
 
+
+
+# ---------------------------------------------------------------------------
+# Alteryx-converter cross-dialect functions
+# ---------------------------------------------------------------------------
+# The Alteryx expression converter emits Databend names; StarRocks (MySQL-
+# protocol) spells/arg-orders several differently. Each function preserves the
+# Databend/default spelling and specializes only StarRocks. StarRocks behavior
+# was verified live (paul-dev). Databend spelling is asserted unchanged.
+
+class TestConverterRenamesDatabend(DatabendTest):
+    """Databend keeps the emitted name verbatim (no regression)."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_modulo_preserved(self):
+        self.assertEqual('modulo(5, 3)', self._sql(sqlalchemy.func.modulo(5, 3)))
+
+    def test_ord_preserved(self):
+        self.assertEqual("ord('A')", self._sql(sqlalchemy.func.ord('A')))
+
+    def test_today_preserved(self):
+        self.assertEqual('today()', self._sql(sqlalchemy.func.today()))
+
+    def test_regexp_instr_preserved(self):
+        self.assertEqual("regexp_instr('s', 'p')", self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
+
+    def test_to_year_preserved(self):
+        self.assertEqual("to_year('2020-01-01')", self._sql(sqlalchemy.func.to_year('2020-01-01')))
+
+    def test_add_days_preserved(self):
+        self.assertEqual("add_days('2020-01-01', 5)", self._sql(sqlalchemy.func.add_days('2020-01-01', 5)))
+
+    def test_to_string_preserved(self):
+        self.assertEqual('to_string(123)', self._sql(sqlalchemy.func.to_string(123)))
+
+    def test_try_to_float64_preserved(self):
+        self.assertEqual("try_to_float64('1.5')", self._sql(sqlalchemy.func.try_to_float64('1.5')))
+
+    def test_regexp_substr_preserved(self):
+        self.assertEqual("regexp_substr('s', 'p')", self._sql(sqlalchemy.func.regexp_substr('s', 'p')))
+
+    def test_date_diff_preserved(self):
+        self.assertEqual("date_diff('day', 'd2', 'd1')",
+                         self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
+
+
+class TestConverterRenamesStarrocks(StarrocksTest):
+    """StarRocks gets the valid MySQL-protocol spelling/arg-order."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_modulo_becomes_mod(self):
+        self.assertEqual('mod(5, 3)', self._sql(sqlalchemy.func.modulo(5, 3)))
+
+    def test_ord_becomes_ascii(self):
+        self.assertEqual("ascii('A')", self._sql(sqlalchemy.func.ord('A')))
+
+    def test_today_becomes_current_date(self):
+        self.assertEqual('current_date()', self._sql(sqlalchemy.func.today()))
+
+    def test_regexp_instr_becomes_regexp(self):
+        self.assertEqual("regexp('s', 'p')", self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
+
+    def test_datetime_extractors_become_mysql_names(self):
+        self.assertEqual("year('2020-01-01')", self._sql(sqlalchemy.func.to_year('2020-01-01')))
+        self.assertEqual("month('2020-01-01')", self._sql(sqlalchemy.func.to_month('2020-01-01')))
+        self.assertEqual("day('2020-01-01')", self._sql(sqlalchemy.func.to_day_of_month('2020-01-01')))
+        self.assertEqual("hour('2020-01-01')", self._sql(sqlalchemy.func.to_hour('2020-01-01')))
+        self.assertEqual("minute('2020-01-01')", self._sql(sqlalchemy.func.to_minute('2020-01-01')))
+        self.assertEqual("second('2020-01-01')", self._sql(sqlalchemy.func.to_second('2020-01-01')))
+
+    def test_add_family_reverses_word_order(self):
+        self.assertEqual("days_add('2020-01-01', 5)", self._sql(sqlalchemy.func.add_days('2020-01-01', 5)))
+        self.assertEqual("months_add('2020-01-01', 2)", self._sql(sqlalchemy.func.add_months('2020-01-01', 2)))
+        self.assertEqual("years_add('2020-01-01', 1)", self._sql(sqlalchemy.func.add_years('2020-01-01', 1)))
+
+    def test_to_string_casts_to_char(self):
+        self.assertEqual('CAST(123 AS CHAR)', self._sql(sqlalchemy.func.to_string(123)))
+
+    def test_to_string_with_decimals_rounds_under_literal_binds(self):
+        # ToString(number, decimals): must render a real literal (no %(…)s bind
+        # placeholder) so it is valid inside view DDL (compiled with literal_binds).
+        expr = sqlalchemy.func.to_string(sqlalchemy.column('c'), 2)
+        sql = str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+        self.assertEqual('CAST(round(c, 2) AS CHAR)', sql)
+
+    def test_try_to_float64_casts_to_double(self):
+        self.assertEqual("CAST('1.5' AS DOUBLE)", self._sql(sqlalchemy.func.try_to_float64('1.5')))
+
+    def test_regexp_substr_becomes_regexp_extract(self):
+        self.assertEqual("regexp_extract('s', 'p', 0)", self._sql(sqlalchemy.func.regexp_substr('s', 'p')))
+
+    def test_date_diff_becomes_unit_diff_with_swapped_args(self):
+        # date_diff('day', dt2, dt1) (= dt1 - dt2 on Databend) → days_diff(dt1, dt2).
+        self.assertEqual("days_diff('d1', 'd2')",
+                         self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
+        self.assertEqual("months_diff('d1', 'd2')",
+                         self._sql(sqlalchemy.func.date_diff('month', 'd2', 'd1')))
