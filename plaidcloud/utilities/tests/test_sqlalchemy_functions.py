@@ -1,4 +1,5 @@
 # coding=utf-8
+import pickle
 import unittest
 
 import datetime
@@ -645,6 +646,18 @@ class TestSafeDivideSR(StarrocksTest):
 # protocol) spells/arg-orders several differently. Each function preserves the
 # Databend/default spelling and specializes only StarRocks. StarRocks behavior
 # was verified live (paul-dev). Databend spelling is asserted unchanged.
+
+class TestGeneratedFunctionPickling(unittest.TestCase):
+    def test_generated_functions_are_pickleable(self):
+        for name in sf._STARROCKS_FUNCTION_RENAMES:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(sf, name))
+                self.assertEqual(sf.__name__, getattr(sf, name).__module__)
+                expr = getattr(sqlalchemy.func, name)('2020-01-01')
+                restored = pickle.loads(pickle.dumps(expr))
+                self.assertIs(type(expr), type(restored))
+                self.assertEqual(str(expr), str(restored))
+
 
 class TestConverterRenamesDatabend(DatabendTest):
     """Databend keeps the emitted name verbatim (no regression)."""

@@ -1289,6 +1289,7 @@ _STARROCKS_FUNCTION_RENAMES = {
 def _register_starrocks_rename(databend_name, starrocks_name):
     func_cls = type(databend_name, (GenericFunction,),
                     {'name': databend_name, 'inherit_cache': True})
+    globals()[databend_name] = func_cls
 
     @compiles(func_cls, 'starrocks')
     def _compile(element, compiler, _name=starrocks_name, **kw):
