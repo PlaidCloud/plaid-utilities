@@ -1449,10 +1449,10 @@ geom_centroid = _register_geom_fn(
     'geom_centroid', 'st_centroid',
     starrocks_unsupported='st_centroid has no StarRocks equivalent; degrade to the shapely centroid executor.')
 # Distance is NOT a transparent rename: Databend st_distance is PLANAR over two
-# geometries, while StarRocks only ships st_distance_sphere(lat0, lon0, lat1,
-# lon1) — SPHERICAL and taking four scalars, not two geometries. The emission
+# geometries, while StarRocks only ships st_distance_sphere(lon0, lat0, lon1,
+# lat1) — SPHERICAL and taking four scalars, not two geometries. The emission
 # site (wave-2b) must supply the coordinate scalars and reconcile the degree↔
 # meter unit factor; a blind @compiles here would silently change semantics.
 geom_distance = _register_geom_fn(
     'geom_distance', 'st_distance',
-    starrocks_unsupported='st_distance (planar, two geometries) has no transparent StarRocks equivalent; emit st_distance_sphere(lat0, lon0, lat1, lon1) with unit reconciliation at the call site.')
+    starrocks_unsupported='st_distance (planar, two geometries) has no transparent StarRocks equivalent; emit st_distance_sphere(lon0, lat0, lon1, lat1) — longitude first, per StarRocks ST_Distance_Sphere(x,y,...) — with unit reconciliation at the call site.')
