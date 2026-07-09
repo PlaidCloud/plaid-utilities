@@ -364,6 +364,40 @@ class TestDateAdd(BaseTest):
         self.assertEqual(0, compiled.params['param_7'])
 
 
+class TestDateAddStarrocks(StarrocksTest):
+    def test_date_add(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt, years=1, months=2, weeks=3, days=4, hours=5, minutes=6, seconds=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'seconds_add(minutes_add(hours_add(days_add(weeks_add(months_add(years_add(CAST(%(date_add_1)s AS DATETIME), %(years_add_1)s), %(months_add_1)s), %(weeks_add_1)s), %(days_add_1)s), %(hours_add_1)s), %(minutes_add_1)s), %(seconds_add_1)s)',
+            str(compiled),
+        )
+        self.assertEqual(dt, compiled.params['date_add_1'])
+        self.assertEqual(1, compiled.params['years_add_1'])
+        self.assertEqual(2, compiled.params['months_add_1'])
+        self.assertEqual(3, compiled.params['weeks_add_1'])
+        self.assertEqual(4, compiled.params['days_add_1'])
+        self.assertEqual(5, compiled.params['hours_add_1'])
+        self.assertEqual(6, compiled.params['minutes_add_1'])
+        self.assertEqual(7, compiled.params['seconds_add_1'])
+
+    def test_date_add_weeks_and_days(self):
+        expr = sqlalchemy.func.date_add(sqlalchemy.func.date_trunc('WEEK', sqlalchemy.func.now()), weeks=6, days=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})
+        self.assertEqual(
+            "days_add(weeks_add(CAST(date_trunc('WEEK', now()) AS DATETIME), 6), 7)",
+            str(compiled),
+        )
+
+    def test_date_add_no_params(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(date_add_1)s AS DATETIME)', str(compiled))
+        self.assertEqual(dt, compiled.params['date_add_1'])
+
+
 class TestTransactionTimestamp(DatabendTest):
     def test_transaction_timestamp(self):
         expr = sqlalchemy.func.transaction_timestamp()
