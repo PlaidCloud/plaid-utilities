@@ -1079,6 +1079,26 @@ def compile_sql_date_add(element, compiler, **kw):
 
     return compiler.process(dt + interval)
 
+@compiles(sql_date_add, 'starrocks')
+def compile_sql_date_add_starrocks(element, compiler, **kw):
+    dt, *args = list(element.clauses)
+    expr = func.cast(dt, sqlalchemy.DateTime)
+    starrocks_units = [
+        ('years', 'years_add'),
+        ('months', 'months_add'),
+        ('weeks', 'weeks_add'),
+        ('days', 'days_add'),
+        ('hours', 'hours_add'),
+        ('minutes', 'minutes_add'),
+        ('seconds', 'seconds_add'),
+    ]
+    for unit, fn_name in starrocks_units:
+        value = element.additions[unit]
+        if isinstance(value, (int, float)) and value == 0:
+            continue
+        expr = getattr(func, fn_name)(expr, value)
+    return compiler.process(expr, **kw)
+
 ### Databend
 
 # Still need to check this one
