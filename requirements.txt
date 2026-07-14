@@ -4,7 +4,7 @@ avro
 ipython
 numpy
 pandas<3.0.0
-plaidcloud-rpc>=1.6.1
+plaidcloud-rpc>=1.9.0
 PyYAML
 requests
 setuptools

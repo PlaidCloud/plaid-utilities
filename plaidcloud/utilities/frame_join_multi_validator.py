@@ -61,7 +61,7 @@ _COLUMN_ID_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
 # this set and the dtype mapper.
 _DTYPE_ENUM = frozenset({
     'text', 'integer', 'bigint', 'smallint', 'tinyint', 'numeric', 'decimal',
-    'float', 'double', 'boolean', 'date', 'timestamp', 'time', 'interval',
+    'float', 'double', 'boolean', 'currency', 'date', 'timestamp', 'time', 'interval',
     'json', 'uuid', 'serial', 'bigserial', 'largebinary',
 })
 

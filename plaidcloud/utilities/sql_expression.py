@@ -15,6 +15,7 @@ import sqlalchemy
 import sqlalchemy.orm
 import sqlalchemy.dialects
 
+from plaidcloud.rpc.database import PlaidCurrency
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
 from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
@@ -441,6 +442,9 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
         'numeric': sqlalchemy.NUMERIC,
         'Numeric': sqlalchemy.NUMERIC,
         'NUMERIC': sqlalchemy.NUMERIC,
+        'currency': PlaidCurrency,
+        'Currency': PlaidCurrency,
+        'CURRENCY': PlaidCurrency,
         'timestamp': sqlalchemy.TIMESTAMP,
         'Timestamp': sqlalchemy.TIMESTAMP,
         'TIMESTAMP': sqlalchemy.TIMESTAMP,

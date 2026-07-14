@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the `currency` dtype (`DECIMAL(18, 4)`, via plaidcloud-rpc >= 1.9.0 `PlaidCurrency`): accepted by the frame_join_multi validator, `import_cast` branches for HANA/Databend/StarRocks, `currency` in the expression cast vocabulary, and float64/Avro-`double` read mappings in frame_manager ([@inviscid](https://github.com/inviscid)).
+- File imports load empty cells in `currency` columns as 0.0, matching numeric's behavior ([@inviscid](https://github.com/inviscid)).
 - Compile keyword-based `date_add` expressions to StarRocks-compatible SQL so StarRocks dashboard filters run without parser errors.
 - Add StarRocks specializations for the SQL functions the Alteryx expression converter emits, so converted expressions run on StarRocks as well as Databend. Each keeps the existing Databend/default SQL unchanged and adds only a StarRocks form: regular-expression match/extract, `to_string`/`try_to_float64` casts, `modulo`, `ord`, `today`, the date-part extractors (`to_year`/`to_month`/…), the `add_*` date-add family, and unit-parameterized `date_diff` ([@inviscid](https://github.com/inviscid)).
 - Close the remaining non-spatial StarRocks gaps: add StarRocks forms for `to_char` (dates via `date_format`, other values cast to `CHAR`), `to_number` (`CAST(... AS DECIMAL(38, 10))`, which also fixes the `import_cast` trailing-negatives path that previously emitted a nonexistent `to_number`), `transaction_timestamp` (`now()`), `string_to_array` (`split`), `ascii`/only-ASCII (3-arg `regexp_replace`), and `normalize_whitespace` (3-arg `regexp_replace` with RE2 `\x{…}` code-point escapes). The Databend/default SQL is byte-for-byte unchanged; every StarRocks form was verified executing live ([@inviscid](https://github.com/inviscid)).
