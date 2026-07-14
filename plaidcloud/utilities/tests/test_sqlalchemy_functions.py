@@ -57,6 +57,13 @@ class TestImportCol(BaseTest):
         self.assertEqual('', compiled.params['regexp_replace_3'])
         self.assertEqual(0.0, compiled.params['param_1'])
 
+    def test_import_col_currency_empty_cell_is_zero(self):
+        # Money columns mirror numeric's empty-cell semantics (0.0, not NULL)
+        # so re-typing a column to currency doesn't change import behavior.
+        expr = sqlalchemy.func.import_col('Column1', 'currency', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(0.0, compiled.params['param_1'])
+
     def test_import_col_numeric_trailing_negatives(self):
         expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})

@@ -152,7 +152,7 @@ def compile_import_col(element, compiler, **kw):
     return compiler.process(
         import_cast(col, dtype, date_format, trailing_negs) if dtype == 'text' else
         case(
-            (func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype == 'numeric' else None),
+            (func.regexp_replace(col, r'\s*', '') == '', 0.0 if dtype in ('numeric', 'currency') else None),
             else_=import_cast(col, dtype, date_format, trailing_negs)
         ),
         **kw
