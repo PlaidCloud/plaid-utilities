@@ -51,7 +51,7 @@ test = [
     "databend_sqlalchemy",
 ]
 full = [
-    "plaidcloud-rpc[full]>=1.6.3",
+    "plaidcloud-rpc[full]>=1.9.0",
     "fastavro",
 ]
 xray = [

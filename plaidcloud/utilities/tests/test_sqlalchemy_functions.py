@@ -148,6 +148,16 @@ class TestImportColDatabend(DatabendTest):
         self.assertEqual('', compiled.params['regexp_replace_2'])
         self.assertEqual('', compiled.params['regexp_replace_3'])
 
+    def test_import_cast_currency(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CAST(CASE WHEN (to_string(regexp_replace(%(import_cast_1)s, '
+                          '%(regexp_replace_1)s, %(regexp_replace_2)s)) = %(to_string_1)s) THEN NULL '
+                          'ELSE regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s) END AS DECIMAL(18, 4))'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_cast_1'])
+        self.assertEqual('NaN', compiled.params['to_string_1'])
+
 
 # class TestLeft(BaseTest):
 #     def test_left(self):
@@ -181,6 +191,19 @@ class TestImportColStarrocks(TestImportCol, StarrocksTest):
                           'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
         self.assertEqual('Column1', compiled.params['import_col_1'])
         self.assertEqual(0.0, compiled.params['param_1'])
+
+    def test_import_cast_currency(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(import_cast_1)s AS DECIMAL(18, 4))', str(compiled))
+        self.assertEqual('Column1', compiled.params['import_cast_1'])
+
+    def test_import_cast_currency_trailing_negatives(self):
+        # Same as numeric: to_number specializes to the wide-decimal cast on
+        # StarRocks. The (18, 4) target column still governs storage width.
+        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', True)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(import_cast_1)s AS DECIMAL(38, 10))', str(compiled))
 
 
 class TestZfill(BaseTest):

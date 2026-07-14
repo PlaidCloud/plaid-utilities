@@ -223,6 +223,8 @@ def compile_import_cast_hana(element, compiler, **kw):
         return compiler.process(func.to_smallint(func.to_nvarchar(col)))
     elif dtype == 'numeric':
         return compiler.process(func.to_decimal(func.to_nvarchar(col), 38, 10))
+    elif dtype == 'currency':
+        return compiler.process(func.to_decimal(func.to_nvarchar(col), 18, 4))
 
 
 @compiles(import_cast, 'databend')
@@ -257,7 +259,7 @@ def compile_import_cast_databend(element, compiler, **kw):
             ),
             **kw
         )
-    elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
+    elif dtype in ['integer', 'bigint', 'smallint', 'numeric', 'currency']:
         expr = func.regexp_replace(col, r'\s*', '')
         if trailing_negs:
             expr = sqlalchemy.case(
@@ -278,6 +280,16 @@ def compile_import_cast_databend(element, compiler, **kw):
                         else_=expr,
                     ),
                     sqlalchemy.Numeric(38, 10),
+                )
+            )
+        elif dtype == 'currency':
+            return compiler.process(
+                func.cast(
+                    sqlalchemy.case(
+                        (func.to_string(expr) == 'NaN', None),
+                        else_=expr,
+                    ),
+                    sqlalchemy.Numeric(18, 4),
                 )
             )
     else:
@@ -307,6 +319,10 @@ def compile_import_cast_starrocks(element, compiler, **kw):
         if trailing_negs:
             return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
         return compiler.process(func.cast(col, Numeric(38, 10)), **kw)
+    elif dtype == 'currency':
+        if trailing_negs:
+            return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
+        return compiler.process(func.cast(col, Numeric(18, 4)), **kw)
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)

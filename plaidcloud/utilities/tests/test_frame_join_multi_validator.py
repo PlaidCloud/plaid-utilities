@@ -460,6 +460,12 @@ class TestRound11ContractGaps(unittest.TestCase):
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'source_column_dtype_invalid')
 
+    def test_currency_dtype_accepted(self):
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][0]['dtype'] = 'currency'
+        cfg['target_columns'][0]['dtype'] = 'currency'
+        validate_frame_join_multi_config(cfg)  # no raise
+
     def test_user_supplied_datastore_dialect_rejected_at_save_time(self):
         """Save-time hook (dialect=None) must reject user-supplied datastore_dialect to
         prevent FULL OUTER bypass on Databend tenants."""

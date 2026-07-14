@@ -481,6 +481,7 @@ def avro_from_sql(sql, default=None):
         'bigint': 'int',
         'integer': 'int',
         'numeric': 'double',
+        'currency': 'double',
         'timestamp': 'int',
         'interval': 'float',
         'date': 'float',
@@ -506,6 +507,7 @@ def dtype_from_sql(sql):
         'integer': 'int32',
         'bigint': 'int64',
         'numeric': 'float64',
+        'currency': 'float64',
         'timestamp': 'datetime64[s]',
         'interval': 'timedelta64[s]',
         'date': 'datetime64[s]',
@@ -557,6 +559,7 @@ def converter_from_sql(sql):
         #'numeric': float, #dh.cast_as_float,
         #'numeric': dh.cast_as_float,
         'numeric': sturdy_cast_as_float,
+        'currency': sturdy_cast_as_float,
         'timestamp': pd.datetime,
         'interval': pd.datetime,
         'date': pd.datetime,
@@ -1717,7 +1720,7 @@ def set_column_types(df, type_dict):
     """
 
     float_column_types = (
-        'float16', 'float32', 'float64', 'numeric',
+        'float16', 'float32', 'float64', 'numeric', 'currency',
     )
 
     #Can't call this int_column_types, because there's a few other possibilities things listed

@@ -235,6 +235,17 @@ class TestFrameManager(unittest.TestCase):
         self.assertEqual('int64', x['Age'].dtypes)
         self.assertEqual('object', x['Name'].dtypes)
 
+    def test_avro_from_sql_currency(self):
+        self.assertEqual('double', frame_manager.avro_from_sql('currency'))
+
+    def test_dtype_from_sql_currency(self):
+        self.assertEqual('float64', frame_manager.dtype_from_sql('currency'))
+
+    def test_table_result_to_df_currency(self):
+        result = {'meta': [{'id': 'amount', 'dtype': 'currency'}], 'data': [(1.5,), (2.25,)]}
+        df = frame_manager.table_result_to_df(result)
+        self.assertEqual('float64', str(df['amount'].dtype))
+
     def test_drop_column(self):
         """Tests to verify columns dropped appropriately"""
         x = frame_manager.drop_column(self.df, ['Age'])

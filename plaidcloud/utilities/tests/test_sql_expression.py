@@ -5,7 +5,7 @@ import sqlalchemy
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
-from plaidcloud.rpc.database import PlaidUnicode
+from plaidcloud.rpc.database import PlaidCurrency, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
 from plaidcloud.utilities.analyze_table import compiled
 
@@ -353,6 +353,15 @@ class TestEvalExpression(TestSQLExpression):
     def test_error(self):
         with self.assertRaises(se.SQLExpressionError):
             se.eval_expression("1/0", {}, [])
+
+    def test_currency_cast_type(self):
+        self.assertIs(se.eval_expression("currency", {}, []), PlaidCurrency)
+
+    def test_cast_currency_renders_explicit_precision(self):
+        self.assertEqual(
+            ('CAST(%(param_1)s AS NUMERIC(18, 4))', {'param_1': 1}),
+            compiled(se.eval_expression("cast(v(1), currency)", {}, [])),
+        )
 
 class TestOnClause(TestSQLExpression):
     def setUp(self):
