@@ -165,6 +165,24 @@ class TestImportColDatabend(DatabendTest):
         self.assertEqual('Column1', compiled.params['import_cast_1'])
         self.assertEqual('NaN', compiled.params['to_string_1'])
 
+    def test_import_cast_currency_trailing_negatives(self):
+        # Shares numeric's sign-fixup logic but must still land on DECIMAL(18, 4)
+        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', True)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CAST(CASE WHEN (to_string(CASE WHEN regexp_like(regexp_replace(%(import_cast_1)s, '
+                          '%(regexp_replace_1)s, %(regexp_replace_2)s), %(regexp_like_1)s) THEN '
+                          'concat(%(concat_1)s, replace(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(replace_1)s, %(replace_2)s)) ELSE '
+                          'regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) END) '
+                          '= %(to_string_1)s) THEN NULL ELSE CASE WHEN '
+                          'regexp_like(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
+                          'replace(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(replace_1)s, %(replace_2)s)) ELSE '
+                          'regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) END '
+                          'END AS DECIMAL(18, 4))'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_cast_1'])
+
 
 # class TestLeft(BaseTest):
 #     def test_left(self):

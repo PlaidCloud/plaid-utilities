@@ -321,6 +321,8 @@ def compile_import_cast_starrocks(element, compiler, **kw):
         return compiler.process(func.cast(col, Numeric(38, 10)), **kw)
     elif dtype == 'currency':
         if trailing_negs:
+            # to_number renders a DECIMAL(38, 10) intermediate (see its compiler);
+            # the physical DECIMAL(18, 4) target column narrows it on insert.
             return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
         return compiler.process(func.cast(col, Numeric(18, 4)), **kw)
     else:
