@@ -30,11 +30,9 @@ def _table():
     )
 
 
-# Each of these executes arbitrary code (or leaks internals) if it reaches a
-# naked eval(). Every one is rejected by the static guard directly. A subset
-# containing ``{...}`` is *also* intercepted one layer earlier by
-# apply_variables (it reads the braces as an undefined template token), so the
-# eval_expression path blocks them either way — see the two test methods.
+# Each executes arbitrary code (or leaks internals) if it reaches a naked
+# eval(). The guard rejects every one; the ``{...}`` subset is also stopped a
+# layer earlier by apply_variables (undefined template token).
 ATTACKS = [
     "__import__('subprocess').getoutput('id')",           # direct builtins RCE
     "__import__('os').system('id')",
@@ -51,11 +49,10 @@ ATTACKS = [
 # through), so the guard is the sole thing standing between them and eval().
 BRACE_FREE_ATTACKS = [a for a in ATTACKS if '{' not in a]
 
-# Non-dunder attribute-traversal escapes (sc-22664, escalated). Each reaches
-# os / subprocess / io / sys.modules purely through non-underscore attributes
-# rooted at the raw ``sqlalchemy`` module — the old underscore-only denylist
-# never fired. The allowlist guard blocks them by confining a sqlalchemy-rooted
-# chain to curated type/expression helpers and rejecting unlisted AST nodes.
+# Non-dunder attribute-traversal escapes (sc-22664): each reaches
+# os/subprocess/io/sys.modules purely through non-underscore attrs rooted at the
+# raw ``sqlalchemy`` module — invisible to a denylist. The allowlist blocks them
+# by confining a sqlalchemy-rooted chain and rejecting unlisted AST nodes.
 TRAVERSAL_ATTACKS = [
     "sqlalchemy.log.logging.os.system('id')",
     "sqlalchemy.exc.compat.platform.os.system('id')",
