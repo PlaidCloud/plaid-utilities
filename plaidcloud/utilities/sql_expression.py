@@ -77,12 +77,45 @@ _SAFE_BUILTINS = {
     for name in ('abs', 'round', 'min', 'max', 'len', 'sum', 'str', 'int', 'bool')
 }
 
-# Constructs with no legitimate use in a SQL expression that also widen the
-# escape surface — reject them outright rather than reason about each one.
-_BANNED_NODES = (
-    ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
-    ast.NamedExpr, ast.Await, ast.Yield, ast.YieldFrom,
-)
+# Strict ALLOWLIST guard (sc-22664). A denylist of "dangerous attrs" is
+# unwinnable here: every stdlib/3rd-party module reachable through a
+# non-underscore attribute chain (sqlalchemy.log.logging.os.system,
+# sqlalchemy.util.concurrency.asyncio.base_events.subprocess.call,
+# ...inspect.importlib.import_module('os')...) re-exports os/subprocess/io
+# with no underscore anywhere for the guard to catch. So we invert it: only a
+# curated set of AST node types is allowed, and the one attribute root that
+# resolves to the raw ``sqlalchemy`` module is restricted to a curated set of
+# type/expression helpers — closing sqlalchemy.text raw-SQL and every module
+# re-export in one stroke. Other attribute roots (table aliases, extra_keys)
+# are dynamic and NOT root-restricted; the value objects they resolve to are
+# SQLAlchemy column collections, not arbitrary modules.
+
+# Only these AST node types may appear. Anything else — Lambda, comprehensions,
+# IfExp/ternary, Dict/Set, JoinedStr, walrus, await/yield, and any future
+# Python node — is rejected by default.
+_ALLOWED_NODES = frozenset({
+    ast.Expression, ast.Constant, ast.Name, ast.Load,
+    ast.Call, ast.keyword, ast.Attribute, ast.Subscript,
+    ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+    ast.BitAnd, ast.BitOr,
+    ast.BoolOp, ast.And, ast.Or,
+    ast.UnaryOp, ast.USub, ast.UAdd, ast.Invert,
+    ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+    ast.In, ast.NotIn,
+    ast.List, ast.Tuple, ast.Starred,
+})
+
+# The ONLY attributes permitted on a chain rooted at the raw ``sqlalchemy``
+# module. Mirrors plaid/app/ai/expression.py::ALLOWED_SQLALCHEMY_ATTRS. Type
+# constructors + expression helpers only — no engine, no text(), no DDL, no
+# module re-exports (log/util/engine/exc/connectors/...).
+_ALLOWED_SQLALCHEMY_ATTRS = frozenset({
+    'Text', 'Integer', 'Float', 'Boolean', 'DateTime', 'Date', 'Time',
+    'String', 'Numeric', 'BigInteger', 'SmallInteger', 'LargeBinary',
+    'Interval', 'ARRAY', 'JSON',
+    'cast', 'literal', 'literal_column', 'type_coerce', 'case',
+    'and_', 'or_', 'not_', 'null', 'true', 'false', 'asc', 'desc',
+})
 _FORMAT_METHODS = frozenset({'format', 'format_map'})
 
 
@@ -91,12 +124,26 @@ def _attr_off_func(node):
     return isinstance(node.value, ast.Name) and node.value.id == 'func'
 
 
+def _attr_root_name(node):
+    """Walk an attribute chain to its root ast.Name id, or None."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
 def _assert_safe_expression(source):
     """Reject a Python expression string that could escape the eval sandbox.
 
     Runs on the post-variable-substitution source (exactly what gets eval'd).
     A SyntaxError is left for compile() to report with the normal user-facing
     message — this guard only vetoes *parseable* code that is unsafe.
+
+    Strict allowlist: only node types in ``_ALLOWED_NODES`` are permitted, no
+    dunder/underscore attribute may be traversed (except a single-underscore
+    SQL-function name off ``func``, e.g. Databend's ``func._if``), and a chain
+    rooted at ``sqlalchemy`` is confined to ``_ALLOWED_SQLALCHEMY_ATTRS``.
     """
     try:
         tree = ast.parse(source, mode='eval')
@@ -104,7 +151,7 @@ def _assert_safe_expression(source):
         return
 
     for node in ast.walk(tree):
-        if isinstance(node, _BANNED_NODES):
+        if type(node) not in _ALLOWED_NODES:
             raise SQLExpressionError(
                 'Error in expression:\n    {}\n{} is not permitted in an expression.'.format(
                     source, type(node).__name__
@@ -117,10 +164,10 @@ def _assert_safe_expression(source):
                 )
             )
         if isinstance(node, ast.Attribute):
-            # Dunder attrs are the primary escape vector (__class__, __globals__,
-            # __subclasses__, __builtins__). A single leading underscore is
-            # internal API too — allowed ONLY as a bare SQL-function name off
-            # ``func`` (e.g. Databend's func._if), never chained further.
+            # Any underscore attr is internal API and the primary escape vector
+            # (__class__, __globals__, __subclasses__, _impl, ...). Allowed ONLY
+            # as a bare single-underscore SQL-function name off ``func`` (e.g.
+            # Databend's func._if), never chained further and never a dunder.
             if node.attr.startswith('_') and not (
                 not node.attr.startswith('__') and _attr_off_func(node)
             ):
@@ -130,9 +177,19 @@ def _assert_safe_expression(source):
                     )
                 )
             # str.format / format_map resolve attribute chains from inside the
-            # format string at runtime, bypassing the checks above. func.format
+            # format string at runtime, bypassing every static check. func.format
             # (a real SQL FORMAT function) is fine.
             if node.attr in _FORMAT_METHODS and not _attr_off_func(node):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+            # A chain rooted at the raw ``sqlalchemy`` module can otherwise
+            # reach os/subprocess/io/sys.modules via non-underscore re-exports
+            # (sqlalchemy.log.logging.os.system) or raw SQL (sqlalchemy.text).
+            # Confine it to curated type/expression helpers.
+            if _attr_root_name(node) == 'sqlalchemy' and node.attr not in _ALLOWED_SQLALCHEMY_ATTRS:
                 raise SQLExpressionError(
                     'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
                         source, node.attr

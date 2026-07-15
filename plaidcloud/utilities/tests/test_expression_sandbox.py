@@ -51,6 +51,35 @@ ATTACKS = [
 # through), so the guard is the sole thing standing between them and eval().
 BRACE_FREE_ATTACKS = [a for a in ATTACKS if '{' not in a]
 
+# Non-dunder attribute-traversal escapes (sc-22664, escalated). Each reaches
+# os / subprocess / io / sys.modules purely through non-underscore attributes
+# rooted at the raw ``sqlalchemy`` module — the old underscore-only denylist
+# never fired. The allowlist guard blocks them by confining a sqlalchemy-rooted
+# chain to curated type/expression helpers and rejecting unlisted AST nodes.
+TRAVERSAL_ATTACKS = [
+    "sqlalchemy.log.logging.os.system('id')",
+    "sqlalchemy.exc.compat.platform.os.system('id')",
+    "sqlalchemy.engine.create.inspect.os.system('id')",
+    "sqlalchemy.engine.base.sys.modules['os'].system('id')",
+    "sqlalchemy.engine.create.inspect.importlib.import_module('os').system('id')",
+    "sqlalchemy.util.concurrency.asyncio.base_events.subprocess.call(['x'])",
+    "str(sqlalchemy.log.logging.os.popen('id').read())",
+    "sqlalchemy.exc.compat.importlib_metadata.import_module('os').system('id')",
+    "sqlalchemy.log.logging.io.open('/etc/hostname').read()",
+    "sqlalchemy.engine.create.inspect.tokenize.open('/etc/hostname').read()",
+    "str(sqlalchemy.engine.base.sys.modules)",
+    "sqlalchemy.util.langhelpers.sys.modules",
+    "sqlalchemy.util.langhelpers.sys.modules['os'].system('id')",
+    # AST-node-shaped wrappers around the same call (ternary / chained compare /
+    # list+subscript / starred / bytes-decode) — all now rejected node types or
+    # blocked sqlalchemy roots.
+    "sqlalchemy.log.logging.os.system('id') if 1 < 2 else 0",
+    "0 <= sqlalchemy.log.logging.os.system('id') <= 0",
+    "[sqlalchemy.log.logging.os.system('id')][0]",
+    "sqlalchemy.connectors.asyncio.asyncio.base_events.subprocess.call(*[['x']])",
+    "sqlalchemy.log.logging.os.system('touch ' + b'x'.decode())",
+]
+
 # These build ordinary SQLAlchemy expressions and MUST still pass the guard.
 LEGIT = [
     "'foobar'",
@@ -66,6 +95,9 @@ LEGIT = [
     "func._if(table.a > 1, 'y', 'n')",      # Databend underscore SQL function
     "func.format(table.a, 2)",              # real SQL FORMAT function
     "abs(table.a)",
+    "sqlalchemy.cast(table.a, sqlalchemy.Integer)",   # curated sqlalchemy.* attrs
+    "table.a * 100 / table.b",
+    "func.import_col(get_column(table, 'a'), 'text', '', False)",
 ]
 
 
@@ -95,6 +127,25 @@ class TestExpressionSandboxBlocks(unittest.TestCase):
     def test_attacks_rejected_in_rule_path(self):
         with self.assertRaises(se.SQLExpressionError):
             se.eval_rule("__import__('os').system('id')", {}, [])
+
+    def test_guard_rejects_every_traversal_attack(self):
+        # Non-dunder attribute-traversal escapes rooted at ``sqlalchemy`` —
+        # every one bypassed the old underscore-only denylist.
+        for attack in TRAVERSAL_ATTACKS:
+            with self.subTest(attack=attack):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(attack)
+
+    def test_traversal_attacks_never_execute_via_eval_path(self):
+        for attack in TRAVERSAL_ATTACKS:
+            with self.subTest(attack=attack):
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(attack, None, [])
+
+    def test_sqlalchemy_text_raw_sql_is_blocked(self):
+        # sqlalchemy.text injects raw SQL; not in the curated attr allowlist.
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("sqlalchemy.text('DROP TABLE t')")
 
     def test_builtins_are_pinned_and_dangerous_ones_absent(self):
         safe = se.get_safe_dict([])
