@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Security: sandbox the transform-expression engine so an authored expression can no longer execute arbitrary Python. `eval_expression`/`eval_rule` now run under a pinned restricted `__builtins__` and a static guard that rejects dunder/private attribute access, `str.format`/`format_map`, lambdas, and comprehensions — closing both the builtins-injection and attribute-traversal escapes. Legitimate SQL expressions (including `func._if` and `func.format`) are unaffected ([@simozzy](https://github.com/simozzy)).
 - Add the `currency` dtype (`DECIMAL(18, 4)`, via plaidcloud-rpc >= 1.9.0 `PlaidCurrency`): accepted by the frame_join_multi validator, `import_cast` branches for HANA/Databend/StarRocks, `currency` in the expression cast vocabulary, and float64/Avro-`double` read mappings in frame_manager ([@inviscid](https://github.com/inviscid)).
 - File imports load empty cells in `currency` columns as 0.0, matching numeric's behavior ([@inviscid](https://github.com/inviscid)).
 - Compile keyword-based `date_add` expressions to StarRocks-compatible SQL so StarRocks dashboard filters run without parser errors.

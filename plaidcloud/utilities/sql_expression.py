@@ -3,6 +3,7 @@
 
 """Utility library for sqlalchemy metaprogramming used in analyze transforms"""
 
+import ast
 import re
 import uuid
 from copy import deepcopy
@@ -48,6 +49,97 @@ class SQLExpressionError(Exception):
     pass
 
 
+# --- Expression sandbox (sc-22664) -----------------------------------------
+#
+# eval_expression / eval_rule compile and eval() user-authored strings to build
+# SQLAlchemy expression trees. Anyone who can author a transform-step
+# expression (calc field, filter/where, rule, allocation) therefore reaches
+# eval(), so the eval context must not be a Python-code sandbox escape.
+#
+# Two independent layers close it:
+#
+#   1. get_safe_dict() pins ``__builtins__`` to a curated pure-function set.
+#      Without this, eval(code, globals) with no ``__builtins__`` key makes
+#      CPython inject the REAL builtins module — __import__, open, eval, exec —
+#      i.e. direct arbitrary code execution.
+#
+#   2. _assert_safe_expression() statically rejects the attribute-traversal
+#      escape (``().__class__.__mro__[1].__subclasses__()`` reaches os with NO
+#      builtins at all) and the str.format info-leak (``"{0.__class__}"``
+#      hides dunders inside a string literal the AST can't see).
+#
+# These SQL-building expressions never legitimately need Python dunders, a
+# lambda, a comprehension, or str.format, so blocking them costs no real
+# expressiveness. Do NOT relax either layer without re-checking both escapes.
+
+_SAFE_BUILTINS = {
+    name: __builtins__[name] if isinstance(__builtins__, dict) else getattr(__builtins__, name)
+    for name in ('abs', 'round', 'min', 'max', 'len', 'sum', 'str', 'int', 'bool')
+}
+
+# Constructs with no legitimate use in a SQL expression that also widen the
+# escape surface — reject them outright rather than reason about each one.
+_BANNED_NODES = (
+    ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+    ast.NamedExpr, ast.Await, ast.Yield, ast.YieldFrom,
+)
+_FORMAT_METHODS = frozenset({'format', 'format_map'})
+
+
+def _attr_off_func(node):
+    """True when the attribute is accessed directly off the ``func`` name."""
+    return isinstance(node.value, ast.Name) and node.value.id == 'func'
+
+
+def _assert_safe_expression(source):
+    """Reject a Python expression string that could escape the eval sandbox.
+
+    Runs on the post-variable-substitution source (exactly what gets eval'd).
+    A SyntaxError is left for compile() to report with the normal user-facing
+    message — this guard only vetoes *parseable* code that is unsafe.
+    """
+    try:
+        tree = ast.parse(source, mode='eval')
+    except SyntaxError:
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, _BANNED_NODES):
+            raise SQLExpressionError(
+                'Error in expression:\n    {}\n{} is not permitted in an expression.'.format(
+                    source, type(node).__name__
+                )
+            )
+        if isinstance(node, ast.Name) and node.id.startswith('__'):
+            raise SQLExpressionError(
+                'Error in expression:\n    {}\nReference to {!r} is not permitted.'.format(
+                    source, node.id
+                )
+            )
+        if isinstance(node, ast.Attribute):
+            # Dunder attrs are the primary escape vector (__class__, __globals__,
+            # __subclasses__, __builtins__). A single leading underscore is
+            # internal API too — allowed ONLY as a bare SQL-function name off
+            # ``func`` (e.g. Databend's func._if), never chained further.
+            if node.attr.startswith('_') and not (
+                not node.attr.startswith('__') and _attr_off_func(node)
+            ):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+            # str.format / format_map resolve attribute chains from inside the
+            # format string at runtime, bypassing the checks above. func.format
+            # (a real SQL FORMAT function) is fine.
+            if node.attr in _FORMAT_METHODS and not _attr_off_func(node):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+
+
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
 
@@ -62,6 +154,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
         else:
             raise
 
+    _assert_safe_expression(expression_with_variables)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
@@ -485,7 +578,12 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
     # alias like `func` resolves to the builtin and never shadows it.
     alias_keys = {alias: rep.columns for alias, rep in (tables_by_alias or {}).items()}
 
-    return merge(alias_keys, default_keys, table_keys, extra_keys)
+    safe_dict = merge(alias_keys, default_keys, table_keys, extra_keys)
+    # Pin builtins LAST so nothing merged in (a column/alias/extra_key literally
+    # named __builtins__) can reopen the eval sandbox (sc-22664). eval() would
+    # otherwise inject the full builtins module here.
+    safe_dict['__builtins__'] = _SAFE_BUILTINS
+    return safe_dict
 
 
 def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
@@ -1230,6 +1328,7 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
         else:
             raise
 
+    _assert_safe_expression(expression_with_variables)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
