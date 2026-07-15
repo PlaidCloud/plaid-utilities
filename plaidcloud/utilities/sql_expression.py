@@ -3,6 +3,7 @@
 
 """Utility library for sqlalchemy metaprogramming used in analyze transforms"""
 
+import ast
 import re
 import uuid
 from copy import deepcopy
@@ -48,6 +49,119 @@ class SQLExpressionError(Exception):
     pass
 
 
+# --- Expression sandbox (sc-22664) -----------------------------------------
+# eval_expression / eval_rule eval() user-authored strings (calc fields,
+# filters, rules, allocations), so the eval context must not be escapable.
+# Two layers, neither to be relaxed without re-checking the escapes below:
+#   1. get_safe_dict() pins __builtins__ to a curated pure-function set — else
+#      eval() injects the real builtins module (__import__/open/exec).
+#   2. _assert_safe_expression() is a strict allowlist. A denylist is unwinnable
+#      because arbitrary modules are reachable through NON-underscore attribute
+#      chains (sqlalchemy.log.logging.os.system, ...) with nothing to match on.
+_SAFE_BUILTINS = {
+    name: __builtins__[name] if isinstance(__builtins__, dict) else getattr(__builtins__, name)
+    for name in ('abs', 'round', 'min', 'max', 'len', 'sum', 'str', 'int', 'bool')
+}
+
+# Allowlisted AST node types; every other node (lambda, comprehensions,
+# ternary, f-strings, dict/set, walrus, await/yield) is rejected by default.
+_ALLOWED_NODES = frozenset({
+    ast.Expression, ast.Constant, ast.Name, ast.Load,
+    ast.Call, ast.keyword, ast.Attribute, ast.Subscript,
+    ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+    ast.BitAnd, ast.BitOr,
+    ast.BoolOp, ast.And, ast.Or,
+    ast.UnaryOp, ast.USub, ast.UAdd, ast.Invert,
+    ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+    ast.In, ast.NotIn,
+    ast.List, ast.Tuple, ast.Starred,
+})
+
+# Attrs allowed on a `sqlalchemy`-rooted chain: type constructors + expression
+# helpers only, no text()/engine/DDL/module re-exports. Other roots (table
+# aliases, extra_keys) resolve to column collections, not modules, so are not
+# root-restricted. Mirrors plaid/app/ai/expression.py::ALLOWED_SQLALCHEMY_ATTRS.
+_ALLOWED_SQLALCHEMY_ATTRS = frozenset({
+    'Text', 'Integer', 'Float', 'Boolean', 'DateTime', 'Date', 'Time',
+    'String', 'Numeric', 'BigInteger', 'SmallInteger', 'LargeBinary',
+    'Interval', 'ARRAY', 'JSON',
+    'cast', 'literal', 'literal_column', 'type_coerce', 'case',
+    'and_', 'or_', 'not_', 'null', 'true', 'false', 'asc', 'desc',
+})
+_FORMAT_METHODS = frozenset({'format', 'format_map'})
+
+
+def _attr_off_func(node):
+    """True when the attribute is accessed directly off the ``func`` name."""
+    return isinstance(node.value, ast.Name) and node.value.id == 'func'
+
+
+def _attr_root_name(node):
+    """Walk an attribute chain to its root ast.Name id, or None."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _assert_safe_expression(source):
+    """Reject a Python expression string that could escape the eval sandbox.
+
+    Runs on the post-variable-substitution source (exactly what gets eval'd).
+    A SyntaxError is left for compile() to report with the normal user-facing
+    message — this guard only vetoes *parseable* code that is unsafe.
+    """
+    try:
+        tree = ast.parse(source, mode='eval')
+    except SyntaxError:
+        return
+
+    for node in ast.walk(tree):
+        if type(node) not in _ALLOWED_NODES:
+            raise SQLExpressionError(
+                'Error in expression:\n    {}\n{} is not permitted in an expression.'.format(
+                    source, type(node).__name__
+                )
+            )
+        if isinstance(node, ast.Name) and node.id.startswith('__'):
+            raise SQLExpressionError(
+                'Error in expression:\n    {}\nReference to {!r} is not permitted.'.format(
+                    source, node.id
+                )
+            )
+        if isinstance(node, ast.Attribute):
+            # Underscore attrs are the escape vector (__class__, __globals__,
+            # _impl, ...); allow only a single-underscore SQL function off func
+            # (Databend func._if).
+            if node.attr.startswith('_') and not (
+                not node.attr.startswith('__') and _attr_off_func(node)
+            ):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+            # str.format/format_map do attribute lookups from inside the format
+            # string at runtime, past every static check; func.format is a real
+            # SQL function.
+            if node.attr in _FORMAT_METHODS and not _attr_off_func(node):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+            # A sqlalchemy-rooted chain otherwise reaches os/subprocess via
+            # non-underscore re-exports (sqlalchemy.log.logging.os) or raw SQL
+            # (sqlalchemy.text).
+            if _attr_root_name(node) == 'sqlalchemy' and node.attr not in _ALLOWED_SQLALCHEMY_ATTRS:
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+
+
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
 
@@ -62,6 +176,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
         else:
             raise
 
+    _assert_safe_expression(expression_with_variables)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
@@ -485,7 +600,12 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
     # alias like `func` resolves to the builtin and never shadows it.
     alias_keys = {alias: rep.columns for alias, rep in (tables_by_alias or {}).items()}
 
-    return merge(alias_keys, default_keys, table_keys, extra_keys)
+    safe_dict = merge(alias_keys, default_keys, table_keys, extra_keys)
+    # Pin builtins LAST so nothing merged in (a column/alias/extra_key literally
+    # named __builtins__) can reopen the eval sandbox (sc-22664). eval() would
+    # otherwise inject the full builtins module here.
+    safe_dict['__builtins__'] = _SAFE_BUILTINS
+    return safe_dict
 
 
 def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
@@ -1230,6 +1350,7 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
         else:
             raise
 
+    _assert_safe_expression(expression_with_variables)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
