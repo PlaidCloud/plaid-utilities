@@ -87,8 +87,22 @@ _ALLOWED_SQLALCHEMY_ATTRS = frozenset({
     'Interval', 'ARRAY', 'JSON',
     'cast', 'literal', 'literal_column', 'type_coerce', 'case',
     'and_', 'or_', 'not_', 'null', 'true', 'false', 'asc', 'desc',
+    # Query constructor for scalar-subquery expressions (e.g. the Table
+    # Explorer facet's distinct-count: sqlalchemy.select(...).subquery()).
+    # select() itself is inert (its string-accepting builder methods —
+    # where/order_by/group_by/add_columns — already require text() in SA 2.0,
+    # which stays blocked); its ONLY raw-SQL splice methods are blocked by
+    # _RAW_SQL_METHODS below, so it cannot re-introduce a text()-style vector.
+    'select',
 })
 _FORMAT_METHODS = frozenset({'format', 'format_map'})
+# Statement methods that splice a raw, unparsed string literally into the
+# compiled SQL — the same raw-SQL injection primitive as text(). They live on
+# select()'s RESULT (and are reachable via a subquery's .element back-ref), so
+# the sqlalchemy-root allowlist can't see them (a Call result's root is None);
+# they must be blocked by name regardless of root. No SQL function shares these
+# names, so — unlike _FORMAT_METHODS — there is no func.* exemption.
+_RAW_SQL_METHODS = frozenset({'prefix_with', 'suffix_with', 'with_hint', 'with_statement_hint'})
 
 
 def _attr_off_func(node):
@@ -146,6 +160,15 @@ def _assert_safe_expression(source):
             # string at runtime, past every static check; func.format is a real
             # SQL function.
             if node.attr in _FORMAT_METHODS and not _attr_off_func(node):
+                raise SQLExpressionError(
+                    'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
+                        source, node.attr
+                    )
+                )
+            # Raw-SQL splice methods off a select() result / subquery .element
+            # back-ref reach past the sqlalchemy-root allowlist (result root is
+            # None); block by name unconditionally.
+            if node.attr in _RAW_SQL_METHODS:
                 raise SQLExpressionError(
                     'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
                         source, node.attr
