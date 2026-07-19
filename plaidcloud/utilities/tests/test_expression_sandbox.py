@@ -77,6 +77,21 @@ TRAVERSAL_ATTACKS = [
     "sqlalchemy.log.logging.os.system('touch ' + b'x'.decode())",
 ]
 
+# Raw-SQL splice via select()'s result methods (sc-23125). Allowlisting
+# ``select`` (needed for the facet distinct-count) hands the sandbox a Select,
+# whose prefix_with/suffix_with/with_hint/with_statement_hint coerce an
+# arbitrary string into literal SQL — the same primitive text() gives. These
+# live on a Call *result* (root None), so the sqlalchemy-root allowlist can't
+# see them; the guard blocks the method names unconditionally. The last case
+# reaches back to the Select via a subquery's ``.element`` back-reference.
+RAW_SQL_SPLICE_ATTACKS = [
+    "sqlalchemy.select(get_column(table, 'a')).suffix_with('UNION SELECT secret').subquery()",
+    "sqlalchemy.select(get_column(table, 'a')).prefix_with('/*x*/ EVIL').subquery()",
+    "sqlalchemy.select(get_column(table, 'a')).with_hint(table, 'EVIL').subquery()",
+    "sqlalchemy.select(get_column(table, 'a')).with_statement_hint('EVIL').subquery()",
+    "sqlalchemy.select(get_column(table, 'a')).subquery().element.suffix_with('EVIL').subquery()",
+]
+
 # These build ordinary SQLAlchemy expressions and MUST still pass the guard.
 LEGIT = [
     "'foobar'",
@@ -95,6 +110,9 @@ LEGIT = [
     "sqlalchemy.cast(table.a, sqlalchemy.Integer)",   # curated sqlalchemy.* attrs
     "table.a * 100 / table.b",
     "func.import_col(get_column(table, 'a'), 'text', '', False)",
+    # Table Explorer facet distinct-count (sc-23125): sqlalchemy.select must
+    # be allowlisted or the facet view never loads.
+    "sqlalchemy.select(func.count(func.distinct(get_column(table, 'a')))).subquery()",
 ]
 
 
@@ -144,6 +162,21 @@ class TestExpressionSandboxBlocks(unittest.TestCase):
         with self.assertRaises(se.SQLExpressionError):
             se._assert_safe_expression("sqlalchemy.text('DROP TABLE t')")
 
+    def test_guard_rejects_raw_sql_splice_off_select(self):
+        # sc-23125: select() is allowlisted, but its raw-text splice methods
+        # (and the subquery .element back-ref to them) must stay blocked.
+        for attack in RAW_SQL_SPLICE_ATTACKS:
+            with self.subTest(attack=attack):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(attack)
+
+    def test_raw_sql_splice_never_executes_via_eval_path(self):
+        table = _table()
+        for attack in RAW_SQL_SPLICE_ATTACKS:
+            with self.subTest(attack=attack):
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(attack, None, [table])
+
     def test_builtins_are_pinned_and_dangerous_ones_absent(self):
         safe = se.get_safe_dict([])
         self.assertIn('__builtins__', safe)
@@ -165,6 +198,16 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         self.assertEqual(se.eval_expression("get_column(table, 'a')", {}, [table]).name, 'a')
         # Produces a real SQLAlchemy element, not a Python value.
         self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_facet_distinct_count_subquery_evaluates(self):
+        # sc-23125: the Table Explorer facet's runtime-generated distinct-count
+        # expression must eval to a scalar subquery, not raise on `select`.
+        table = _table()
+        result = se.eval_expression(
+            "sqlalchemy.select(func.count(func.distinct(get_column(table, 'a')))).subquery()",
+            {}, [table],
+        )
+        self.assertIsInstance(result, sqlalchemy.sql.selectable.Subquery)
 
 
 if __name__ == '__main__':
