@@ -49,6 +49,8 @@ test = [
     "sqlalchemy-greenplum",
     "starrocks",
     "databend_sqlalchemy",
+    "databricks-sqlalchemy",
+    "databricks-sql-connector",
 ]
 full = [
     "plaidcloud-rpc[full]>=1.9.0",
