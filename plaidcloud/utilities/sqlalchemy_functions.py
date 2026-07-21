@@ -76,9 +76,11 @@ def postgres_to_snowflake_date_format(pg_format):
     """Translates a Postgres date-format string to a Snowflake format model.
 
     Double-quoted literals pass through verbatim (both engines honor them).
-    Documented Postgres tokens with no Snowflake format element raise
-    CompileError — never silently wrong output. Text outside the token table
-    passes through unchanged, matching how both engines treat it (literally).
+    Tokens from the plaid-rpc conversion-table vocabulary with no Snowflake
+    format element raise CompileError — the never-silently-wrong guarantee
+    holds for that vocabulary. Postgres tokens outside it (Q, WW, W, J, CC,
+    lowercase forms, …) pass through as literal text, the same treatment the
+    databend/starrocks translators give out-of-table tokens.
     """
     out = []
     i = 0
@@ -141,7 +143,8 @@ def compile_es_starrocks(element, compiler, **kw):
 def compile_es_snowflake(element, compiler, **kw):
     # Snowflake cannot subtract timestamps directly and has no NOW();
     # DATEDIFF(second, start, end) = end - start (whole seconds, matching the
-    # mssql/starrocks variants).
+    # mssql variant). Side-find: the starrocks variant's seconds_diff(a, b)
+    # is a - b, so it yields the opposite sign — pre-existing, left untouched.
     start_date, end_date = list(element.clauses)
     return "datediff(second, %s, COALESCE(%s, CURRENT_TIMESTAMP))" % (compiler.process(func.cast(start_date, sqlalchemy.DateTime)), compiler.process(func.cast(end_date, sqlalchemy.DateTime)))
 
@@ -438,8 +441,9 @@ def compile_import_cast_snowflake(element, compiler, **kw):
     elif dtype == 'time':
         return compiler.process(func.to_timestamp(col, 'HH24:MI:SS'), **kw)
     elif dtype == 'interval':
-        # Snowflake has interval constants but no INTERVAL data type.
-        raise CompileError('Snowflake has no INTERVAL data type; interval columns cannot be imported')
+        # Snowflake's INTERVAL data type is Public Preview, not GA — the loud
+        # refusal stands until it ships.
+        raise CompileError('Snowflake has no GA INTERVAL data type; interval columns cannot be imported')
     elif dtype == 'boolean':
         # TO_BOOLEAN natively accepts true/t/yes/y/on/1 and false/f/no/n/off/0,
         # case-insensitive — a superset of the databend variant's t/1/f/0 mapping.
@@ -458,6 +462,9 @@ def compile_import_cast_snowflake(element, compiler, **kw):
         elif dtype == 'smallint':
             return compiler.process(func.cast(expr, sqlalchemy.SmallInteger), **kw)
         elif dtype == 'numeric':
+            # N.B. the numeric/currency branches call compiler.process without
+            # **kw — a faithful replica of the databend variant (literal_binds
+            # does not propagate there either); fix both together if ever fixed.
             return compiler.process(
                 func.cast(
                     sqlalchemy.case(
@@ -672,6 +679,15 @@ def compile_sql_metric_multiply(element, compiler, **kw):
     return compiler.process(exp, **kw)
 
 
+@compiles(sql_metric_multiply, 'snowflake')
+def compile_sql_metric_multiply_snowflake(element, compiler, **kw):
+    # The default's _squash_to_numeric casts through bare NUMERIC —
+    # NUMBER(38, 0) on Snowflake — so '1.5K' would round to 2 before the
+    # multiplier applies (→ 2000, silently wrong). Fail loud until a
+    # scale-preserving variant ships.
+    raise CompileError('metric_multiply has no Snowflake variant yet; the default rendering rounds decimals away (bare-NUMERIC squash is NUMBER(38, 0))')
+
+
 class sql_numericize(GenericFunction):
     name = 'numericize'
     inherit_cache = False
@@ -756,8 +772,8 @@ def compile_sql_numericize_snowflake(element, compiler, **kw):
     """
     # Snowflake: REGEXP_SUBSTR(subject, pattern) returns the first whole match
     # (NULL when none); 3-arg REGEXP_REPLACE replaces all occurrences
-    # (occurrence defaults to 0) — the Postgres 'g' flag would be read as the
-    # numeric <position> argument.
+    # (occurrence defaults to 0) — a Postgres-style 'g' 4th argument would
+    # error as an invalid <position>.
     arg, = list(element.clauses)
 
     def sql_only_numeric(text):
@@ -1008,7 +1024,7 @@ SNOWFLAKE_WW_RE = '[' + ''.join(
 @compiles(sql_normalize_whitespace, 'snowflake')
 def compile_sql_normalize_whitespace_snowflake(element, compiler, **kw):
     # 3-arg regexp_replace: Snowflake replaces all occurrences by default; the
-    # Postgres 'g' flag the default emits would be read as <position>.
+    # Postgres 'g' flag the default emits would error as an invalid <position>.
     field, *args = list(element.clauses)
     field = func.cast(field, sqlalchemy.Text)
 
@@ -1244,8 +1260,8 @@ SNOWFLAKE_NON_ASCII_RE = '[^\x01-\x7f]+'
 @compiles(sql_only_ascii, 'snowflake')
 def compile_sql_only_ascii_snowflake(element, compiler, **kw):
     # Remove non-ascii characters. 3-arg regexp_replace replaces all
-    # occurrences on Snowflake; the default's 4th-position 'g' flag would be
-    # read as <position>.
+    # occurrences on Snowflake; the default's 4th-position 'g' flag would
+    # error as an invalid <position>.
     text, *args = list(element.clauses)
     text = func.cast(text, sqlalchemy.Text)
 

@@ -1694,6 +1694,16 @@ class TestQuantilesSnowflake(SnowflakeTest):
             self._sql(sqlalchemy.func.quantile_tdigest_weighted(0.5, sqlalchemy.column('x'), sqlalchemy.column('w')))
 
 
+class TestMetricMultiplySnowflake(SnowflakeTest):
+    def test_metric_multiply_raises(self):
+        # The default's bare-NUMERIC squash is NUMBER(38, 0) on Snowflake, so
+        # '1.5K' would round to 2 before the multiplier (→ 2000) — loud beats
+        # silently wrong.
+        expr = sqlalchemy.func.metric_multiply(sqlalchemy.column('t'))
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+
+
 class TestSnowflakeDefaultOk(unittest.TestCase):
     """The parity harness keys known-gap skips on snowflake-variant absence;
     _SNOWFLAKE_DEFAULT_OK is the explicit per-function confirmation that the
