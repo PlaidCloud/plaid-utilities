@@ -1173,3 +1173,547 @@ class TestUuidCastDatabend(TestUuidCast, DatabendTest):
 
 class TestUuidCastStarrocks(TestUuidCast, StarrocksTest):
     pass
+
+
+# ---------------------------------------------------------------------------
+# sc-23158 WS-B2: Snowflake expression variants
+# ---------------------------------------------------------------------------
+# Exact compiled-SQL assertions per function on snowflake, verified against
+# the Snowflake function reference, plus regression assertions pinning the
+# databend/starrocks/default renderings of every touched class (current
+# operations must stay byte-identical).
+
+
+class TestElapsedSeconds(BaseTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_elapsed_seconds(self):
+        self.assertEqual(
+            'EXTRACT(EPOCH FROM COALESCE(CAST(b AS TIMESTAMP WITHOUT TIME ZONE), NOW())'
+            '-CAST(a AS TIMESTAMP WITHOUT TIME ZONE))',
+            self._sql(sf.elapsed_seconds(sqlalchemy.column('a'), sqlalchemy.column('b'))))
+
+
+class TestElapsedSecondsDatabend(DatabendTest):
+    def test_elapsed_seconds(self):
+        expr = sf.elapsed_seconds(sqlalchemy.column('a'), sqlalchemy.column('b'))
+        self.assertEqual(
+            '(CAST(COALESCE(CAST(b AS DATETIME), NOW()) AS INT64 - CAST(CAST(a AS DATETIME) AS INT64)) / 1000000',
+            str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+
+class TestElapsedSecondsStarrocks(StarrocksTest):
+    def test_elapsed_seconds(self):
+        expr = sf.elapsed_seconds(sqlalchemy.column('a'), sqlalchemy.column('b'))
+        self.assertEqual(
+            'seconds_diff(CAST(a AS DATETIME), COALESCE(CAST(b AS DATETIME), NOW()))',
+            str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+
+class TestElapsedSecondsSnowflake(SnowflakeTest):
+    def test_elapsed_seconds(self):
+        # No timestamp subtraction and no NOW() on Snowflake; DATEDIFF(second,
+        # start, end) = end - start.
+        expr = sf.elapsed_seconds(sqlalchemy.column('a'), sqlalchemy.column('b'))
+        self.assertEqual(
+            'datediff(second, CAST(a AS datetime), COALESCE(CAST(b AS datetime), CURRENT_TIMESTAMP))',
+            str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+
+class TestImportColSnowflake(SnowflakeTest):
+    def test_import_col_text(self):
+        expr = sqlalchemy.func.import_col('Column1', 'text', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('%(import_col_1)s', str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+
+    def test_import_col_numeric(self):
+        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s) = %(regexp_replace_3)s) THEN %(param_1)s ELSE '
+                          'CAST(CASE WHEN (to_varchar(regexp_replace(%(import_col_1)s, '
+                          '%(regexp_replace_4)s, %(regexp_replace_5)s)) = %(to_string_1)s) THEN NULL '
+                          'ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+                          '%(regexp_replace_5)s) END AS NUMERIC(38, 10)) END'), str(compiled))
+        self.assertEqual('Column1', compiled.params['import_col_1'])
+        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
+        self.assertEqual(0.0, compiled.params['param_1'])
+        self.assertEqual('NaN', compiled.params['to_string_1'])
+
+    def test_import_cast_numeric_trailing_negatives(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'numeric', 'YYYY-MM-DD', True)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CAST(CASE WHEN (to_varchar(CASE WHEN regexp_like(regexp_replace(%(import_cast_1)s, '
+                          '%(regexp_replace_1)s, %(regexp_replace_2)s), %(regexp_like_1)s) THEN '
+                          'concat(%(concat_1)s, replace(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(replace_1)s, %(replace_2)s)) ELSE '
+                          'regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) END) '
+                          '= %(to_string_1)s) THEN NULL ELSE CASE WHEN '
+                          'regexp_like(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
+                          'replace(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s), %(replace_1)s, %(replace_2)s)) ELSE '
+                          'regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) END '
+                          'END AS NUMERIC(38, 10))'), str(compiled))
+        self.assertEqual('^[0-9]*\\.?[0-9]*-$', compiled.params['regexp_like_1'])
+        self.assertEqual('-', compiled.params['concat_1'])
+
+    def test_import_cast_currency(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('CAST(CASE WHEN (to_varchar(regexp_replace(%(import_cast_1)s, '
+                          '%(regexp_replace_1)s, %(regexp_replace_2)s)) = %(to_string_1)s) THEN NULL '
+                          'ELSE regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, '
+                          '%(regexp_replace_2)s) END AS NUMERIC(18, 4))'), str(compiled))
+
+    def test_import_cast_integer(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'integer', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'CAST(regexp_replace(%(import_cast_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) AS INTEGER)',
+            str(compiled))
+
+    def test_import_cast_boolean(self):
+        # TO_BOOLEAN natively accepts true/t/yes/y/on/1 // false/f/no/n/off/0,
+        # case-insensitive — no CASE mapping needed.
+        expr = sqlalchemy.func.import_cast('Column1', 'boolean', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_boolean(CAST(%(import_cast_1)s AS VARCHAR))', str(compiled))
+
+    def test_import_cast_date(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'date', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'to_date(nullif(trim(CAST(CAST(%(import_cast_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))',
+            str(compiled))
+        self.assertEqual('YYYY-MM-DD', compiled.params['param_1'])
+
+    def test_import_cast_time(self):
+        expr = sqlalchemy.func.import_cast('Column1', 'time', 'YYYY-MM-DD', False)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_timestamp(CAST(%(import_cast_1)s AS TEXT), CAST(%(param_1)s AS TEXT))', str(compiled))
+        self.assertEqual('HH24:MI:SS', compiled.params['param_1'])
+
+    def test_import_cast_interval_raises(self):
+        # Snowflake has interval constants but no INTERVAL data type.
+        expr = sqlalchemy.func.import_cast('Column1', 'interval', 'YYYY-MM-DD', False)
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+
+
+class TestSafeToDateSnowflake(SnowflakeTest):
+    def test_to_date(self):
+        expr = sqlalchemy.func.to_date('2019-01-05')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s))', str(compiled))
+        self.assertEqual('2019-01-05', compiled.params['to_date_1'])
+
+    def test_to_date_specifier(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))',
+            str(compiled))
+        self.assertEqual('YYYY-MM-DD', compiled.params['param_1'])
+
+    def test_to_date_specifier_python(self):
+        expr = sqlalchemy.func.to_date('2019-01-05', '%Y-%m-%d')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))',
+            str(compiled))
+        self.assertEqual('YYYY-MM-DD', compiled.params['param_1'])
+
+    def test_to_date_unsupported_token_raises(self):
+        expr = sqlalchemy.func.to_date('Monday 2019-01-05', 'Day YYYY-MM-DD')
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+
+
+class TestSafeToTimestampSnowflake(SnowflakeTest):
+    def test_to_timestamp_single_arg(self):
+        expr = sqlalchemy.func.to_timestamp(sqlalchemy.column('t'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_timestamp(CAST(t AS TEXT), CAST(%(param_1)s AS TEXT))', str(compiled))
+        self.assertEqual('YYYY-MM-DD HH24:MI:SS', compiled.params['param_1'])
+
+    def test_to_timestamp_translates_bare_hh(self):
+        # Postgres HH means HH12; bare HH on Snowflake would mean HH24.
+        expr = sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), 'YYYY-MM-DD HH:MI:SS')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_timestamp(CAST(t AS TEXT), CAST(%(param_1)s AS TEXT))', str(compiled))
+        self.assertEqual('YYYY-MM-DD HH12:MI:SS', compiled.params['param_1'])
+
+    def test_to_timestamp_python_format(self):
+        expr = sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), '%Y-%m-%dT%H:%M:%S')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('YYYY-MM-DD"T"HH24:MI:SS', compiled.params['param_1'])
+
+
+class TestDateAddSnowflake(SnowflakeTest):
+    def test_date_add(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt, years=1, months=2, weeks=3, days=4, hours=5, minutes=6, seconds=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'dateadd(second, %(dateadd_1)s, dateadd(minute, %(dateadd_2)s, dateadd(hour, %(dateadd_3)s, '
+            'dateadd(day, %(dateadd_4)s, dateadd(week, %(dateadd_5)s, dateadd(month, %(dateadd_6)s, '
+            'dateadd(year, %(dateadd_7)s, CAST(%(date_add_1)s AS datetime))))))))',
+            str(compiled),
+        )
+        self.assertEqual(dt, compiled.params['date_add_1'])
+        self.assertEqual(7, compiled.params['dateadd_1'])
+        self.assertEqual(6, compiled.params['dateadd_2'])
+        self.assertEqual(5, compiled.params['dateadd_3'])
+        self.assertEqual(4, compiled.params['dateadd_4'])
+        self.assertEqual(3, compiled.params['dateadd_5'])
+        self.assertEqual(2, compiled.params['dateadd_6'])
+        self.assertEqual(1, compiled.params['dateadd_7'])
+
+    def test_date_add_weeks_and_days(self):
+        expr = sqlalchemy.func.date_add(sqlalchemy.func.date_trunc('WEEK', sqlalchemy.func.now()), weeks=6, days=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})
+        self.assertEqual(
+            "dateadd(day, 7, dateadd(week, 6, CAST(date_trunc('WEEK', CURRENT_TIMESTAMP) AS datetime)))",
+            str(compiled),
+        )
+
+    def test_date_add_no_params(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(date_add_1)s AS datetime)', str(compiled))
+
+
+class TestDateDiffSnowflake(SnowflakeTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_date_diff_same_direction_no_swap(self):
+        # Snowflake DATEDIFF(part, a, b) = b - a, the same direction as
+        # Databend's date_diff — arguments pass through unswapped.
+        self.assertEqual("datediff(day, 'd2', 'd1')",
+                         self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
+        self.assertEqual("datediff(month, 'd2', 'd1')",
+                         self._sql(sqlalchemy.func.date_diff('month', 'd2', 'd1')))
+        self.assertEqual("datediff(week, 'd2', 'd1')",
+                         self._sql(sqlalchemy.func.date_diff('week', 'd2', 'd1')))
+        self.assertEqual("datediff(quarter, 'd2', 'd1')",
+                         self._sql(sqlalchemy.func.date_diff('quarter', 'd2', 'd1')))
+
+    def test_date_diff_unknown_unit_falls_through(self):
+        # Renders the nonexistent date_diff → loud server error, never a
+        # silently mis-scaled count (same fallback contract as StarRocks).
+        expr = sqlalchemy.func.date_diff('millennium', 'd2', 'd1')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('date_diff(%(date_diff_1)s, %(date_diff_2)s, %(date_diff_3)s)', str(compiled))
+
+
+class TestNumericize(BaseTest):
+    def test_numericize(self):
+        expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'coalesce(SUBSTRING(trim(CAST(CAST(t AS TEXT) AS TEXT)) FROM %(substring_1)s), '
+            'SUBSTRING(trim(CAST(CAST(t AS TEXT) AS TEXT)) FROM %(substring_2)s), '
+            'nullif(regexp_replace(trim(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_replace_1)s, '
+            '%(regexp_replace_2)s, %(regexp_replace_3)s), %(nullif_1)s))',
+            str(compiled))
+
+
+class TestNumericizeDatabend(DatabendTest):
+    def test_numericize(self):
+        expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'coalesce(regexp_substr(TRIM(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_substr_1)s), '
+            'regexp_substr(TRIM(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_substr_2)s), '
+            'nullif(regexp_replace(TRIM(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_replace_1)s, '
+            '%(regexp_replace_2)s, %(regexp_replace_3)s, %(regexp_replace_4)s), %(nullif_1)s))',
+            str(compiled))
+
+
+class TestNumericizeStarrocks(StarrocksTest):
+    def test_numericize(self):
+        expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'coalesce(nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_extract_1)s, '
+            '%(regexp_extract_2)s), %(nullif_1)s), nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), '
+            '%(regexp_extract_3)s, %(regexp_extract_4)s), %(nullif_2)s), '
+            'nullif(regexp_replace(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_replace_1)s, '
+            '%(regexp_replace_2)s), %(nullif_3)s))',
+            str(compiled))
+
+
+class TestNumericizeSnowflake(SnowflakeTest):
+    def test_numericize(self):
+        # REGEXP_SUBSTR(subject, pattern) = first whole match / NULL; 3-arg
+        # REGEXP_REPLACE replaces all occurrences (occurrence defaults to 0).
+        expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'coalesce(regexp_substr(trim(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_substr_1)s), '
+            'regexp_substr(trim(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_substr_2)s), '
+            'nullif(regexp_replace(trim(CAST(CAST(t AS TEXT) AS TEXT)), %(regexp_replace_1)s, '
+            '%(regexp_replace_2)s), %(nullif_1)s))',
+            str(compiled))
+        self.assertEqual(r'([+\-]?(\d+\.?\d*[Ee][+\-]?\d+))', compiled.params['regexp_substr_1'])
+        self.assertEqual(r'(^[+\-][0-9\.]+)', compiled.params['regexp_substr_2'])
+        self.assertEqual(r'[^0-9\.]+', compiled.params['regexp_replace_1'])
+
+
+class TestOnlyAsciiSnowflake(SnowflakeTest):
+    def test_only_ascii_literal_range_class(self):
+        # [[:ascii:]] is a PCRE extension Snowflake's documented POSIX-ERE
+        # engine doesn't list, and \x{…} escapes don't exist — the class is
+        # spelled with literal characters.
+        expr = sqlalchemy.func.ascii('abc')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'regexp_replace(CAST(%(ascii_1)s AS TEXT), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            str(compiled))
+        self.assertEqual('[^\x01-\x7f]+', compiled.params['regexp_replace_1'])
+        self.assertEqual('', compiled.params['regexp_replace_2'])
+
+
+class TestNormalizeWhitespaceSnowflake(SnowflakeTest):
+    def test_normalize_whitespace_literal_char_class(self):
+        expr = sqlalchemy.func.normalize_whitespace('foobar')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'regexp_replace(CAST(%(normalize_whitespace_1)s AS TEXT), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            str(compiled))
+        self.assertEqual(sf.SNOWFLAKE_WW_RE, compiled.params['regexp_replace_1'])
+        self.assertEqual('[\n\r\f\x0b\x85\u2028\u2029\xa0]+', compiled.params['regexp_replace_1'])
+        self.assertEqual(' ', compiled.params['regexp_replace_2'])
+
+
+class TestTrimFamilySnowflake(SnowflakeTest):
+    """Defaults confirmed valid: LTRIM/RTRIM/TRIM(<expr> [, <characters>])."""
+
+    def test_ltrim_plain(self):
+        expr = sqlalchemy.func.ltrim('12345', '')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('ltrim(CAST(%(ltrim_1)s AS TEXT))', str(compiled))
+
+    def test_ltrim_specific(self):
+        expr = sqlalchemy.func.ltrim('12345', '1')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('ltrim(CAST(%(ltrim_2)s AS TEXT), %(ltrim_1)s)', str(compiled))
+
+    def test_rtrim_specific(self):
+        expr = sqlalchemy.func.rtrim('12345', '5')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('rtrim(CAST(%(rtrim_2)s AS TEXT), %(rtrim_1)s)', str(compiled))
+
+    def test_trim_specific(self):
+        expr = sqlalchemy.func.trim('12345', '5')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('trim(CAST(%(trim_2)s AS TEXT), %(trim_1)s)', str(compiled))
+
+
+class TestStrposSnowflake(SnowflakeTest):
+    def test_strpos_becomes_charindex(self):
+        expr = sqlalchemy.func.strpos('haystack', 'needle')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('charindex(%(strpos_1)s, %(strpos_2)s)', str(compiled))
+        self.assertEqual('needle', compiled.params['strpos_1'])
+        self.assertEqual('haystack', compiled.params['strpos_2'])
+
+
+class TestStringToArraySnowflake(SnowflakeTest):
+    def test_string_to_array_split(self):
+        expr = sqlalchemy.func.string_to_array('1,2,3,4', ',')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'split(%(string_to_array_1)s, CASE WHEN (%(string_to_array_2)s = %(param_1)s OR '
+            '%(string_to_array_2)s IS NULL) THEN %(param_2)s ELSE %(string_to_array_2)s END)',
+            str(compiled))
+
+
+class TestSafeDivideSnowflake(SnowflakeTest):
+    def test_safe_divide(self):
+        # Hand-rendered division: SQLAlchemy's truediv rendering under
+        # snowflake-sqlalchemy's div_is_floordiv default would wrap the divisor
+        # in CAST(... AS NUMERIC) — NUMBER(38, 0) — rounding it to an integer.
+        expr = sqlalchemy.func.safe_divide(123.45, 987.65, 100)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'coalesce(CAST(%(safe_divide_1)s AS NUMERIC(38, 10)) / '
+            'nullif(CAST(%(safe_divide_2)s AS NUMERIC(38, 10)), %(nullif_1)s), %(safe_divide_3)s)',
+            str(compiled))
+        self.assertEqual(123.45, compiled.params['safe_divide_1'])
+        self.assertEqual(987.65, compiled.params['safe_divide_2'])
+        self.assertEqual(100, compiled.params['safe_divide_3'])
+        self.assertEqual(0, compiled.params['nullif_1'])
+
+
+class TestIntegerizeTruncate(BaseTest):
+    def test_integerize_truncate(self):
+        expr = sqlalchemy.func.integerize_truncate(sqlalchemy.column('a'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertTrue(str(compiled).startswith('CAST(trunc(CAST(nullif('))
+        self.assertTrue(str(compiled).endswith('AS NUMERIC)) AS INTEGER)'))
+
+
+class TestIntegerizeTruncateDatabend(DatabendTest):
+    def test_integerize_truncate(self):
+        expr = sqlalchemy.func.integerize_truncate(sqlalchemy.column('a'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertTrue(str(compiled).startswith('CAST(truncate(CAST(nullif('))
+        self.assertTrue(str(compiled).endswith('AS DECIMAL(38, 10))) AS INTEGER)'))
+
+
+class TestIntegerizeTruncateSnowflake(SnowflakeTest):
+    def test_integerize_truncate_keeps_decimals_for_trunc(self):
+        # Bare NUMERIC is NUMBER(38, 0) on Snowflake and casts round half away
+        # from zero — the squash cast must keep scale so trunc sees decimals.
+        expr = sqlalchemy.func.integerize_truncate(sqlalchemy.column('a'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertTrue(str(compiled).startswith('CAST(trunc(CAST(nullif('))
+        self.assertTrue(str(compiled).endswith('AS NUMERIC(38, 10))) AS INTEGER)'))
+
+
+class TestToNumberSnowflake(SnowflakeTest):
+    def test_to_number_pins_precision_and_scale(self):
+        # Without explicit precision/scale Snowflake TO_NUMBER returns
+        # NUMBER(38, 0), rounding every fractional digit away.
+        expr = sqlalchemy.func.to_number('12345', '999999')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_number(%(to_number_1)s, %(to_number_2)s, 38, 10)', str(compiled))
+        self.assertEqual('12345', compiled.params['to_number_1'])
+        self.assertEqual('999999', compiled.params['to_number_2'])
+
+
+class TestToCharSnowflake(SnowflakeTest):
+    def test_to_char_number(self):
+        # Snowflake's numeric format models cover 9/0/,/./D/G/$/S/MI/B/X/TM and
+        # the FM modifier; only the locale currency element L translates (→ $).
+        expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_varchar(%(to_char_1)s, %(to_varchar_1)s)', str(compiled))
+        self.assertEqual(123456.789, compiled.params['to_char_1'])
+        self.assertEqual('$FM999,999,999,999D00', compiled.params['to_varchar_1'])
+
+    def test_to_char_date(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'YYYY-MM-DD')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_varchar(%(to_char_1)s, %(to_varchar_1)s)', str(compiled))
+        self.assertEqual('YYYY-MM-DD', compiled.params['to_varchar_1'])
+
+    def test_to_char_time(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'HH24:MI:SS')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('HH24:MI:SS', compiled.params['to_varchar_1'])
+
+    def test_to_char_iso_week_raises(self):
+        # 'IYYY-IW' has no Snowflake ISO-week element — loud failure, not
+        # literal-text output.
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.to_char(dt, 'IYYY-IW')
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+
+    def test_to_char_no_format(self):
+        expr = sqlalchemy.func.to_char(sqlalchemy.column('c'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('to_varchar(c)', str(compiled))
+
+
+class TestToStringSnowflake(SnowflakeTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_to_string_becomes_to_varchar(self):
+        self.assertEqual('to_varchar(123)', self._sql(sqlalchemy.func.to_string(123)))
+
+    def test_to_string_with_decimals_rounds_under_literal_binds(self):
+        self.assertEqual('to_varchar(round(c, 2))',
+                         self._sql(sqlalchemy.func.to_string(sqlalchemy.column('c'), 2)))
+
+
+class TestTryToFloat64Snowflake(SnowflakeTest):
+    def test_try_to_float64_becomes_try_to_double(self):
+        expr = sqlalchemy.func.try_to_float64('1.5')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})
+        self.assertEqual("try_to_double('1.5')", str(compiled))
+
+
+class TestTransactionTimestampSnowflake(SnowflakeTest):
+    def test_transaction_timestamp_is_current_timestamp(self):
+        expr = sqlalchemy.func.transaction_timestamp()
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CURRENT_TIMESTAMP', str(compiled))
+
+
+class TestQuantiles(BaseTest):
+    """Default (ClickHouse-style parameterized-aggregate) renderings pinned."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_default_renderings(self):
+        x = sqlalchemy.column('x')
+        self.assertEqual('QUANTILE_TDIGEST(0.5)(x)', self._sql(sqlalchemy.func.quantile_tdigest(0.5, x)))
+        self.assertEqual('QUANTILE_CONT(0.5)(x)', self._sql(sqlalchemy.func.quantile_cont(0.5, x)))
+        self.assertEqual('QUANTILE_DISC(0.5)(x)', self._sql(sqlalchemy.func.quantile_disc(0.5, x)))
+        self.assertEqual('QUANTILE_TDIGEST_WEIGHTED(0.5)(x, w)',
+                         self._sql(sqlalchemy.func.quantile_tdigest_weighted(0.5, x, sqlalchemy.column('w'))))
+
+
+class TestQuantilesDatabend(TestQuantiles, DatabendTest):
+    pass
+
+
+class TestQuantilesSnowflake(SnowflakeTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_quantile_tdigest_becomes_approx_percentile(self):
+        # Snowflake's APPROX_PERCENTILE is itself t-digest-based; args reverse.
+        self.assertEqual('APPROX_PERCENTILE(x, 0.5)',
+                         self._sql(sqlalchemy.func.quantile_tdigest(0.5, sqlalchemy.column('x'))))
+
+    def test_quantile_cont_within_group(self):
+        self.assertEqual('PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x)',
+                         self._sql(sqlalchemy.func.quantile_cont(0.5, sqlalchemy.column('x'))))
+
+    def test_quantile_disc_within_group(self):
+        self.assertEqual('PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY x)',
+                         self._sql(sqlalchemy.func.quantile_disc(0.5, sqlalchemy.column('x'))))
+
+    def test_quantile_tdigest_weighted_raises(self):
+        # No weighted percentile aggregate on Snowflake — fail loud rather than
+        # silently drop the weight.
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            self._sql(sqlalchemy.func.quantile_tdigest_weighted(0.5, sqlalchemy.column('x'), sqlalchemy.column('w')))
+
+
+class TestSnowflakeDefaultOk(unittest.TestCase):
+    """The parity harness keys known-gap skips on snowflake-variant absence;
+    _SNOWFLAKE_DEFAULT_OK is the explicit per-function confirmation that the
+    default rendering is valid Snowflake SQL."""
+
+    def test_members_have_no_snowflake_variant(self):
+        for cls in sf._SNOWFLAKE_DEFAULT_OK:
+            with self.subTest(cls=cls.__name__):
+                specs = cls._compiler_dispatcher.specs
+                self.assertNotIn('snowflake', specs)
+
+    def test_safe_extract_default_on_snowflake(self):
+        eng = sqlalchemy.create_engine('snowflake://127.0.0.1/')
+        c = sqlalchemy.column('d', eng.dialect.type_descriptor(sqlalchemy.types.DateTime))
+        expr = sqlalchemy.func.extract('year', c)
+        compiled = expr.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('EXTRACT(year FROM d)', str(compiled))
+
+    def test_regexp_substr_default_on_snowflake(self):
+        eng = sqlalchemy.create_engine('snowflake://127.0.0.1/')
+        expr = sqlalchemy.func.regexp_substr('s', 'p')
+        compiled = expr.compile(dialect=eng.dialect, compile_kwargs={"literal_binds": True})
+        self.assertEqual("regexp_substr('s', 'p')", str(compiled))
