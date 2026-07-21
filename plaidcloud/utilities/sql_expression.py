@@ -70,9 +70,17 @@ _ALLOWED_NODES = frozenset({
     ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
     ast.BitAnd, ast.BitOr,
     ast.BoolOp, ast.And, ast.Or,
-    ast.UnaryOp, ast.USub, ast.UAdd, ast.Invert,
+    ast.UnaryOp, ast.USub, ast.UAdd, ast.Invert, ast.Not,
     ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.In, ast.NotIn,
+    # `is` / `is not` / `not` were omitted from the original allowlist and
+    # that broke saved expressions doing `x is None` (sc-23186). They are pure
+    # operators — no attribute access, call, or name resolution — so they add
+    # no escape surface. NB they are usually a semantic no-op on a Column
+    # (`col is None` is Python identity: always False, so the branch is dead;
+    # `not col` raises at runtime), but that is the author's bug to fix with
+    # `.is_(None)` / `~col`, not the sandbox's to reject.
+    ast.Is, ast.IsNot,
     ast.List, ast.Tuple, ast.Starred,
 })
 
@@ -109,6 +117,18 @@ def _attr_off_func(node):
     return isinstance(node.value, ast.Name) and node.value.id == 'func'
 
 
+def _attr_is_column(node, underscore_columns):
+    """True when the attribute names a real column off a table alias.
+
+    Only ``<alias>.<name>`` is accepted — a chain like ``table.a._impl`` has a
+    non-Name value and stays blocked.
+    """
+    return (
+        isinstance(node.value, ast.Name)
+        and node.attr in underscore_columns.get(node.value.id, ())
+    )
+
+
 def _attr_root_name(node):
     """Walk an attribute chain to its root ast.Name id, or None."""
     while isinstance(node, ast.Attribute):
@@ -118,13 +138,49 @@ def _attr_root_name(node):
     return None
 
 
-def _assert_safe_expression(source):
+def _underscore_columns_by_alias(safe_dict):
+    """Map each table alias in the eval context to its underscore-led columns.
+
+    A column may legitimately be named `_MajorAccountFlag` (sc-23186), and
+    `table._MajorAccountFlag` is how the UI writes it. Blanket-blocking
+    underscore attrs broke those steps, so the guard needs to know which
+    underscore names are real columns rather than SQLAlchemy internals.
+
+    The identity check is what keeps this from re-opening the escape it is
+    relaxing: a column named after a ColumnCollection internal (`_index`,
+    `_all_columns`, ...) does NOT shadow it — attribute access still returns
+    the internal — so such a name is left blocked and stays reachable only
+    through `get_column(table, '_index')`, which cannot return internals.
+    """
+    def exposed_columns(collection):
+        names = set()
+        for name in collection.keys():
+            if not (isinstance(name, str) and name.startswith('_')):
+                continue
+            if getattr(collection, name, None) is collection[name]:
+                names.add(name)
+        return names
+
+    return {
+        key: exposed_columns(val)
+        for key, val in (safe_dict or {}).items()
+        if isinstance(val, sqlalchemy.sql.base.ColumnCollection)
+    }
+
+
+def _assert_safe_expression(source, safe_dict=None):
     """Reject a Python expression string that could escape the eval sandbox.
 
     Runs on the post-variable-substitution source (exactly what gets eval'd).
     A SyntaxError is left for compile() to report with the normal user-facing
     message — this guard only vetoes *parseable* code that is unsafe.
+
+    ``safe_dict`` is the eval context the source will run against; it is used
+    only to recognise underscore-led *column* names. Omitting it falls back to
+    blocking every underscore attr — safe, but it will reject an expression
+    over a legitimately underscore-named column.
     """
+    underscore_columns = _underscore_columns_by_alias(safe_dict)
     try:
         tree = ast.parse(source, mode='eval')
     except SyntaxError:
@@ -146,9 +202,12 @@ def _assert_safe_expression(source):
         if isinstance(node, ast.Attribute):
             # Underscore attrs are the escape vector (__class__, __globals__,
             # _impl, ...); allow only a single-underscore SQL function off func
-            # (Databend func._if).
+            # (Databend func._if) or a real underscore-led column off a table
+            # alias (sc-23186). Dunders stay blocked either way — a column
+            # named `__x` is reachable via get_column(table, '__x').
             if node.attr.startswith('_') and not (
-                not node.attr.startswith('__') and _attr_off_func(node)
+                not node.attr.startswith('__')
+                and (_attr_off_func(node) or _attr_is_column(node, underscore_columns))
             ):
                 raise SQLExpressionError(
                     'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(
@@ -198,7 +257,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
         else:
             raise
 
-    _assert_safe_expression(expression_with_variables)
+    _assert_safe_expression(expression_with_variables, safe_dict)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
@@ -1375,7 +1434,7 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
         else:
             raise
 
-    _assert_safe_expression(expression_with_variables)
+    _assert_safe_expression(expression_with_variables, safe_dict)
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:

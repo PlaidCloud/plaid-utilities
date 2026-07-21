@@ -26,6 +26,8 @@ def _table():
         sqlalchemy.Column('a', sqlalchemy.INTEGER),
         sqlalchemy.Column('b', sqlalchemy.INTEGER),
         sqlalchemy.Column('flag', sqlalchemy.BOOLEAN),
+        # Customers really do have underscore-led column names (sc-23186).
+        sqlalchemy.Column('_MajorAccountFlag', sqlalchemy.TEXT),
         schema='anlz',
     )
 
@@ -115,6 +117,17 @@ LEGIT = [
     "sqlalchemy.select(func.count(func.distinct(get_column(table, 'a')))).subquery()",
 ]
 
+# Saved customer expressions the first allowlist broke (sc-23186): `is`,
+# `is not` and `not` were never deliberately excluded, and a step that had run
+# for years started failing with "Is is not permitted in an expression."
+IDENTITY_AND_NOT = [
+    "get_column(table, 'a') is None",
+    "get_column(table, 'a') is not None",
+    "not get_column(table, 'a')",
+    "case((get_column(table, 'a') is None, false), else_=table.b)",
+    "table.a is None and table.b is not None",
+]
+
 
 class TestExpressionSandboxBlocks(unittest.TestCase):
     def test_guard_rejects_every_attack(self):
@@ -198,6 +211,85 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         self.assertEqual(se.eval_expression("get_column(table, 'a')", {}, [table]).name, 'a')
         # Produces a real SQLAlchemy element, not a Python value.
         self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_identity_and_not_operators_pass_the_guard(self):
+        # sc-23186: pure operators, no escape surface — the sandbox must not
+        # veto them just because they are usually a semantic no-op on a Column.
+        for expr in IDENTITY_AND_NOT:
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr)
+
+    def test_case_with_is_none_branch_still_evaluates(self):
+        # The exact customer shape (sc-23186), end to end through eval.
+        table = _table()
+        result = se.eval_expression(
+            "case((get_column(table, 'a') is None, false), else_=table.b)", {}, [table],
+        )
+        self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_is_none_on_a_column_is_a_dead_branch(self):
+        # Pins WHY `is None` is allowed but useless: Python identity against a
+        # Column is always False, so authors need `.is_(None)` for a real null
+        # test. If SQLAlchemy ever overloads this, the guidance changes.
+        table = _table()
+        self.assertFalse(se.eval_expression("get_column(table, 'a') is None", {}, [table]))
+        self.assertIsInstance(
+            se.eval_expression("get_column(table, 'a').is_(None)", {}, [table]),
+            sqlalchemy.sql.elements.ColumnElement,
+        )
+
+    def test_underscore_column_is_reachable_as_an_attribute(self):
+        # sc-23186: `func.rtrim(table._MajorAccountFlag)` is what the UI writes
+        # for an underscore-led column; the guard must not read it as an
+        # internals escape. Needs the eval context to tell column from internal.
+        table = _table()
+        result = se.eval_expression(
+            "func.rtrim(table._MajorAccountFlag)", {}, [table],
+        )
+        self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_underscore_internals_still_blocked_on_the_same_table(self):
+        # The exemption is column-name-scoped, not a blanket underscore pass:
+        # an internal that is NOT a column stays blocked, as does any chained
+        # underscore attr and every dunder.
+        table = _table()
+        safe = se.get_safe_dict([table])
+        for expr in (
+            "table._sa_instance_state",
+            "table._MajorAccountFlag._parententity",
+            "table.__class__",
+            "func.rtrim(table.a)._compiler_dispatch",
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(expr, safe)
+
+    def test_column_named_after_an_internal_does_not_expose_it(self):
+        # The exemption is by resolved identity, not by name: a column called
+        # `_index` does NOT shadow ColumnCollection._index, so allowing it by
+        # name would hand the expression SQLAlchemy internals (and, through
+        # `_all_columns[0].table.metadata`, the schema graph).
+        md = sqlalchemy.MetaData()
+        hostile = sqlalchemy.Table(
+            'analyzetable_h', md,
+            *[sqlalchemy.Column(n, sqlalchemy.TEXT)
+              for n in ('_index', '_collection', '_all_columns', '_colset')],
+            schema='anlz',
+        )
+        safe = se.get_safe_dict([hostile])
+        for expr in ('table._index', 'table._all_columns',
+                     'table._all_columns[0].table.metadata'):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(expr, safe)
+        # …and the column itself stays reachable the safe way.
+        se._assert_safe_expression("get_column(table, '_index')", safe)
+
+    def test_underscore_column_blocked_without_the_eval_context(self):
+        # No safe_dict = no way to tell column from internal, so the guard
+        # stays closed rather than guessing.
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("func.rtrim(table._MajorAccountFlag)")
 
     def test_facet_distinct_count_subquery_evaluates(self):
         # sc-23125: the Table Explorer facet's runtime-generated distinct-count
