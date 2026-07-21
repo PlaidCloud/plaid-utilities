@@ -1,4 +1,5 @@
 # coding=utf-8
+import pickle
 import unittest
 
 import datetime
@@ -351,6 +352,40 @@ class TestDateAdd(BaseTest):
         self.assertEqual(0, compiled.params['param_7'])
 
 
+class TestDateAddStarrocks(StarrocksTest):
+    def test_date_add(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt, years=1, months=2, weeks=3, days=4, hours=5, minutes=6, seconds=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            'seconds_add(minutes_add(hours_add(days_add(weeks_add(months_add(years_add(CAST(%(date_add_1)s AS DATETIME), %(years_add_1)s), %(months_add_1)s), %(weeks_add_1)s), %(days_add_1)s), %(hours_add_1)s), %(minutes_add_1)s), %(seconds_add_1)s)',
+            str(compiled),
+        )
+        self.assertEqual(dt, compiled.params['date_add_1'])
+        self.assertEqual(1, compiled.params['years_add_1'])
+        self.assertEqual(2, compiled.params['months_add_1'])
+        self.assertEqual(3, compiled.params['weeks_add_1'])
+        self.assertEqual(4, compiled.params['days_add_1'])
+        self.assertEqual(5, compiled.params['hours_add_1'])
+        self.assertEqual(6, compiled.params['minutes_add_1'])
+        self.assertEqual(7, compiled.params['seconds_add_1'])
+
+    def test_date_add_weeks_and_days(self):
+        expr = sqlalchemy.func.date_add(sqlalchemy.func.date_trunc('WEEK', sqlalchemy.func.now()), weeks=6, days=7)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})
+        self.assertEqual(
+            "days_add(weeks_add(CAST(date_trunc('WEEK', now()) AS DATETIME), 6), 7)",
+            str(compiled),
+        )
+
+    def test_date_add_no_params(self):
+        dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
+        expr = sqlalchemy.func.date_add(dt)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('CAST(%(date_add_1)s AS DATETIME)', str(compiled))
+        self.assertEqual(dt, compiled.params['date_add_1'])
+
+
 class TestTransactionTimestamp(DatabendTest):
     def test_transaction_timestamp(self):
         expr = sqlalchemy.func.transaction_timestamp()
@@ -634,6 +669,18 @@ class TestSafeDivideSR(StarrocksTest):
 # Databend/default spelling and specializes only StarRocks. StarRocks behavior
 # was verified live (paul-dev). Databend spelling is asserted unchanged.
 
+class TestGeneratedFunctionPickling(unittest.TestCase):
+    def test_generated_functions_are_pickleable(self):
+        for name in sf._STARROCKS_FUNCTION_RENAMES:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(sf, name))
+                self.assertEqual(sf.__name__, getattr(sf, name).__module__)
+                expr = getattr(sqlalchemy.func, name)('2020-01-01')
+                restored = pickle.loads(pickle.dumps(expr))
+                self.assertIs(type(expr), type(restored))
+                self.assertEqual(str(expr), str(restored))
+
+
 class TestConverterRenamesDatabend(DatabendTest):
     """Databend keeps the emitted name verbatim (no regression)."""
 
@@ -725,3 +772,33 @@ class TestConverterRenamesStarrocks(StarrocksTest):
                          self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
         self.assertEqual("months_diff('d1', 'd2')",
                          self._sql(sqlalchemy.func.date_diff('month', 'd2', 'd1')))
+
+    def test_array_to_string_becomes_array_join(self):
+        self.assertEqual("array_join(split('a-b', '-'), '-')",
+                         self._sql(sqlalchemy.func.array_to_string(
+                             sqlalchemy.func.split('a-b', '-'), '-')))
+
+    def test_array_tail_becomes_array_slice(self):
+        # Text To Columns overflow-to-last-field: array_to_string(array_tail(split(...), i), d)
+        self.assertEqual("array_slice(split('a-b', '-'), 2)",
+                         self._sql(sqlalchemy.func.array_tail(
+                             sqlalchemy.func.split('a-b', '-'), 2)))
+
+    def test_string_agg_becomes_group_concat_with_separator_clause(self):
+        # Passing the delimiter as a second argument concatenates it onto every
+        # value on StarRocks; it has to be a SEPARATOR clause.
+        self.assertEqual("group_concat(c SEPARATOR '-')",
+                         self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'), '-')))
+
+    def test_string_agg_without_separator(self):
+        self.assertEqual('group_concat(c)',
+                         self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'))))
+
+
+class TestArrayTailDatabend(DatabendTest):
+    """array_tail keeps Databend's slice() spelling."""
+
+    def test_array_tail_renders_slice(self):
+        sql = str(sqlalchemy.func.array_tail(sqlalchemy.func.split('a-b', '-'), 2).compile(
+            dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+        self.assertEqual("slice(split('a-b', '-'), 2)", sql)

@@ -1049,6 +1049,26 @@ def compile_sql_date_add(element, compiler, **kw):
 
     return compiler.process(dt + interval)
 
+@compiles(sql_date_add, 'starrocks')
+def compile_sql_date_add_starrocks(element, compiler, **kw):
+    dt, *args = list(element.clauses)
+    expr = func.cast(dt, sqlalchemy.DateTime)
+    starrocks_units = [
+        ('years', 'years_add'),
+        ('months', 'months_add'),
+        ('weeks', 'weeks_add'),
+        ('days', 'days_add'),
+        ('hours', 'hours_add'),
+        ('minutes', 'minutes_add'),
+        ('seconds', 'seconds_add'),
+    ]
+    for unit, fn_name in starrocks_units:
+        value = element.additions[unit]
+        if isinstance(value, (int, float)) and value == 0:
+            continue
+        expr = getattr(func, fn_name)(expr, value)
+    return compiler.process(expr, **kw)
+
 ### Databend
 
 # Still need to check this one
@@ -1212,12 +1232,14 @@ _STARROCKS_FUNCTION_RENAMES = {
     'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
     'add_years': 'years_add', 'add_months': 'months_add', 'add_days': 'days_add',
     'add_hours': 'hours_add', 'add_minutes': 'minutes_add', 'add_seconds': 'seconds_add',
+    'array_to_string': 'array_join',  # Alteryx TextToColumns overflow-to-last-field
 }
 
 
 def _register_starrocks_rename(databend_name, starrocks_name):
     func_cls = type(databend_name, (GenericFunction,),
                     {'name': databend_name, 'inherit_cache': True})
+    globals()[databend_name] = func_cls
 
     @compiles(func_cls, 'starrocks')
     def _compile(element, compiler, _name=starrocks_name, **kw):
@@ -1227,6 +1249,42 @@ def _register_starrocks_rename(databend_name, starrocks_name):
 
 for _db_name, _sr_name in _STARROCKS_FUNCTION_RENAMES.items():
     _register_starrocks_rename(_db_name, _sr_name)
+
+
+class array_tail(GenericFunction):
+    """array_tail(array, offset): the array from 1-based `offset` to the end.
+
+    Named rather than reusing `slice` because SQLAlchemy already registers that
+    name for the PostgreSQL hstore slice function.
+    """
+    name = 'array_tail'
+    inherit_cache = True
+
+@compiles(array_tail)
+def compile_array_tail(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'slice({rendered})'
+
+@compiles(array_tail, 'starrocks')
+def compile_array_tail_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'array_slice({rendered})'
+
+
+class string_agg(GenericFunction):
+    name = 'string_agg'
+    inherit_cache = True
+
+@compiles(string_agg, 'starrocks')
+def compile_string_agg_starrocks(element, compiler, **kw):
+    # StarRocks has no string_agg; group_concat is the equivalent, but it takes
+    # the delimiter as a SEPARATOR clause — passing it as a second argument
+    # concatenates it onto every value instead ('a-,b-,c-' rather than 'a-b-c').
+    value, *separator = list(element.clauses)
+    rendered = compiler.process(value, **kw)
+    if separator:
+        rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
+    return f'group_concat({rendered})'
 
 
 class to_string(GenericFunction):
