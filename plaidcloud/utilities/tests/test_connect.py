@@ -67,6 +67,19 @@ class TestPlaidConnectionForwarding:
         PlaidConnection(project_id='pid')
         assert captured_connect_kwargs == {}
 
+    def test_workspace_uuid_alone_is_not_forwarded(self, captured_connect_kwargs, monkeypatch):
+        """Same constraint as project_id — Connect raises on either without rpc_uri."""
+        monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
+        PlaidConnection(workspace_uuid='ws')
+        assert captured_connect_kwargs == {}
+
+    def test_plaid_conf_shaped_blob_is_still_ignored(self, captured_connect_kwargs, monkeypatch):
+        """Callers pass whole plaid.conf blobs as kwargs and have always had the extras
+        ignored. Forwarding them off the direct path turns that into a ValueError."""
+        monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
+        PlaidConnection(workspace_uuid='ws-123', project_id='p-1')
+        assert captured_connect_kwargs == {}
+
     def test_xl_path_is_not_forwarded(self, captured_connect_kwargs, monkeypatch):
         """xl_path is consumed by PlaidConnection itself; forwarding it would TypeError."""
         monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
@@ -87,3 +100,14 @@ class TestPlaidConnectionForwarding:
         monkeypatch.setenv('__PLAID_JUPYTER__', 'True')
         with pytest.raises(Exception, match='Set the Project ID'):
             PlaidConnection()
+
+    def test_explicit_rpc_uri_skips_jupyter_env_seeding(self, captured_connect_kwargs, monkeypatch):
+        """Explicit configuration wins. Seeding __PLAID_* anyway would leak into any later
+        bare PlaidConnection() in the same interpreter."""
+        monkeypatch.setenv('__PLAID_JUPYTER__', 'True')
+        monkeypatch.delenv('__PLAID_PROJECT_ID__', raising=False)
+        PlaidConnection(rpc_uri='https://t.plaid.cloud/json-rpc/', auth_token='tok',
+                        project_id='pid')
+        import os
+        assert '__PLAID_PROJECT_ID__' not in os.environ
+        assert captured_connect_kwargs['rpc_uri'] == 'https://t.plaid.cloud/json-rpc/'
