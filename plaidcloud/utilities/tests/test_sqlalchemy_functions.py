@@ -41,6 +41,11 @@ class StarrocksTest(BaseTest):
     dialect = 'starrocks'
 
 
+class SnowflakeTest(BaseTest):
+
+    dialect = 'snowflake'
+
+
 class TestImportCol(BaseTest):
 
     def test_import_col_text(self):
@@ -734,7 +739,7 @@ class TestSafeDivideSR(StarrocksTest):
 
 class TestGeneratedFunctionPickling(unittest.TestCase):
     def test_generated_functions_are_pickleable(self):
-        for name in sf._STARROCKS_FUNCTION_RENAMES:
+        for name in {n for renames in sf._FUNCTION_RENAMES.values() for n in renames}:
             with self.subTest(name=name):
                 self.assertTrue(hasattr(sf, name))
                 self.assertEqual(sf.__name__, getattr(sf, name).__module__)
@@ -835,6 +840,42 @@ class TestConverterRenamesStarrocks(StarrocksTest):
                          self._sql(sqlalchemy.func.date_diff('day', 'd2', 'd1')))
         self.assertEqual("months_diff('d1', 'd2')",
                          self._sql(sqlalchemy.func.date_diff('month', 'd2', 'd1')))
+
+
+class TestConverterRenamesSnowflake(SnowflakeTest):
+    """Snowflake gets the documented spelling; arg-reorders go through DATEADD."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_modulo_becomes_mod(self):
+        self.assertEqual('mod(5, 3)', self._sql(sqlalchemy.func.modulo(5, 3)))
+
+    def test_ord_becomes_ascii(self):
+        self.assertEqual("ascii('A')", self._sql(sqlalchemy.func.ord('A')))
+
+    def test_today_becomes_current_date(self):
+        self.assertEqual('current_date()', self._sql(sqlalchemy.func.today()))
+
+    def test_regexp_instr_is_native(self):
+        # Snowflake ships regexp_instr (1-based position, 0 on no match) — no rename.
+        self.assertEqual("regexp_instr('s', 'p')", self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
+
+    def test_datetime_extractors_become_snowflake_names(self):
+        self.assertEqual("year('2020-01-01')", self._sql(sqlalchemy.func.to_year('2020-01-01')))
+        self.assertEqual("month('2020-01-01')", self._sql(sqlalchemy.func.to_month('2020-01-01')))
+        self.assertEqual("day('2020-01-01')", self._sql(sqlalchemy.func.to_day_of_month('2020-01-01')))
+        self.assertEqual("hour('2020-01-01')", self._sql(sqlalchemy.func.to_hour('2020-01-01')))
+        self.assertEqual("minute('2020-01-01')", self._sql(sqlalchemy.func.to_minute('2020-01-01')))
+        self.assertEqual("second('2020-01-01')", self._sql(sqlalchemy.func.to_second('2020-01-01')))
+
+    def test_add_family_becomes_dateadd(self):
+        self.assertEqual("dateadd(day, 5, '2020-01-01')", self._sql(sqlalchemy.func.add_days('2020-01-01', 5)))
+        self.assertEqual("dateadd(month, 2, '2020-01-01')", self._sql(sqlalchemy.func.add_months('2020-01-01', 2)))
+        self.assertEqual("dateadd(year, 1, '2020-01-01')", self._sql(sqlalchemy.func.add_years('2020-01-01', 1)))
+        self.assertEqual("dateadd(hour, 3, '2020-01-01')", self._sql(sqlalchemy.func.add_hours('2020-01-01', 3)))
+        self.assertEqual("dateadd(minute, 4, '2020-01-01')", self._sql(sqlalchemy.func.add_minutes('2020-01-01', 4)))
+        self.assertEqual("dateadd(second, 6, '2020-01-01')", self._sql(sqlalchemy.func.add_seconds('2020-01-01', 6)))
 
 
 # ---------------------------------------------------------------------------

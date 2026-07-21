@@ -1302,41 +1302,80 @@ def default_quantile_tdigest_weighted(element, compiler, **kw):
 # Alteryx-converter cross-dialect functions
 # ---------------------------------------------------------------------------
 # The Alteryx expression converter (plaid app/analyze/utility/
-# alteryx_expression_converter.py) emits Databend function names. StarRocks is
-# MySQL-protocol and spells, arg-orders, or lacks several of them. Each function
-# below leaves the Databend/default spelling untouched (built-in GenericFunction
-# rendering) and adds only a StarRocks specialization — so existing Databend SQL
-# is byte-for-byte preserved while StarRocks gets valid SQL. StarRocks behavior
-# of every emission here was verified live (paul-dev, StarRocks 3 / MySQL 8.0.33
-# protocol).
+# alteryx_expression_converter.py) emits Databend function names. Other engines
+# spell, arg-order, or lack several of them. Each function below leaves the
+# Databend/default spelling untouched (built-in GenericFunction rendering) and
+# adds only per-dialect specializations — so existing Databend SQL is
+# byte-for-byte preserved while each other engine gets valid SQL. StarRocks
+# behavior of every emission here was verified live (paul-dev, StarRocks 3 /
+# MySQL 8.0.33 protocol); Snowflake emissions are verified against the
+# Snowflake function reference (sc-23158 WS-B).
 
-#: Databend function name → StarRocks name, when the only difference is the
-#: spelling (same arguments, same order).
-_STARROCKS_FUNCTION_RENAMES = {
-    'modulo': 'mod',           # Alteryx Mod()
-    'ord': 'ascii',            # Alteryx CharToInt() (StarRocks has no ord)
-    'today': 'current_date',   # Alteryx DateTimeToday()
-    'regexp_instr': 'regexp',  # REGEX_Match(): emitted as `regexp_instr(col, pat) > 0`; regexp() returns 1/0
-    'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
-    'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
-    'add_years': 'years_add', 'add_months': 'months_add', 'add_days': 'days_add',
-    'add_hours': 'hours_add', 'add_minutes': 'minutes_add', 'add_seconds': 'seconds_add',
+#: Per-dialect pure renames: Databend function name → dialect's name, when the
+#: only difference is the spelling (same arguments, same order). Snowflake
+#: ships regexp_instr natively (same 1-based-position / 0-on-no-match
+#: contract), so it needs no entry there; the add_<unit>s family is an
+#: argument reorder on Snowflake (DATEADD takes the unit first), not a rename
+#: — see _SNOWFLAKE_DATE_ADD_FUNCS below.
+_FUNCTION_RENAMES = {
+    'starrocks': {
+        'modulo': 'mod',           # Alteryx Mod()
+        'ord': 'ascii',            # Alteryx CharToInt() (StarRocks has no ord)
+        'today': 'current_date',   # Alteryx DateTimeToday()
+        'regexp_instr': 'regexp',  # REGEX_Match(): emitted as `regexp_instr(col, pat) > 0`; regexp() returns 1/0
+        'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
+        'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
+        'add_years': 'years_add', 'add_months': 'months_add', 'add_days': 'days_add',
+        'add_hours': 'hours_add', 'add_minutes': 'minutes_add', 'add_seconds': 'seconds_add',
+    },
+    'snowflake': {
+        'modulo': 'mod',           # MOD(expr1, expr2)
+        'ord': 'ascii',            # ASCII(<string>)
+        'today': 'current_date',   # CURRENT_DATE() — parentheses form is valid
+        'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
+        'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
+    },
 }
 
 
-def _register_starrocks_rename(databend_name, starrocks_name):
+def _register_rename(databend_name, targets_by_dialect):
     func_cls = type(databend_name, (GenericFunction,),
                     {'name': databend_name, 'inherit_cache': True})
     globals()[databend_name] = func_cls
 
-    @compiles(func_cls, 'starrocks')
-    def _compile(element, compiler, _name=starrocks_name, **kw):
-        rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
-        return f"{_name}({rendered})"
+    for target_dialect, target_name in targets_by_dialect.items():
+        @compiles(func_cls, target_dialect)
+        def _compile(element, compiler, _name=target_name, **kw):
+            rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+            return f"{_name}({rendered})"
 
 
-for _db_name, _sr_name in _STARROCKS_FUNCTION_RENAMES.items():
-    _register_starrocks_rename(_db_name, _sr_name)
+_RENAME_TARGETS = {}
+for _dialect_name, _renames in _FUNCTION_RENAMES.items():
+    for _db_name, _target_name in _renames.items():
+        _RENAME_TARGETS.setdefault(_db_name, {})[_dialect_name] = _target_name
+for _db_name, _targets in _RENAME_TARGETS.items():
+    _register_rename(_db_name, _targets)
+
+
+#: Alteryx converter add_<unit>s(dt, n) → Snowflake DATEADD(<unit>, n, dt) —
+#: an argument reorder, not a rename. The unit renders as an unquoted keyword
+#: because DATEADD requires a constant date part.
+_SNOWFLAKE_DATE_ADD_FUNCS = {
+    'add_years': 'year', 'add_months': 'month', 'add_days': 'day',
+    'add_hours': 'hour', 'add_minutes': 'minute', 'add_seconds': 'second',
+}
+
+
+def _register_snowflake_dateadd(func_cls, unit):
+    @compiles(func_cls, 'snowflake')
+    def _compile(element, compiler, _unit=unit, **kw):
+        dt, n = list(element.clauses)
+        return f"dateadd({_unit}, {compiler.process(n, **kw)}, {compiler.process(dt, **kw)})"
+
+
+for _fn_name, _unit in _SNOWFLAKE_DATE_ADD_FUNCS.items():
+    _register_snowflake_dateadd(globals()[_fn_name], _unit)
 
 
 class to_string(GenericFunction):

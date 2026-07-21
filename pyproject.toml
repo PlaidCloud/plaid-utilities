@@ -51,6 +51,7 @@ test = [
     "databend_sqlalchemy",
     "databricks-sqlalchemy",
     "databricks-sql-connector",
+    "snowflake-sqlalchemy",
 ]
 full = [
     "plaidcloud-rpc[full]>=1.9.0",
