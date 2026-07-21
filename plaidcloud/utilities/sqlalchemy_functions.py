@@ -23,6 +23,91 @@ __maintainer__ = 'Paul Morel'
 __email__ = 'paul.morel@tartansolutions.com'
 
 
+# ---------------------------------------------------------------------------
+# Postgres date-format tokens → Snowflake format models (sc-23158 WS-B3)
+# ---------------------------------------------------------------------------
+#: Every token in plaid-rpc's _PG_PY_FORMAT_MAPPING conversion table (plus the
+#: uppercase name variants its composite entries use) maps to a Snowflake
+#: format element, or to None when Snowflake has no equivalent — those raise at
+#: compile time. Snowflake renders unrecognized format text literally, so a
+#: silent passthrough of a real Postgres token would produce wrong output, not
+#: an error. Verified against
+#: docs.snowflake.com/en/sql-reference/date-time-input-output:
+#:   - bare HH is a synonym for HH24 on Snowflake but means HH12 in Postgres,
+#:     so it must be translated, never passed through
+#:   - UUUU is Snowflake's ISO 4-digit year (Postgres IYYY)
+#:   - no full-weekday-name (Day), day-of-year (DDD), ISO week (IW),
+#:     day-of-week-number (D), or timezone-name (TZ) elements exist
+#:   - FF<n> renders fractional seconds; FF6 = microseconds (Postgres US)
+#:   - TZH/TZM are the signed UTC-offset elements (Postgres tz / %z)
+_SNOWFLAKE_DATE_FORMAT_TOKENS = {
+    'IYYY': 'UUUU',
+    'YYYY': 'YYYY',
+    'YY': 'YY',
+    'Month': 'MMMM',
+    'MONTH': 'MMMM',
+    'Mon': 'MON',
+    'MON': 'MON',
+    'MM': 'MM',
+    'DDD': None,
+    'DD': 'DD',
+    'Day': None,
+    'DAY': None,
+    'Dy': 'DY',
+    'DY': 'DY',
+    'D': None,
+    'HH24': 'HH24',
+    'HH12': 'HH12',
+    'HH': 'HH12',
+    'MI': 'MI',
+    'SS': 'SS',
+    'AM': 'AM',
+    'PM': 'PM',
+    'US': 'FF6',
+    'TZ': None,
+    'tz': 'TZHTZM',
+    'IW': None,
+}
+
+_SNOWFLAKE_TOKENS_BY_LENGTH = sorted(_SNOWFLAKE_DATE_FORMAT_TOKENS, key=len, reverse=True)
+
+
+def postgres_to_snowflake_date_format(pg_format):
+    """Translates a Postgres date-format string to a Snowflake format model.
+
+    Double-quoted literals pass through verbatim (both engines honor them).
+    Documented Postgres tokens with no Snowflake format element raise
+    CompileError — never silently wrong output. Text outside the token table
+    passes through unchanged, matching how both engines treat it (literally).
+    """
+    out = []
+    i = 0
+    while i < len(pg_format):
+        char = pg_format[i]
+        if char == '"':
+            end = pg_format.find('"', i + 1)
+            if end == -1:
+                out.append(pg_format[i:])
+                break
+            out.append(pg_format[i:end + 1])
+            i = end + 1
+            continue
+        for token in _SNOWFLAKE_TOKENS_BY_LENGTH:
+            if pg_format.startswith(token, i):
+                mapped = _SNOWFLAKE_DATE_FORMAT_TOKENS[token]
+                if mapped is None:
+                    raise CompileError(
+                        f"Date format token {token!r} in {pg_format!r} has no Snowflake format element"
+                    )
+                out.append(mapped)
+                i += len(token)
+                break
+        else:
+            out.append(char)
+            i += 1
+    return ''.join(out)
+
+
 class elapsed_seconds(FunctionElement):
     type = Numeric()
     name = 'elapsed_seconds'

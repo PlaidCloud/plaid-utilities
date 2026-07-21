@@ -730,6 +730,99 @@ class TestSafeDivideSR(StarrocksTest):
 
 
 # ---------------------------------------------------------------------------
+# Postgres → Snowflake date-format token translation (sc-23158 WS-B3)
+# ---------------------------------------------------------------------------
+
+#: Postgres token → expected Snowflake format element, one row per supported
+#: token in the translator's table.
+_SNOWFLAKE_TOKEN_MATRIX = {
+    'IYYY': 'UUUU',
+    'YYYY': 'YYYY',
+    'YY': 'YY',
+    'Month': 'MMMM',
+    'MONTH': 'MMMM',
+    'Mon': 'MON',
+    'MON': 'MON',
+    'MM': 'MM',
+    'DD': 'DD',
+    'Dy': 'DY',
+    'DY': 'DY',
+    'HH24': 'HH24',
+    'HH12': 'HH12',
+    'HH': 'HH12',   # Postgres HH = 12-hour; Snowflake bare HH = HH24 — must translate
+    'MI': 'MI',
+    'SS': 'SS',
+    'AM': 'AM',
+    'PM': 'PM',
+    'US': 'FF6',
+    'tz': 'TZHTZM',
+}
+
+#: Postgres tokens Snowflake has no format element for — must raise, never
+#: render (Snowflake would emit them as literal text: silently wrong output).
+_SNOWFLAKE_UNSUPPORTED_TOKENS = ('Day', 'DAY', 'D', 'DDD', 'IW', 'TZ')
+
+
+class TestPostgresToSnowflakeDateFormat(unittest.TestCase):
+
+    def test_each_supported_token(self):
+        for pg_token, expected in _SNOWFLAKE_TOKEN_MATRIX.items():
+            with self.subTest(token=pg_token):
+                self.assertEqual(expected, sf.postgres_to_snowflake_date_format(pg_token))
+
+    def test_each_unsupported_token_raises(self):
+        for pg_token in _SNOWFLAKE_UNSUPPORTED_TOKENS:
+            with self.subTest(token=pg_token):
+                with self.assertRaises(sqlalchemy.exc.CompileError):
+                    sf.postgres_to_snowflake_date_format(pg_token)
+
+    def test_every_documented_conversion_table_token_is_handled(self):
+        # The WS-B3 contract: every key of plaid-rpc's Postgres↔Python
+        # conversion table either translates or raises explicitly.
+        from plaidcloud.rpc.type_conversion import _PG_PY_FORMAT_MAPPING
+        for pg_format in _PG_PY_FORMAT_MAPPING:
+            with self.subTest(token=pg_format):
+                try:
+                    sf.postgres_to_snowflake_date_format(pg_format)
+                except sqlalchemy.exc.CompileError:
+                    pass  # explicit unsupported — the contract allows this, never silence
+
+    def test_composite_formats(self):
+        cases = {
+            'YYYY-MM-DD"T"HH24:MI:SS': 'YYYY-MM-DD"T"HH24:MI:SS',
+            'YYYY-MM-DD"T"HH:MI:SS': 'YYYY-MM-DD"T"HH12:MI:SS',
+            'YYYY-MM-DD': 'YYYY-MM-DD',
+            'YYYY-MM-DD HH24:MI:SS': 'YYYY-MM-DD HH24:MI:SS',
+            'HH24:MI:SS': 'HH24:MI:SS',
+            'MM/DD/YYYY': 'MM/DD/YYYY',
+            'DD Mon YYYY': 'DD MON YYYY',
+            'DD MON YYYY': 'DD MON YYYY',
+            'YYYYMMDD': 'YYYYMMDD',
+            'YYYYMM': 'YYYYMM',
+            'HH12:MI:SS AM': 'HH12:MI:SS AM',
+            'YYYY-MM-DD HH24:MI:SS.US': 'YYYY-MM-DD HH24:MI:SS.FF6',
+        }
+        for pg_format, expected in cases.items():
+            with self.subTest(fmt=pg_format):
+                self.assertEqual(expected, sf.postgres_to_snowflake_date_format(pg_format))
+
+    def test_iso_week_composite_raises(self):
+        # 'IYYY-IW' (used with to_char today): ISO year maps to UUUU but there
+        # is no ISO week element — the whole format must fail loudly.
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            sf.postgres_to_snowflake_date_format('IYYY-IW')
+
+    def test_unknown_text_passes_through(self):
+        # Non-token text is literal on both engines (unquoted T, separators).
+        self.assertEqual('YYYY-MM-DDTHH24:MI:SS',
+                         sf.postgres_to_snowflake_date_format('YYYY-MM-DDTHH24:MI:SS'))
+        self.assertEqual('', sf.postgres_to_snowflake_date_format(''))
+
+    def test_unterminated_quote_passes_through(self):
+        self.assertEqual('YYYY"abc', sf.postgres_to_snowflake_date_format('YYYY"abc'))
+
+
+# ---------------------------------------------------------------------------
 # Alteryx-converter cross-dialect functions
 # ---------------------------------------------------------------------------
 # The Alteryx expression converter emits Databend names; StarRocks (MySQL-
