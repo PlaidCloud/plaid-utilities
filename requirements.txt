@@ -9,7 +9,7 @@ PyYAML
 requests
 setuptools
 orjson
-SQLAlchemy
+SQLAlchemy>=2.0
 texttable
 toolz
 xlwings;platform_system=="Windows"
