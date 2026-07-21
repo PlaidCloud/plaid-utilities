@@ -777,9 +777,20 @@ class TestPostgresToSnowflakeDateFormat(unittest.TestCase):
                     sf.postgres_to_snowflake_date_format(pg_token)
 
     def test_every_documented_conversion_table_token_is_handled(self):
-        # The WS-B3 contract: every key of plaid-rpc's Postgres↔Python
-        # conversion table either translates or raises explicitly.
+        # The WS-B3 contract: every ATOMIC token key of plaid-rpc's
+        # Postgres↔Python conversion table is in the translator's vocabulary —
+        # mapped or raise-listed. A token added to plaid-rpc later without a
+        # _SNOWFLAKE_DATE_FORMAT_TOKENS entry would otherwise pass through as
+        # literal text while this suite stayed green. Composite multi-token
+        # keys ('YYYY-MM-DD"T"HH24:MI:SS', 'MM/DD/YYYY', 'DD Mon YYYY', …) are
+        # excluded from the subset check — they contain separator characters
+        # (so are never pure alphanumeric) and decompose into atomic tokens
+        # the tokenizer handles per token; the loop below still exercises them
+        # end to end.
         from plaidcloud.rpc.type_conversion import _PG_PY_FORMAT_MAPPING
+        atomic_tokens = {key for key in _PG_PY_FORMAT_MAPPING if key.isalnum()}
+        handled = set(sf._SNOWFLAKE_DATE_FORMAT_TOKENS)  # mapped ∪ raise-listed (None)
+        self.assertEqual(set(), atomic_tokens - handled)
         for pg_format in _PG_PY_FORMAT_MAPPING:
             with self.subTest(token=pg_format):
                 try:
