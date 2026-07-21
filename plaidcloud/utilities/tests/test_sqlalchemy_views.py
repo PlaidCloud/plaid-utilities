@@ -730,5 +730,95 @@ class TestCreateMaterializedViewStarRocks(StarRocksTest):
             '\n'), str(compiled))
 
 
+class SnowflakeTest(unittest.TestCase):
+
+    dialect = 'snowflake'
+
+    def setUp(self) -> None:
+        self.eng = sa.create_engine(f'{self.dialect}://127.0.0.1/')
+
+
+class TestDropViewSnowflake(SnowflakeTest):
+    """sc-23158 WS-B5: Snowflake DROP VIEW takes no CASCADE/RESTRICT."""
+
+    def test_drop_default(self):
+        metadata = sa.MetaData()
+        view_obj = sa.Table('article-vw', metadata, schema='public', comment='blah')
+
+        expr = vw.DropView(
+            view_obj,
+        )
+
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('\nDROP VIEW public."article-vw"', str(compiled))
+
+    def test_drop_cascade_is_stripped(self):
+        metadata = sa.MetaData()
+        view_obj = sa.Table('article-vw', metadata, schema='public', comment='blah')
+
+        expr = vw.DropView(
+            view_obj,
+            cascade=True,
+        )
+
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('\nDROP VIEW public."article-vw"', str(compiled))
+
+    def test_drop_if_exists(self):
+        metadata = sa.MetaData()
+        view_obj = sa.Table('article-vw', metadata, schema='public', comment='blah')
+
+        expr = vw.DropView(
+            view_obj,
+            if_exists=True,
+        )
+
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('\nDROP VIEW IF EXISTS public."article-vw"', str(compiled))
+
+    def test_drop_materialized(self):
+        metadata = sa.MetaData()
+        view_obj = sa.Table('article-vw', metadata, schema='public', comment='blah')
+
+        expr = vw.DropView(
+            view_obj,
+            materialized=True,
+            cascade=True,
+        )
+
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('\nDROP MATERIALIZED VIEW public."article-vw"', str(compiled))
+
+
+class TestCreateViewSnowflake(SnowflakeTest):
+    """sc-23158 WS-B5: the generic CreateView rendering is valid Snowflake
+    syntax (OR REPLACE / IF NOT EXISTS / column list all documented) — no
+    snowflake variant is registered; this pins the default's output there."""
+
+    def test_create_with_replace(self):
+        metadata = sa.MetaData()
+        view_obj = sa.Table('article-vw', metadata, schema='public')
+
+        expr = vw.CreateView(
+            view_obj,
+            selectable=sa.select(
+                Article.id,
+                Article.name,
+                User.id.label('author_id'),
+                User.name.label('author_name'),
+            ).join(
+                User, Article.author_id == User.id
+            ),
+            or_replace=True,
+        )
+
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(('\n'
+            'CREATE OR REPLACE VIEW public."article-vw" AS SELECT article.id, article.name, '
+            'user.id AS author_id, user.name AS author_name \n'
+            'FROM article JOIN user ON article.author_id = user.id\n'
+            '\n'), str(compiled))
+
+
 if __name__ == '__main__':
     unittest.main()

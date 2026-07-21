@@ -92,6 +92,10 @@ class DropView(_DropView):
         self.cascade = cascade
 
 # generic - postgres, greenplum
+# Also valid for Snowflake (sc-23158 WS-B5): CREATE [OR REPLACE] [MATERIALIZED]
+# VIEW [IF NOT EXISTS] <name> [(<column_list>)] AS <select> is all documented
+# syntax there; only the Postgres WITH-options branch is PG-specific (Snowflake
+# view options are keyword parameters, which nothing passes on that engine).
 @compiles(CreateView)
 def visit_create_view(create, compiler, **kw):
     view = create.element
@@ -195,7 +199,9 @@ def _drop_view(drop, compiler, **kw):
     return text
 
 
-@compiles(DropView, 'starrocks', 'databend')
+# Snowflake included (sc-23158 WS-B5): DROP [MATERIALIZED] VIEW [IF EXISTS]
+# takes no CASCADE/RESTRICT there either.
+@compiles(DropView, 'starrocks', 'databend', 'snowflake')
 def _drop_view(drop, compiler, **kw):
     text = "\nDROP "
     if drop.materialized:
