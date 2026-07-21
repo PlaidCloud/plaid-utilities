@@ -77,9 +77,10 @@ _ALLOWED_NODES = frozenset({
     # that broke saved expressions doing `x is None` (sc-23186). They are pure
     # operators — no attribute access, call, or name resolution — so they add
     # no escape surface. NB they are usually a semantic no-op on a Column
-    # (`col is None` is Python identity: always False, so the branch is dead;
-    # `not col` raises at runtime), but that is the author's bug to fix with
-    # `.is_(None)` / `~col`, not the sandbox's to reject.
+    # (`col is None` is Python identity: always False, so the branch is dead),
+    # but that is the author's bug to fix with `.is_(None)`, not the sandbox's
+    # to reject. The one shape that fails *silently* rather than loudly —
+    # `not (a == b)` — is rejected below; see `_assert_safe_expression`.
     ast.Is, ast.IsNot,
     ast.List, ast.Tuple, ast.Starred,
 })
@@ -115,6 +116,16 @@ _RAW_SQL_METHODS = frozenset({'prefix_with', 'suffix_with', 'with_hint', 'with_s
 def _attr_off_func(node):
     """True when the attribute is accessed directly off the ``func`` name."""
     return isinstance(node.value, ast.Name) and node.value.id == 'func'
+
+
+def _is_negated_equality(node):
+    """True for `not (a == b)` / `not (a != b)` — the silent-collapse shape."""
+    return (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, ast.Not)
+        and isinstance(node.operand, ast.Compare)
+        and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.operand.ops)
+    )
 
 
 def _attr_is_column(node, underscore_columns):
@@ -189,6 +200,20 @@ def _assert_safe_expression(source, safe_dict=None):
         return
 
     for node in ast.walk(tree):
+        if _is_negated_equality(node):
+            # `not (a == b)` is the one `not` shape that fails silently instead
+            # of loudly: SQLAlchemy's BinaryExpression.__bool__ special-cases
+            # eq/ne and returns an id()-based Python bool, so the comparison
+            # never reaches the SQL and the branch becomes a constant
+            # (`CASE WHEN true THEN ...`). Every other `not` raises "Boolean
+            # value of this clause is not defined", which is safe. Reject the
+            # silent one rather than let it bake wrong results into a query.
+            raise SQLExpressionError(
+                'Error in expression:\n    {}\n'
+                '`not (a == b)` does not build a SQL NOT — it collapses to a '
+                'constant and drops the comparison from the query. '
+                'Use `a != b` (or `~(a == b)` for an explicit SQL NOT).'.format(source)
+            )
         if type(node) not in _ALLOWED_NODES:
             raise SQLExpressionError(
                 'Error in expression:\n    {}\n{} is not permitted in an expression.'.format(

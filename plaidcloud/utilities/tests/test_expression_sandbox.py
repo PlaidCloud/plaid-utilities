@@ -285,6 +285,40 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         # …and the column itself stays reachable the safe way.
         se._assert_safe_expression("get_column(table, '_index')", safe)
 
+    def test_negated_equality_is_rejected_not_silently_collapsed(self):
+        # `not (a == b)` is the one `not` shape that does NOT raise: SA's
+        # BinaryExpression.__bool__ special-cases eq/ne and returns an
+        # id()-based Python bool, so the column vanishes from the SQL and the
+        # branch becomes `CASE WHEN true THEN ...`. Allowing ast.Not must not
+        # smuggle that in (sc-23186).
+        table = _table()
+        for expr in ("not (table.a == 1)", "not (table.a != 1)",
+                     "case((not (table.a == 1), table.b), else_=0)"):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn('!=', str(ctx.exception))
+
+    def test_other_not_shapes_still_fail_loudly_at_runtime(self):
+        # The rest of the `not` family raises "Boolean value of this clause is
+        # not defined" — loud and safe, so the guard leaves them alone.
+        table = _table()
+        for expr in ("not table.a", "not (table.a < 1)", "not table.a.in_([1, 2])"):
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr, se.get_safe_dict([table]))
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(expr, {}, [table])
+
+    def test_sql_not_of_an_equality_still_works(self):
+        # The steer the error message gives has to actually work.
+        table = _table()
+        for expr in ("table.a != 1", "~(table.a == 1)", "not_(table.a == 1)"):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]),
+                    sqlalchemy.sql.elements.ColumnElement,
+                )
+
     def test_rule_path_gets_the_same_relaxations(self):
         # eval_rule shares the guard but is a separate call site — both had to
         # be threaded with the eval context, so pin the positive path here too.
