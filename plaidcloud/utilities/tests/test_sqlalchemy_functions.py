@@ -1,6 +1,7 @@
 # coding=utf-8
 import pickle
 import unittest
+import uuid as uuid_mod
 
 import datetime
 
@@ -9,7 +10,9 @@ import sqlalchemy
 # from toolz.functoolz import identity as ident
 
 # from plaidcloud.rpc.database import PlaidUnicode
+from plaidcloud.rpc.database import GUIDHyphens
 from plaidcloud.utilities import sqlalchemy_functions as sf
+from plaidcloud.utilities import sql_expression
 # from plaidcloud.utilities.analyze_table import compiled
 
 
@@ -998,3 +1001,41 @@ class TestGeomFunctionsStarrocks(StarrocksTest):
             with self.subTest(fn=name):
                 with self.assertRaises(sqlalchemy.exc.CompileError):
                     self._sql(make())
+
+
+class TestUuidCast(BaseTest):
+    """sc-23158 WS-A5: the expression namespace's uuid cast keys resolve to
+    GUIDHyphens — the same type sqlalchemy_from_dtype('uuid') stores columns
+    with — so an inline cast compiles real SQL per engine and binds the
+    36-char hyphenated form (sqlalchemy.Uuid bound 32-char unhyphenated hex
+    on non-native dialects, and StarRocks silently dropped the cast)."""
+
+    expected_cast = 'CAST(anlz_schema.table_abc123.id AS CHAR(36))'
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.table = sql_expression.get_table_rep(
+            'table_abc123', [{'source': 'id', 'dtype': 'text'}], 'anlz_schema')
+
+    def test_uuid_cast_compiles(self):
+        expr = sql_expression.eval_expression('sqlalchemy.cast(table.id, uuid)', {}, [self.table])
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(self.expected_cast, str(compiled))
+
+    def test_all_case_variants_map_to_guidhyphens(self):
+        safe_dict = sql_expression.get_safe_dict([])
+        for key in ('uuid', 'Uuid', 'UUID'):
+            self.assertIs(GUIDHyphens, safe_dict[key])
+
+    def test_bind_is_hyphenated_on_non_native_dialect(self):
+        bound = GUIDHyphens().process_bind_param(
+            uuid_mod.UUID('12345678-1234-5678-1234-567812345678'), self.eng.dialect)
+        self.assertEqual('12345678-1234-5678-1234-567812345678', bound)
+
+
+class TestUuidCastDatabend(TestUuidCast, DatabendTest):
+    pass
+
+
+class TestUuidCastStarrocks(TestUuidCast, StarrocksTest):
+    pass
