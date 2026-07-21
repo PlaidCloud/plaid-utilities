@@ -285,6 +285,28 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         # …and the column itself stays reachable the safe way.
         se._assert_safe_expression("get_column(table, '_index')", safe)
 
+    def test_rule_path_gets_the_same_relaxations(self):
+        # eval_rule shares the guard but is a separate call site — both had to
+        # be threaded with the eval context, so pin the positive path here too.
+        table = _table()
+        self.assertFalse(se.eval_rule("get_column(table, 'a') is None", {}, [table]))
+        self.assertIsInstance(
+            se.eval_rule("func.rtrim(table._MajorAccountFlag)", {}, [table]),
+            sqlalchemy.sql.elements.ColumnElement,
+        )
+
+    def test_cross_alias_underscore_column_is_rejected(self):
+        # The exemption is per alias: table2 does not own the column, so
+        # `table2._MajorAccountFlag` must not ride in on table1's columns.
+        md = sqlalchemy.MetaData()
+        other = sqlalchemy.Table(
+            'analyzetable_o', md, sqlalchemy.Column('z', sqlalchemy.INTEGER), schema='anlz',
+        )
+        safe = se.get_safe_dict([_table(), other])
+        se._assert_safe_expression("table1._MajorAccountFlag", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("table2._MajorAccountFlag", safe)
+
     def test_underscore_column_blocked_without_the_eval_context(self):
         # No safe_dict = no way to tell column from internal, so the guard
         # stays closed rather than guessing.

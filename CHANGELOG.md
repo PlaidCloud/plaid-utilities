@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Fix expression validation rejecting `is`, `is not` and `not`, which broke saved calculated-field, filter and rule expressions that had run for years (e.g. a lookup step failing with "Is is not permitted in an expression."). The three operators were omitted from the expression allowlist in error; they add no escape surface and are now accepted again. Note that on a column `x is None` is a Python identity test that is always false — use `x.is_(None)` for a real null test (sc-23186) ([@simozzy](https://github.com/simozzy)).
+- Fix expression validation rejecting columns whose name begins with an underscore, which broke steps that reference them (e.g. "Access to attribute '_MajorAccountFlag' is not permitted."). Such a column is reachable as `table._MyColumn` again, while a name that merely looks like one but resolves to SQLAlchemy internals stays blocked (sc-23186) ([@simozzy](https://github.com/simozzy)).
 
 - The `uuid`/`Uuid`/`UUID` cast type in transform expressions (calc fields, filters, rules) now uses the platform's canonical `GUIDHyphens` type instead of the Postgres-only `UUID`, so an inline uuid cast compiles valid SQL on every lakehouse engine (StarRocks previously dropped the cast entirely) and produces the same 36-character hyphenated form that uuid-typed columns store. Only the inline-expression cast path changes — column dtype configuration (`sqlalchemy_from_dtype('uuid')`) already used `GUIDHyphens` and was never affected (sc-23158) ([@inviscid](https://github.com/inviscid)).
 

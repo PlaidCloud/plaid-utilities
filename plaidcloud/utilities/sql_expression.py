@@ -157,6 +157,8 @@ def _underscore_columns_by_alias(safe_dict):
         for name in collection.keys():
             if not (isinstance(name, str) and name.startswith('_')):
                 continue
+            if name.startswith('__'):
+                continue  # Never exempt a dunder, whatever it resolves to.
             if getattr(collection, name, None) is collection[name]:
                 names.add(name)
         return names
