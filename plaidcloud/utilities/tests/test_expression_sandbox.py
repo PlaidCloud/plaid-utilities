@@ -285,19 +285,29 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         # …and the column itself stays reachable the safe way.
         se._assert_safe_expression("get_column(table, '_index')", safe)
 
-    def test_negated_equality_is_rejected_not_silently_collapsed(self):
-        # `not (a == b)` is the one `not` shape that does NOT raise: SA's
-        # BinaryExpression.__bool__ special-cases eq/ne and returns an
-        # id()-based Python bool, so the column vanishes from the SQL and the
-        # branch becomes `CASE WHEN true THEN ...`. Allowing ast.Not must not
-        # smuggle that in (sc-23186).
+    def test_negated_comparisons_are_rejected_not_silently_collapsed(self):
+        # These `not` shapes do NOT raise: the inner comparison evaluates to a
+        # plain Python bool (eq/ne via BinaryExpression.__bool__, is/is not via
+        # Python identity, in/not in via tuple.__contains__), so the column
+        # vanishes from the SQL and the branch becomes `CASE WHEN true THEN
+        # ...`. Allowing ast.Not must not smuggle any of them in (sc-23186).
         table = _table()
-        for expr in ("not (table.a == 1)", "not (table.a != 1)",
-                     "case((not (table.a == 1), table.b), else_=0)"):
+        for expr, steer in (
+            ("not (table.a == 1)", '!='),
+            ("not (table.a != 1)", '=='),
+            ("not (table.a is None)", 'isnot'),
+            ("not (table.a is not None)", 'is_'),
+            ("not (table.a in (1, 2))", 'notin_'),
+            ("not (table.a not in (1, 2))", 'in_'),
+            ("not (table.a == 1 == table.b)", '!='),      # chained
+            ("not not (table.a == 1)", '!='),             # double negation
+            ("case((not (table.a == 1), table.b), else_=0)", '!='),
+            ("func.coalesce(not (table.a == 1), 0)", '!='),
+        ):
             with self.subTest(expr=expr):
                 with self.assertRaises(se.SQLExpressionError) as ctx:
                     se.eval_expression(expr, {}, [table])
-                self.assertIn('!=', str(ctx.exception))
+                self.assertIn(steer, str(ctx.exception))
 
     def test_other_not_shapes_still_fail_loudly_at_runtime(self):
         # The rest of the `not` family raises "Boolean value of this clause is

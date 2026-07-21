@@ -118,13 +118,33 @@ def _attr_off_func(node):
     return isinstance(node.value, ast.Name) and node.value.id == 'func'
 
 
-def _is_negated_equality(node):
-    """True for `not (a == b)` / `not (a != b)` — the silent-collapse shape."""
-    return (
+# Comparisons that produce a plain Python bool rather than a SQL clause, so
+# wrapping them in `not` yields a constant instead of a SQL NOT. `==`/`!=` go
+# through BinaryExpression.__bool__ (an id()-based special case); `is`/`is not`
+# are Python identity; `in`/`not in` go through tuple.__contains__, which
+# bool()s the per-element `==`. Value is the operator that builds real SQL.
+_NEGATED_COMPARISON_HINTS = {
+    ast.Eq: '`a != b` (or `~(a == b)` for an explicit SQL NOT)',
+    ast.NotEq: '`a == b`',
+    ast.Is: '`a.isnot(None)`',
+    ast.IsNot: '`a.is_(None)`',
+    ast.In: '`a.notin_([...])`',
+    ast.NotIn: '`a.in_([...])`',
+}
+
+
+def _negated_comparison_hint(node):
+    """For `not (<comparison>)`, the operator to steer to; None otherwise."""
+    if not (
         isinstance(node, ast.UnaryOp)
         and isinstance(node.op, ast.Not)
         and isinstance(node.operand, ast.Compare)
-        and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.operand.ops)
+    ):
+        return None
+    return next(
+        (hint for op in node.operand.ops
+         if (hint := _NEGATED_COMPARISON_HINTS.get(type(op)))),
+        None,
     )
 
 
@@ -200,19 +220,19 @@ def _assert_safe_expression(source, safe_dict=None):
         return
 
     for node in ast.walk(tree):
-        if _is_negated_equality(node):
-            # `not (a == b)` is the one `not` shape that fails silently instead
-            # of loudly: SQLAlchemy's BinaryExpression.__bool__ special-cases
-            # eq/ne and returns an id()-based Python bool, so the comparison
+        negated_hint = _negated_comparison_hint(node)
+        if negated_hint:
+            # These are the `not` shapes that fail silently instead of loudly:
+            # the inner comparison evaluates to a plain Python bool, so it
             # never reaches the SQL and the branch becomes a constant
             # (`CASE WHEN true THEN ...`). Every other `not` raises "Boolean
             # value of this clause is not defined", which is safe. Reject the
-            # silent one rather than let it bake wrong results into a query.
+            # silent ones rather than let them bake wrong results into a query.
             raise SQLExpressionError(
                 'Error in expression:\n    {}\n'
-                '`not (a == b)` does not build a SQL NOT — it collapses to a '
-                'constant and drops the comparison from the query. '
-                'Use `a != b` (or `~(a == b)` for an explicit SQL NOT).'.format(source)
+                '`not (...)` around a comparison does not build a SQL NOT — it '
+                'collapses to a constant and drops the comparison from the '
+                'query. Use {}.'.format(source, negated_hint)
             )
         if type(node) not in _ALLOWED_NODES:
             raise SQLExpressionError(
