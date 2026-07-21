@@ -56,14 +56,29 @@ class PlaidConnection(Connect, Connection):
         project_id = kwargs.pop('project_id', '')
         workflow_id = kwargs.pop('workflow_id', 'workflow_id_not_set')
         step_id = kwargs.pop('step_id', 'step_id_not_set')
-        if is_jupyter:
+        workspace_uuid = kwargs.pop('workspace_uuid', '')
+        # Named explicitly rather than forwarding **kwargs: xl_path is consumed by this class
+        # below, and Connect would reject it.
+        rpc_config = {
+            name: kwargs.pop(name)
+            for name in ('rpc_uri', 'auth_token', 'token_provider')
+            if name in kwargs
+        }
+        if rpc_config.get('rpc_uri'):
+            # Connect rejects workspace_uuid/project_id without rpc_uri, because then the
+            # environment or plaid.conf is supplying them. Callers have long passed whole
+            # plaid.conf-shaped blobs here and had the extras ignored, so forwarding either
+            # off the direct path would turn a working call into a ValueError.
+            rpc_config['workspace_uuid'] = workspace_uuid
+            rpc_config['project_id'] = project_id
+        elif is_jupyter:
             if not project_id:
                 raise Exception('Set the Project ID as a keyword argument to use the connection in JupyterHub')
             os.environ['__PLAID_RPC_AUTH_TOKEN__'] = os.environ.get('KEYCLOAK_ACCESS_TOKEN', 'NOT SET')
             os.environ['__PLAID_PROJECT_ID__'] = project_id
             os.environ['__PLAID_WORKFLOW_ID__'] = workflow_id
             os.environ['__PLAID_STEP_ID__'] = step_id
-        Connect.__init__(self)
+        Connect.__init__(self, **rpc_config)
         Connection.__init__(self, rpc=self)
         self._logger = Logger(rpc=self)
         self._logger.debug('Connected to host "{0}"'.format(self.hostname))
