@@ -299,7 +299,7 @@ class TestExpressionSandboxAllows(unittest.TestCase):
             ("not (table.a is not None)", 'is_'),
             ("not (table.a in (1, 2))", 'notin_'),
             ("not (table.a not in (1, 2))", 'in_'),
-            ("not (table.a == 1 == table.b)", '!='),      # chained
+            ("not (table.a == 1 == table.b)", '!='),      # chained, risky op first
             ("not not (table.a == 1)", '!='),             # double negation
             ("case((not (table.a == 1), table.b), else_=0)", '!='),
             ("func.coalesce(not (table.a == 1), 0)", '!='),
@@ -308,6 +308,15 @@ class TestExpressionSandboxAllows(unittest.TestCase):
                 with self.assertRaises(se.SQLExpressionError) as ctx:
                     se.eval_expression(expr, {}, [table])
                 self.assertIn(steer, str(ctx.exception))
+
+    def test_chained_comparison_with_a_safe_first_op_is_left_to_raise(self):
+        # `not (a < b == c)` expands to `(a < b) and (b == c)`; `and` bool()s
+        # the LEFT side, so the `<` raises and nothing collapses. Flagging it
+        # would hand the author an unrelated `!=` steer for a `<` they wrote.
+        table = _table()
+        se._assert_safe_expression("not (table.a < 1 == table.b)", se.get_safe_dict([table]))
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("not (table.a < 1 == table.b)", {}, [table])
 
     def test_other_not_shapes_still_fail_loudly_at_runtime(self):
         # The rest of the `not` family raises "Boolean value of this clause is

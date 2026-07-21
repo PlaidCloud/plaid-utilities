@@ -134,18 +134,21 @@ _NEGATED_COMPARISON_HINTS = {
 
 
 def _negated_comparison_hint(node):
-    """For `not (<comparison>)`, the operator to steer to; None otherwise."""
+    """For `not (<comparison>)`, the operator to steer to; None otherwise.
+
+    Only the FIRST operator matters: Python expands a chained comparison to
+    `(a op1 b) and (b op2 c)`, and `and` bool()s the left side, so op1 alone
+    decides whether the expression collapses quietly or raises. `not (a < b
+    == c)` raises at the `<` — loud and safe — and must not be mistaken for
+    the silent shape and given an unrelated `!=` steer.
+    """
     if not (
         isinstance(node, ast.UnaryOp)
         and isinstance(node.op, ast.Not)
         and isinstance(node.operand, ast.Compare)
     ):
         return None
-    return next(
-        (hint for op in node.operand.ops
-         if (hint := _NEGATED_COMPARISON_HINTS.get(type(op)))),
-        None,
-    )
+    return _NEGATED_COMPARISON_HINTS.get(type(node.operand.ops[0]))
 
 
 def _attr_is_column(node, underscore_columns):
@@ -230,9 +233,9 @@ def _assert_safe_expression(source, safe_dict=None):
             # silent ones rather than let them bake wrong results into a query.
             raise SQLExpressionError(
                 'Error in expression:\n    {}\n'
-                '`not (...)` around a comparison does not build a SQL NOT — it '
-                'collapses to a constant and drops the comparison from the '
-                'query. Use {}.'.format(source, negated_hint)
+                '`not (...)` around a comparison does not build a SQL NOT — on '
+                'a column it collapses to a constant and drops the comparison '
+                'from the query. Use {}.'.format(source, negated_hint)
             )
         if type(node) not in _ALLOWED_NODES:
             raise SQLExpressionError(
