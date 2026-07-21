@@ -14,9 +14,8 @@ from toolz.dicttoolz import merge, valfilter, assoc
 
 import sqlalchemy
 import sqlalchemy.orm
-import sqlalchemy.dialects
 
-from plaidcloud.rpc.database import PlaidCurrency
+from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
 from plaidcloud.utilities.stringtransforms import apply_variables
 from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
@@ -602,9 +601,12 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
         'Largebinary': sqlalchemy.LargeBinary,
         'LargeBinary': sqlalchemy.LargeBinary,
         'LARGEBINARY': sqlalchemy.LargeBinary,
-        'uuid': sqlalchemy.dialects.postgresql.UUID,
-        'Uuid': sqlalchemy.dialects.postgresql.UUID,
-        'UUID': sqlalchemy.dialects.postgresql.UUID,
+        # GUIDHyphens is what sqlalchemy_from_dtype('uuid') resolves to, so inline
+        # casts bind/compile the same 36-char hyphenated form uuid columns store
+        # (sqlalchemy.Uuid would bind unhyphenated 32-char hex on non-native dialects).
+        'uuid': GUIDHyphens,
+        'Uuid': GUIDHyphens,
+        'UUID': GUIDHyphens,
         'json': sqlalchemy.JSON,
         'Json': sqlalchemy.JSON,
         'JSON': sqlalchemy.JSON,
