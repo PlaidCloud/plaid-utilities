@@ -318,6 +318,66 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         with self.assertRaises(se.SQLExpressionError):
             se.eval_expression("not (table.a < 1 == table.b)", {}, [table])
 
+    def test_compound_negation_is_rejected_with_a_compound_steer(self):
+        # `not (a == 1 or b == 2)` collapses just as silently as the bare shape
+        # — `and`/`or` bool() their operand and hand back a BinaryExpression,
+        # so the outer `not` still drops it to a constant — but the operand is
+        # a BoolOp, not a bare Compare. The guard has to walk into it, and the
+        # per-op steer can't rebuild the whole clause, so it steers to not_().
+        table = _table()
+        for expr in (
+            "not (table.a == 1 or table.b == 2)",
+            "not (table.a == 1 and table.b == 2)",
+            "case((not (table.a == 1 or table.b == 2), 1), else_=0)",
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn('not_', str(ctx.exception))
+
+    def test_compound_sql_not_steer_actually_works(self):
+        # The not_(and_/or_(...)) the compound message points at has to compile.
+        table = _table()
+        for expr in (
+            "not_(or_(table.a == 1, table.b == 2))",
+            "not_(and_(table.a == 1, table.b == 2))",
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]),
+                    sqlalchemy.sql.elements.ColumnElement,
+                )
+
+    def test_negation_of_pure_constants_is_left_alone(self):
+        # `not (<constant> == <constant>)` is correct Python — no column, so
+        # nothing collapses and there is nothing to reject (sc-23186). It comes
+        # up for real once apply_variables has substituted a saved rule's
+        # operands into literals. Pure builtins over literals count as constant
+        # too (they cannot return a clause).
+        table = _table()
+        for expr in (
+            "not ('ABC' == 'CORP')",
+            "not ('ABC' in ('CORP', 'LLC'))",
+            "not (len('abc') == 3)",
+            "not (1 == 2 or 3 == 4)",
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]), bool,
+                )
+        # Same shape reached through eval_rule after variable substitution.
+        self.assertTrue(se.eval_rule("not ('{v}' == 'CORP')", {'v': 'ABC'}, [table]))
+        self.assertTrue(se.eval_rule("not ('{v}' in ('CORP', 'LLC'))", {'v': 'ABC'}, [table]))
+
+    def test_negation_over_a_column_via_a_builtin_still_rejected(self):
+        # A builtin argument that references a column is NOT a constant —
+        # `sum([table.a])` is the column, so `not (... == 0)` still collapses
+        # and must stay rejected. The constant exemption must not widen to any
+        # builtin call, only to calls whose arguments are themselves constants.
+        table = _table()
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("not (sum([table.a, table.b]) == 0)", {}, [table])
+
     def test_other_not_shapes_still_fail_loudly_at_runtime(self):
         # The rest of the `not` family raises "Boolean value of this clause is
         # not defined" — loud and safe, so the guard leaves them alone.

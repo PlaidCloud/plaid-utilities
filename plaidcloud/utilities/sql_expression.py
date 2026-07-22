@@ -132,23 +132,81 @@ _NEGATED_COMPARISON_HINTS = {
     ast.NotIn: '`a.in_([...])`',
 }
 
+# A compound operand (`not (a == 1 or b == 2)`) collapses just as silently, but
+# the per-op steers don't apply — the whole clause has to be rebuilt from SQL
+# combinators. `~(a == 1 or b == 2)` does NOT work: the inner Python `or`
+# collapses before `~` runs, so steer to not_() over an explicit and_()/or_().
+_NEGATED_COMPOUND_HINT = (
+    '`not_(and_(...))` / `not_(or_(...))` to build an explicit SQL NOT over the '
+    'whole clause (a plain `not (... or ...)` collapses before the NOT applies)'
+)
+
+
+def _is_static_constant(node):
+    """True when a node evaluates to a pure Python value with no SQL clause.
+
+    Literals, literal collections, and arithmetic over them — plus a call to
+    one of the sandbox's pure builtins (`_SAFE_BUILTINS`) whose arguments are
+    themselves static constants. Such a call operates only on literals, so it
+    cannot return a Column/clause; `sum([table.a])` or `func.lower(col)` fail
+    the recursion because a column reference is an Attribute/Name, never a
+    constant. This is what keeps a comparison of pure constants (`not ('ABC' ==
+    'CORP')`, `not (len('abc') == 3)`) out of the negated-collapse rejection
+    without exempting anything that touches a column.
+    """
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return all(_is_static_constant(elt) for elt in node.elts)
+    if isinstance(node, ast.UnaryOp):
+        return _is_static_constant(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _is_static_constant(node.left) and _is_static_constant(node.right)
+    if isinstance(node, ast.Call):
+        return (
+            isinstance(node.func, ast.Name)
+            and node.func.id in _SAFE_BUILTINS
+            and not node.keywords
+            and all(_is_static_constant(arg) for arg in node.args)
+        )
+    return False
+
+
+def _comparison_collapses(compare):
+    """True when `not (<compare>)` would silently collapse to a constant.
+
+    Its first operator must be one of the bool()-returning kinds (only op1
+    matters — a chained comparison expands to `(a op1 b) and (b op2 c)` and
+    `and` bool()s the left side, so `not (a < b == c)` raises loudly at `<`
+    and is left alone), AND at least one operand must not be a pure constant
+    (a comparison of literals is correct Python, drops no column, and must not
+    be rejected — sc-23186).
+    """
+    if type(compare.ops[0]) not in _NEGATED_COMPARISON_HINTS:
+        return False
+    operands = [compare.left, *compare.comparators]
+    return not all(_is_static_constant(operand) for operand in operands)
+
 
 def _negated_comparison_hint(node):
-    """For `not (<comparison>)`, the operator to steer to; None otherwise.
+    """For a silently-collapsing `not (...)`, the steer to give; None otherwise.
 
-    Only the FIRST operator matters: Python expands a chained comparison to
-    `(a op1 b) and (b op2 c)`, and `and` bool()s the left side, so op1 alone
-    decides whether the expression collapses quietly or raises. `not (a < b
-    == c)` raises at the `<` — loud and safe — and must not be mistaken for
-    the silent shape and given an unrelated `!=` steer.
+    Walks the operand for any comparison that would collapse (`_comparison_
+    collapses`). A bare comparison gets the specific per-op steer; comparisons
+    joined by `and`/`or` get the compound steer, since the per-op replacement
+    can't rebuild the whole clause.
     """
-    if not (
-        isinstance(node, ast.UnaryOp)
-        and isinstance(node.op, ast.Not)
-        and isinstance(node.operand, ast.Compare)
-    ):
+    if not (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)):
         return None
-    return _NEGATED_COMPARISON_HINTS.get(type(node.operand.ops[0]))
+    collapsing = [
+        child for child in ast.walk(node.operand)
+        if isinstance(child, ast.Compare) and _comparison_collapses(child)
+    ]
+    if not collapsing:
+        return None
+    if any(isinstance(child, ast.BoolOp) for child in ast.walk(node.operand)):
+        return _NEGATED_COMPOUND_HINT
+    return _NEGATED_COMPARISON_HINTS[type(collapsing[0].ops[0])]
 
 
 def _attr_is_column(node, underscore_columns):
