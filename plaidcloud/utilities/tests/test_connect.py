@@ -44,6 +44,19 @@ class TestPlaidConnectionForwarding:
             'workspace_uuid': 'ws', 'project_id': 'pid',
         }
 
+    def test_verify_ssl_reaches_connect_without_rpc_uri(self, captured_connect_kwargs, monkeypatch):
+        """Unlike project_id/workspace_uuid, verify_ssl is applied after PlaidConfig picks a
+        configuration source, so it is valid on the environment path too."""
+        monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
+        PlaidConnection(verify_ssl=True)
+        assert captured_connect_kwargs == {'verify_ssl': True}
+
+    def test_verify_ssl_false_is_forwarded_not_dropped(self, captured_connect_kwargs, monkeypatch):
+        """False is meaningful — it must not be swallowed as falsy."""
+        monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
+        PlaidConnection(verify_ssl=False)
+        assert captured_connect_kwargs == {'verify_ssl': False}
+
     def test_token_provider_reaches_connect(self, captured_connect_kwargs, monkeypatch):
         monkeypatch.delenv('__PLAID_JUPYTER__', raising=False)
 

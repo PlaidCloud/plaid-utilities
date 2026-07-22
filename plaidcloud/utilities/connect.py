@@ -58,10 +58,13 @@ class PlaidConnection(Connect, Connection):
         step_id = kwargs.pop('step_id', 'step_id_not_set')
         workspace_uuid = kwargs.pop('workspace_uuid', '')
         # Named explicitly rather than forwarding **kwargs: xl_path is consumed by this class
-        # below, and Connect would reject it.
+        # below, and Connect would reject it. verify_ssl belongs in this unconditional set
+        # rather than the rpc_uri-gated one below: PlaidConfig applies it after choosing a
+        # configuration source, so it overrides whichever source supplied the rest.
+        # (plaidcloud-rpc config.py: `if verify_ssl is not None: self.verify_ssl = ...`)
         rpc_config = {
             name: kwargs.pop(name)
-            for name in ('rpc_uri', 'auth_token', 'token_provider')
+            for name in ('rpc_uri', 'auth_token', 'token_provider', 'verify_ssl')
             if name in kwargs
         }
         if rpc_config.get('rpc_uri'):
