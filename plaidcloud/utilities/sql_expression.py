@@ -126,7 +126,7 @@ def _attr_off_func(node):
 _NEGATED_COMPARISON_HINTS = {
     ast.Eq: '`a != b` (or `~(a == b)` for an explicit SQL NOT)',
     ast.NotEq: '`a == b`',
-    ast.Is: '`a.isnot(None)`',
+    ast.Is: '`a.is_not(None)`',
     ast.IsNot: '`a.is_(None)`',
     ast.In: '`a.notin_([...])`',
     ast.NotIn: '`a.in_([...])`',
@@ -141,8 +141,16 @@ _NEGATED_COMPOUND_HINT = (
     'whole clause (a plain `not (... or ...)` collapses before the NOT applies)'
 )
 
+# The comparison is reached through a wrapper (a builtin call, an index, a
+# concat) that turns it into a plain Python value, so no per-operator steer is
+# meaningful — point at the SQL-NOT combinators over whatever clause was meant.
+_NEGATED_WRAPPED_HINT = (
+    '`not_(...)` / `~(...)` over the SQL clause you meant to negate — the `not` '
+    'here collapses it to a Python value instead of building a SQL NOT'
+)
 
-def _is_static_constant(node):
+
+def _is_static_constant(node, safe_dict=None):
     """True when a node evaluates to a pure Python value with no SQL clause.
 
     Literals, literal collections, and arithmetic over them — plus a call to
@@ -153,26 +161,35 @@ def _is_static_constant(node):
     constant. This is what keeps a comparison of pure constants (`not ('ABC' ==
     'CORP')`, `not (len('abc') == 3)`) out of the negated-collapse rejection
     without exempting anything that touches a column.
+
+    A builtin name shadowed in ``safe_dict`` (an alias/extra_key literally
+    named `sum`/`len`/…) is NOT treated as pure — eval() resolves the global
+    before `__builtins__`, so the call hits the shadowing object, not the
+    builtin.
     """
     if isinstance(node, ast.Constant):
         return True
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-        return all(_is_static_constant(elt) for elt in node.elts)
+        return all(_is_static_constant(elt, safe_dict) for elt in node.elts)
     if isinstance(node, ast.UnaryOp):
-        return _is_static_constant(node.operand)
+        return _is_static_constant(node.operand, safe_dict)
     if isinstance(node, ast.BinOp):
-        return _is_static_constant(node.left) and _is_static_constant(node.right)
+        return (_is_static_constant(node.left, safe_dict)
+                and _is_static_constant(node.right, safe_dict))
+    if isinstance(node, ast.BoolOp):
+        return all(_is_static_constant(value, safe_dict) for value in node.values)
     if isinstance(node, ast.Call):
         return (
             isinstance(node.func, ast.Name)
             and node.func.id in _SAFE_BUILTINS
+            and node.func.id not in (safe_dict or {})
             and not node.keywords
-            and all(_is_static_constant(arg) for arg in node.args)
+            and all(_is_static_constant(arg, safe_dict) for arg in node.args)
         )
     return False
 
 
-def _comparison_collapses(compare):
+def _comparison_collapses(compare, safe_dict=None):
     """True when `not (<compare>)` would silently collapse to a constant.
 
     Its first operator must be one of the bool()-returning kinds (only op1
@@ -185,26 +202,82 @@ def _comparison_collapses(compare):
     if type(compare.ops[0]) not in _NEGATED_COMPARISON_HINTS:
         return False
     operands = [compare.left, *compare.comparators]
-    return not all(_is_static_constant(operand) for operand in operands)
+    return not all(_is_static_constant(operand, safe_dict) for operand in operands)
 
 
-def _negated_comparison_hint(node):
+def _boolness_bearing_comparisons(operand, safe_dict=None):
+    """Comparisons whose collapse the enclosing `not` would carry to its bool(),
+    plus whether an `and`/`or` joins them and whether a wrapper sits in between.
+
+    Descends the operand with these boundaries:
+
+    * A ``Compare`` is recorded but not descended into — its own operands are
+      evaluated to values *before* the comparison, so a `BoolOp`/`Call` inside
+      a comparator (`table.a == (1 and 2)`) neither adds a comparison nor makes
+      the negation compound.
+    * A ``Call`` to a pure-Python builtin (`_SAFE_BUILTINS`, unless shadowed in
+      ``safe_dict``) is transparent — `bool`/`str`/`len`/`min`/… hand back a
+      plain Python value, so a comparison in their args or keywords still
+      collapses. Descend into both. Any OTHER call — the clause builders
+      `case(...)`/`func.*(...)`/`.in_(...)` — is a leaf: it builds a fresh SQL
+      clause whose bool() raises loudly, so `not <that call>` is left to raise.
+    * `and`/`or` (recorded via ``saw_boolop``) and a nested `not` pass their
+      operand through directly. Anything else — indexing/concatenating a literal
+      collection (`(a == 1, b == 2)[0]`), a builtin call, etc. — is a *wrapper*
+      (``saw_wrapper``): the comparison still collapses, but through a shape for
+      which a per-operator steer would be misleading.
+
+    Returns (comparisons, saw_boolop, saw_wrapper).
+    """
+    comparisons = []
+    saw_boolop = False
+    saw_wrapper = False
+
+    def visit(node):
+        nonlocal saw_boolop, saw_wrapper
+        if isinstance(node, ast.Compare):
+            comparisons.append(node)
+            return
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else None
+            if name in _SAFE_BUILTINS and name not in (safe_dict or {}):
+                saw_wrapper = True
+                for child in (*node.args, *(kw.value for kw in node.keywords)):
+                    visit(child)
+            return
+        if isinstance(node, ast.BoolOp):
+            saw_boolop = True
+            for value in node.values:
+                visit(value)
+            return
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            visit(node.operand)
+            return
+        saw_wrapper = True
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(operand)
+    return comparisons, saw_boolop, saw_wrapper
+
+
+def _negated_comparison_hint(node, safe_dict=None):
     """For a silently-collapsing `not (...)`, the steer to give; None otherwise.
 
-    Walks the operand for any comparison that would collapse (`_comparison_
-    collapses`). A bare comparison gets the specific per-op steer; comparisons
-    joined by `and`/`or` get the compound steer, since the per-op replacement
-    can't rebuild the whole clause.
+    A bare comparison gets the specific per-op steer; comparisons joined by
+    `and`/`or` get the compound steer; a comparison reached through a wrapper
+    (a builtin call, an index) gets the generic not_()/~() steer, since neither
+    a per-op nor an and_/or_ replacement describes what to write there.
     """
     if not (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not)):
         return None
-    collapsing = [
-        child for child in ast.walk(node.operand)
-        if isinstance(child, ast.Compare) and _comparison_collapses(child)
-    ]
+    comparisons, saw_boolop, saw_wrapper = _boolness_bearing_comparisons(node.operand, safe_dict)
+    collapsing = [c for c in comparisons if _comparison_collapses(c, safe_dict)]
     if not collapsing:
         return None
-    if any(isinstance(child, ast.BoolOp) for child in ast.walk(node.operand)):
+    if saw_wrapper:
+        return _NEGATED_WRAPPED_HINT
+    if saw_boolop:
         return _NEGATED_COMPOUND_HINT
     return _NEGATED_COMPARISON_HINTS[type(collapsing[0].ops[0])]
 
@@ -274,21 +347,35 @@ def _assert_safe_expression(source, safe_dict=None):
     blocking every underscore attr — safe, but it will reject an expression
     over a legitimately underscore-named column.
     """
-    underscore_columns = _underscore_columns_by_alias(safe_dict)
+    # Built lazily on the first underscore-led attribute — deriving the per-alias
+    # column map (a getattr identity probe per underscore column) is wasted work
+    # on the common expression that has no underscore attribute at all.
+    underscore_columns = None
+
+    def is_underscore_column(attr_node):
+        nonlocal underscore_columns
+        if underscore_columns is None:
+            underscore_columns = _underscore_columns_by_alias(safe_dict)
+        return _attr_is_column(attr_node, underscore_columns)
+
     try:
         tree = ast.parse(source, mode='eval')
     except SyntaxError:
         return
 
     for node in ast.walk(tree):
-        negated_hint = _negated_comparison_hint(node)
+        negated_hint = _negated_comparison_hint(node, safe_dict)
         if negated_hint:
-            # These are the `not` shapes that fail silently instead of loudly:
-            # the inner comparison evaluates to a plain Python bool, so it
-            # never reaches the SQL and the branch becomes a constant
-            # (`CASE WHEN true THEN ...`). Every other `not` raises "Boolean
-            # value of this clause is not defined", which is safe. Reject the
-            # silent ones rather than let them bake wrong results into a query.
+            # `not (<comparison>)` where the comparison returns a plain Python
+            # bool rather than a SQL clause: the branch collapses to a constant
+            # (`CASE WHEN true THEN ...`) and the comparison never reaches the
+            # query. Every *other* `not` shape raises "Boolean value of this
+            # clause is not defined" — loud and safe — so the guard leaves it
+            # alone. NB the same silent collapse also afflicts a bare `a == 1
+            # and b == 2` / `in (...)`, which this guard does NOT touch: those
+            # shipped for years (ast.Not did not), so tightening them is a
+            # behaviour change tracked separately (sc-23189), not part of this
+            # regression fix. Reject only what restoring ast.Not newly reopened.
             raise SQLExpressionError(
                 'Error in expression:\n    {}\n'
                 '`not (...)` around a comparison does not build a SQL NOT — on '
@@ -315,7 +402,7 @@ def _assert_safe_expression(source, safe_dict=None):
             # named `__x` is reachable via get_column(table, '__x').
             if node.attr.startswith('_') and not (
                 not node.attr.startswith('__')
-                and (_attr_off_func(node) or _attr_is_column(node, underscore_columns))
+                and (_attr_off_func(node) or is_underscore_column(node))
             ):
                 raise SQLExpressionError(
                     'Error in expression:\n    {}\nAccess to attribute {!r} is not permitted.'.format(

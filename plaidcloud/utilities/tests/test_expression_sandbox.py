@@ -295,7 +295,7 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         for expr, steer in (
             ("not (table.a == 1)", '!='),
             ("not (table.a != 1)", '=='),
-            ("not (table.a is None)", 'isnot'),
+            ("not (table.a is None)", 'is_not'),
             ("not (table.a is not None)", 'is_'),
             ("not (table.a in (1, 2))", 'notin_'),
             ("not (table.a not in (1, 2))", 'in_'),
@@ -369,6 +369,75 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         self.assertTrue(se.eval_rule("not ('{v}' == 'CORP')", {'v': 'ABC'}, [table]))
         self.assertTrue(se.eval_rule("not ('{v}' in ('CORP', 'LLC'))", {'v': 'ABC'}, [table]))
 
+    def test_comparison_consumed_by_a_call_is_not_flagged(self):
+        # A comparison handed to case()/func.* is used AS a SQL clause, not
+        # bool()'d — `not case((a == 1, ...))` raises loudly at runtime, it does
+        # not collapse. The guard must not descend into the call and mistake the
+        # inner comparison for a negated-collapse (sc-23186 re-review). It stays
+        # out of the guard and is left to raise at eval.
+        table = _table()
+        for expr in (
+            "not case((table.a == 1, true), else_=false)",
+            "not func.coalesce(table.a == 1, 0)",
+        ):
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr, se.get_safe_dict([table]))
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(expr, {}, [table])
+
+    def test_boolop_inside_a_comparator_gets_the_bare_steer(self):
+        # `not (table.a == (1 and 2))` is a BARE comparison — the `and` sits in
+        # the comparator and is evaluated to a value before the `==`, so the
+        # negation collapses like any `a == b`. It must get the `!=` steer, not
+        # the compound `not_(...)` one (the BoolOp does not join comparisons).
+        table = _table()
+        with self.assertRaises(se.SQLExpressionError) as ctx:
+            se.eval_expression("not (table.a == (1 and 2))", {}, [table])
+        self.assertIn('!=', str(ctx.exception))
+        self.assertNotIn('not_', str(ctx.exception))
+
+    def test_negation_of_a_column_comparison_reached_through_a_wrapper(self):
+        # A comparison reaches the outer `not` through a wrapper that turns it
+        # into a Python value: indexing/concatenating a literal collection
+        # (returns a member clause unchanged) or a pure-Python builtin call
+        # (bool/str/len/min/max/sum — scalarises, incl. via a keyword arg). All
+        # collapse and must be rejected; a per-operator steer would be
+        # misleading, so the message points at not_()/~() (sc-23186 re-review).
+        table = _table()
+        for expr in (
+            "not (table.a == 1, table.b == 2)[0]",
+            "not [table.a == 1, table.b == 2][1]",
+            "not (table.a == 1,)[-1]",
+            "not ([table.a == 1] + [table.b == 2])[0]",
+            "not bool(table.a == 1)",
+            "not str(table.a == 1)",
+            "not len([table.a == 1])",
+            "not min([table.a == 1])",
+            "not max([table.a == 1])",
+            "not sum([table.a == 1])",
+            "not bool(table.a == 1 or table.b == 2)",
+            "not str(object=table.a == 1)",  # keyword arg must not bypass
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn('not_(...)', str(ctx.exception))
+
+    def test_shadowed_builtin_call_is_not_treated_as_transparent(self):
+        # A builtin name bound to a ColumnCollection (`bool`/`str` shadowed by an
+        # alias) is NOT the builtin — calling it raises loudly, so the guard must
+        # leave it a leaf, not descend into it looking for a collapse.
+        shadowed = se.get_safe_dict([], tables_by_alias={'bool': _table()})
+        se._assert_safe_expression("not bool(table.a == 1)", shadowed)
+
+    def test_negation_of_pure_constant_boolop_operands_is_left_alone(self):
+        # `(1 and 2)` is a pure-constant operand (evaluates to 2), so the whole
+        # comparison is constant and must not be rejected.
+        table = _table()
+        self.assertIsInstance(
+            se.eval_expression("not ((1 and 2) == (3 or 4))", {}, [table]), bool,
+        )
+
     def test_negation_over_a_column_via_a_builtin_still_rejected(self):
         # A builtin argument that references a column is NOT a constant —
         # `sum([table.a])` is the column, so `not (... == 0)` still collapses
@@ -377,6 +446,17 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         table = _table()
         with self.assertRaises(se.SQLExpressionError):
             se.eval_expression("not (sum([table.a, table.b]) == 0)", {}, [table])
+
+    def test_builtin_shadowed_by_an_alias_is_not_a_constant(self):
+        # eval() resolves the `len` global before __builtins__, so an alias
+        # named `len` makes `len(...)` call the ColumnCollection, not the
+        # builtin. The constant exemption must not treat it as pure — otherwise
+        # a `not (len(...) == x)` over the shadow would ride through.
+        shadowed = se.get_safe_dict([], tables_by_alias={'len': _table()})
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("not (len('abc') == 3)", shadowed)
+        # Unshadowed, the same expression is the exempt pure-constant case.
+        se._assert_safe_expression("not (len('abc') == 3)", se.get_safe_dict([_table()]))
 
     def test_other_not_shapes_still_fail_loudly_at_runtime(self):
         # The rest of the `not` family raises "Boolean value of this clause is
@@ -419,6 +499,26 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         se._assert_safe_expression("table1._MajorAccountFlag", safe)
         with self.assertRaises(se.SQLExpressionError):
             se._assert_safe_expression("table2._MajorAccountFlag", safe)
+
+    def test_underscore_column_exempt_via_tables_by_alias(self):
+        # frame_join_multi exposes each join source by alias (`mdp.col`), not by
+        # positional `table1`/`table2`. The exemption is keyed on every alias in
+        # the eval context, so an underscore column reached through an alias key
+        # is exempt too — and an internal-colliding name via the alias stays
+        # blocked.
+        safe = se.get_safe_dict([], tables_by_alias={'mdp': _table()})
+        se._assert_safe_expression("func.rtrim(mdp._MajorAccountFlag)", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("mdp._index", safe)
+
+    def test_underscore_column_exempt_via_extra_keys_result(self):
+        # The post-filter (HAVING) path binds the query result as `result` in
+        # extra_keys — a ColumnCollection like any alias, so its underscore
+        # columns are exempt and its internals stay blocked.
+        safe = se.get_safe_dict([], extra_keys={'result': _table().columns})
+        se._assert_safe_expression("func.rtrim(result._MajorAccountFlag)", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("result._index", safe)
 
     def test_underscore_column_blocked_without_the_eval_context(self):
         # No safe_dict = no way to tell column from internal, so the guard
