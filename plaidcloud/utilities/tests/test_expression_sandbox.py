@@ -26,6 +26,8 @@ def _table():
         sqlalchemy.Column('a', sqlalchemy.INTEGER),
         sqlalchemy.Column('b', sqlalchemy.INTEGER),
         sqlalchemy.Column('flag', sqlalchemy.BOOLEAN),
+        # Customers really do have underscore-led column names (sc-23186).
+        sqlalchemy.Column('_MajorAccountFlag', sqlalchemy.TEXT),
         schema='anlz',
     )
 
@@ -115,6 +117,17 @@ LEGIT = [
     "sqlalchemy.select(func.count(func.distinct(get_column(table, 'a')))).subquery()",
 ]
 
+# Saved customer expressions the first allowlist broke (sc-23186): `is`,
+# `is not` and `not` were never deliberately excluded, and a step that had run
+# for years started failing with "Is is not permitted in an expression."
+IDENTITY_AND_NOT = [
+    "get_column(table, 'a') is None",
+    "get_column(table, 'a') is not None",
+    "not get_column(table, 'a')",
+    "case((get_column(table, 'a') is None, false), else_=table.b)",
+    "table.a is None and table.b is not None",
+]
+
 
 class TestExpressionSandboxBlocks(unittest.TestCase):
     def test_guard_rejects_every_attack(self):
@@ -198,6 +211,320 @@ class TestExpressionSandboxAllows(unittest.TestCase):
         self.assertEqual(se.eval_expression("get_column(table, 'a')", {}, [table]).name, 'a')
         # Produces a real SQLAlchemy element, not a Python value.
         self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_identity_and_not_operators_pass_the_guard(self):
+        # sc-23186: pure operators, no escape surface — the sandbox must not
+        # veto them just because they are usually a semantic no-op on a Column.
+        for expr in IDENTITY_AND_NOT:
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr)
+
+    def test_case_with_is_none_branch_still_evaluates(self):
+        # The exact customer shape (sc-23186), end to end through eval.
+        table = _table()
+        result = se.eval_expression(
+            "case((get_column(table, 'a') is None, false), else_=table.b)", {}, [table],
+        )
+        self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_is_none_on_a_column_is_a_dead_branch(self):
+        # Pins WHY `is None` is allowed but useless: Python identity against a
+        # Column is always False, so authors need `.is_(None)` for a real null
+        # test. If SQLAlchemy ever overloads this, the guidance changes.
+        table = _table()
+        self.assertFalse(se.eval_expression("get_column(table, 'a') is None", {}, [table]))
+        self.assertIsInstance(
+            se.eval_expression("get_column(table, 'a').is_(None)", {}, [table]),
+            sqlalchemy.sql.elements.ColumnElement,
+        )
+
+    def test_underscore_column_is_reachable_as_an_attribute(self):
+        # sc-23186: `func.rtrim(table._MajorAccountFlag)` is what the UI writes
+        # for an underscore-led column; the guard must not read it as an
+        # internals escape. Needs the eval context to tell column from internal.
+        table = _table()
+        result = se.eval_expression(
+            "func.rtrim(table._MajorAccountFlag)", {}, [table],
+        )
+        self.assertIsInstance(result, sqlalchemy.sql.elements.ColumnElement)
+
+    def test_underscore_internals_still_blocked_on_the_same_table(self):
+        # The exemption is column-name-scoped, not a blanket underscore pass:
+        # an internal that is NOT a column stays blocked, as does any chained
+        # underscore attr and every dunder.
+        table = _table()
+        safe = se.get_safe_dict([table])
+        for expr in (
+            "table._sa_instance_state",
+            "table._MajorAccountFlag._parententity",
+            "table.__class__",
+            "func.rtrim(table.a)._compiler_dispatch",
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(expr, safe)
+
+    def test_column_named_after_an_internal_does_not_expose_it(self):
+        # The exemption is by resolved identity, not by name: a column called
+        # `_index` does NOT shadow ColumnCollection._index, so allowing it by
+        # name would hand the expression SQLAlchemy internals (and, through
+        # `_all_columns[0].table.metadata`, the schema graph).
+        md = sqlalchemy.MetaData()
+        hostile = sqlalchemy.Table(
+            'analyzetable_h', md,
+            *[sqlalchemy.Column(n, sqlalchemy.TEXT)
+              for n in ('_index', '_collection', '_all_columns', '_colset')],
+            schema='anlz',
+        )
+        safe = se.get_safe_dict([hostile])
+        for expr in ('table._index', 'table._all_columns',
+                     'table._all_columns[0].table.metadata'):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError):
+                    se._assert_safe_expression(expr, safe)
+        # …and the column itself stays reachable the safe way.
+        se._assert_safe_expression("get_column(table, '_index')", safe)
+
+    def test_negated_comparisons_are_rejected_not_silently_collapsed(self):
+        # These `not` shapes do NOT raise: the inner comparison evaluates to a
+        # plain Python bool (eq/ne via BinaryExpression.__bool__, is/is not via
+        # Python identity, in/not in via tuple.__contains__), so the column
+        # vanishes from the SQL and the branch becomes `CASE WHEN true THEN
+        # ...`. Allowing ast.Not must not smuggle any of them in (sc-23186).
+        table = _table()
+        for expr, steer in (
+            ("not (table.a == 1)", '!='),
+            ("not (table.a != 1)", '=='),
+            ("not (table.a is None)", 'is_not'),
+            ("not (table.a is not None)", 'is_'),
+            ("not (table.a in (1, 2))", 'notin_'),
+            ("not (table.a not in (1, 2))", 'in_'),
+            ("not (table.a == 1 == table.b)", '!='),      # chained, risky op first
+            ("not not (table.a == 1)", '!='),             # double negation
+            ("case((not (table.a == 1), table.b), else_=0)", '!='),
+            ("func.coalesce(not (table.a == 1), 0)", '!='),
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn(steer, str(ctx.exception))
+
+    def test_chained_comparison_with_a_safe_first_op_is_left_to_raise(self):
+        # `not (a < b == c)` expands to `(a < b) and (b == c)`; `and` bool()s
+        # the LEFT side, so the `<` raises and nothing collapses. Flagging it
+        # would hand the author an unrelated `!=` steer for a `<` they wrote.
+        table = _table()
+        se._assert_safe_expression("not (table.a < 1 == table.b)", se.get_safe_dict([table]))
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("not (table.a < 1 == table.b)", {}, [table])
+
+    def test_compound_negation_is_rejected_with_a_compound_steer(self):
+        # `not (a == 1 or b == 2)` collapses just as silently as the bare shape
+        # — `and`/`or` bool() their operand and hand back a BinaryExpression,
+        # so the outer `not` still drops it to a constant — but the operand is
+        # a BoolOp, not a bare Compare. The guard has to walk into it, and the
+        # per-op steer can't rebuild the whole clause, so it steers to not_().
+        table = _table()
+        for expr in (
+            "not (table.a == 1 or table.b == 2)",
+            "not (table.a == 1 and table.b == 2)",
+            "case((not (table.a == 1 or table.b == 2), 1), else_=0)",
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn('not_', str(ctx.exception))
+
+    def test_compound_sql_not_steer_actually_works(self):
+        # The not_(and_/or_(...)) the compound message points at has to compile.
+        table = _table()
+        for expr in (
+            "not_(or_(table.a == 1, table.b == 2))",
+            "not_(and_(table.a == 1, table.b == 2))",
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]),
+                    sqlalchemy.sql.elements.ColumnElement,
+                )
+
+    def test_negation_of_pure_constants_is_left_alone(self):
+        # `not (<constant> == <constant>)` is correct Python — no column, so
+        # nothing collapses and there is nothing to reject (sc-23186). It comes
+        # up for real once apply_variables has substituted a saved rule's
+        # operands into literals. Pure builtins over literals count as constant
+        # too (they cannot return a clause).
+        table = _table()
+        for expr in (
+            "not ('ABC' == 'CORP')",
+            "not ('ABC' in ('CORP', 'LLC'))",
+            "not (len('abc') == 3)",
+            "not (1 == 2 or 3 == 4)",
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]), bool,
+                )
+        # Same shape reached through eval_rule after variable substitution.
+        self.assertTrue(se.eval_rule("not ('{v}' == 'CORP')", {'v': 'ABC'}, [table]))
+        self.assertTrue(se.eval_rule("not ('{v}' in ('CORP', 'LLC'))", {'v': 'ABC'}, [table]))
+
+    def test_comparison_consumed_by_a_call_is_not_flagged(self):
+        # A comparison handed to case()/func.* is used AS a SQL clause, not
+        # bool()'d — `not case((a == 1, ...))` raises loudly at runtime, it does
+        # not collapse. The guard must not descend into the call and mistake the
+        # inner comparison for a negated-collapse (sc-23186 re-review). It stays
+        # out of the guard and is left to raise at eval.
+        table = _table()
+        for expr in (
+            "not case((table.a == 1, true), else_=false)",
+            "not func.coalesce(table.a == 1, 0)",
+        ):
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr, se.get_safe_dict([table]))
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(expr, {}, [table])
+
+    def test_boolop_inside_a_comparator_gets_the_bare_steer(self):
+        # `not (table.a == (1 and 2))` is a BARE comparison — the `and` sits in
+        # the comparator and is evaluated to a value before the `==`, so the
+        # negation collapses like any `a == b`. It must get the `!=` steer, not
+        # the compound `not_(...)` one (the BoolOp does not join comparisons).
+        table = _table()
+        with self.assertRaises(se.SQLExpressionError) as ctx:
+            se.eval_expression("not (table.a == (1 and 2))", {}, [table])
+        self.assertIn('!=', str(ctx.exception))
+        self.assertNotIn('not_', str(ctx.exception))
+
+    def test_negation_of_a_column_comparison_reached_through_a_wrapper(self):
+        # A comparison reaches the outer `not` through a wrapper that turns it
+        # into a Python value: indexing/concatenating a literal collection
+        # (returns a member clause unchanged) or a pure-Python builtin call
+        # (bool/str/len/min/max/sum — scalarises, incl. via a keyword arg). All
+        # collapse and must be rejected; a per-operator steer would be
+        # misleading, so the message points at not_()/~() (sc-23186 re-review).
+        table = _table()
+        for expr in (
+            "not (table.a == 1, table.b == 2)[0]",
+            "not [table.a == 1, table.b == 2][1]",
+            "not (table.a == 1,)[-1]",
+            "not ([table.a == 1] + [table.b == 2])[0]",
+            "not bool(table.a == 1)",
+            "not str(table.a == 1)",
+            "not len([table.a == 1])",
+            "not min([table.a == 1])",
+            "not max([table.a == 1])",
+            "not sum([table.a == 1])",
+            "not bool(table.a == 1 or table.b == 2)",
+            "not str(object=table.a == 1)",  # keyword arg must not bypass
+        ):
+            with self.subTest(expr=expr):
+                with self.assertRaises(se.SQLExpressionError) as ctx:
+                    se.eval_expression(expr, {}, [table])
+                self.assertIn('not_(...)', str(ctx.exception))
+
+    def test_shadowed_builtin_call_is_not_treated_as_transparent(self):
+        # A builtin name bound to a ColumnCollection (`bool`/`str` shadowed by an
+        # alias) is NOT the builtin — calling it raises loudly, so the guard must
+        # leave it a leaf, not descend into it looking for a collapse.
+        shadowed = se.get_safe_dict([], tables_by_alias={'bool': _table()})
+        se._assert_safe_expression("not bool(table.a == 1)", shadowed)
+
+    def test_negation_of_pure_constant_boolop_operands_is_left_alone(self):
+        # `(1 and 2)` is a pure-constant operand (evaluates to 2), so the whole
+        # comparison is constant and must not be rejected.
+        table = _table()
+        self.assertIsInstance(
+            se.eval_expression("not ((1 and 2) == (3 or 4))", {}, [table]), bool,
+        )
+
+    def test_negation_over_a_column_via_a_builtin_still_rejected(self):
+        # A builtin argument that references a column is NOT a constant —
+        # `sum([table.a])` is the column, so `not (... == 0)` still collapses
+        # and must stay rejected. The constant exemption must not widen to any
+        # builtin call, only to calls whose arguments are themselves constants.
+        table = _table()
+        with self.assertRaises(se.SQLExpressionError):
+            se.eval_expression("not (sum([table.a, table.b]) == 0)", {}, [table])
+
+    def test_builtin_shadowed_by_an_alias_is_not_a_constant(self):
+        # eval() resolves the `len` global before __builtins__, so an alias
+        # named `len` makes `len(...)` call the ColumnCollection, not the
+        # builtin. The constant exemption must not treat it as pure — otherwise
+        # a `not (len(...) == x)` over the shadow would ride through.
+        shadowed = se.get_safe_dict([], tables_by_alias={'len': _table()})
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("not (len('abc') == 3)", shadowed)
+        # Unshadowed, the same expression is the exempt pure-constant case.
+        se._assert_safe_expression("not (len('abc') == 3)", se.get_safe_dict([_table()]))
+
+    def test_other_not_shapes_still_fail_loudly_at_runtime(self):
+        # The rest of the `not` family raises "Boolean value of this clause is
+        # not defined" — loud and safe, so the guard leaves them alone.
+        table = _table()
+        for expr in ("not table.a", "not (table.a < 1)", "not table.a.in_([1, 2])"):
+            with self.subTest(expr=expr):
+                se._assert_safe_expression(expr, se.get_safe_dict([table]))
+                with self.assertRaises(se.SQLExpressionError):
+                    se.eval_expression(expr, {}, [table])
+
+    def test_sql_not_of_an_equality_still_works(self):
+        # The steer the error message gives has to actually work.
+        table = _table()
+        for expr in ("table.a != 1", "~(table.a == 1)", "not_(table.a == 1)"):
+            with self.subTest(expr=expr):
+                self.assertIsInstance(
+                    se.eval_expression(expr, {}, [table]),
+                    sqlalchemy.sql.elements.ColumnElement,
+                )
+
+    def test_rule_path_gets_the_same_relaxations(self):
+        # eval_rule shares the guard but is a separate call site — both had to
+        # be threaded with the eval context, so pin the positive path here too.
+        table = _table()
+        self.assertFalse(se.eval_rule("get_column(table, 'a') is None", {}, [table]))
+        self.assertIsInstance(
+            se.eval_rule("func.rtrim(table._MajorAccountFlag)", {}, [table]),
+            sqlalchemy.sql.elements.ColumnElement,
+        )
+
+    def test_cross_alias_underscore_column_is_rejected(self):
+        # The exemption is per alias: table2 does not own the column, so
+        # `table2._MajorAccountFlag` must not ride in on table1's columns.
+        md = sqlalchemy.MetaData()
+        other = sqlalchemy.Table(
+            'analyzetable_o', md, sqlalchemy.Column('z', sqlalchemy.INTEGER), schema='anlz',
+        )
+        safe = se.get_safe_dict([_table(), other])
+        se._assert_safe_expression("table1._MajorAccountFlag", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("table2._MajorAccountFlag", safe)
+
+    def test_underscore_column_exempt_via_tables_by_alias(self):
+        # frame_join_multi exposes each join source by alias (`mdp.col`), not by
+        # positional `table1`/`table2`. The exemption is keyed on every alias in
+        # the eval context, so an underscore column reached through an alias key
+        # is exempt too — and an internal-colliding name via the alias stays
+        # blocked.
+        safe = se.get_safe_dict([], tables_by_alias={'mdp': _table()})
+        se._assert_safe_expression("func.rtrim(mdp._MajorAccountFlag)", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("mdp._index", safe)
+
+    def test_underscore_column_exempt_via_extra_keys_result(self):
+        # The post-filter (HAVING) path binds the query result as `result` in
+        # extra_keys — a ColumnCollection like any alias, so its underscore
+        # columns are exempt and its internals stay blocked.
+        safe = se.get_safe_dict([], extra_keys={'result': _table().columns})
+        se._assert_safe_expression("func.rtrim(result._MajorAccountFlag)", safe)
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("result._index", safe)
+
+    def test_underscore_column_blocked_without_the_eval_context(self):
+        # No safe_dict = no way to tell column from internal, so the guard
+        # stays closed rather than guessing.
+        with self.assertRaises(se.SQLExpressionError):
+            se._assert_safe_expression("func.rtrim(table._MajorAccountFlag)")
 
     def test_facet_distinct_count_subquery_evaluates(self):
         # sc-23125: the Table Explorer facet's runtime-generated distinct-count
