@@ -1298,6 +1298,59 @@ class TestGetSelectQuery(TestSQLExpression):
             se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, limit_target_start=0, limit_target_end=0),
         )
 
+    def test_config_present_but_null_limit_uses_default(self):
+        # A step config that carries limit_target_end/start explicitly set to null
+        # (rather than omitting the key) used to raise TypeError on `end - start`.
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table], self.source_columns, [self.target_column], [],
+                config={'use_target_slicer': True, 'limit_target_start': None, 'limit_target_end': None},
+            ),
+            se.get_select_query(
+                [self.table], self.source_columns, [self.target_column], [],
+                config={'use_target_slicer': True},
+            ),
+        )
+
+    def test_config_present_but_null_matches_omitted_key(self):
+        # Every fill_in-guarded param treats a present-but-null config value as absent.
+        # use_target_slicer is forced on as an argument so the limit block really runs —
+        # taking it from the null config would skip the block and make this vacuous.
+        null_config = {
+            name: None
+            for name in (
+                'aggregate', 'having', 'use_target_slicer', 'limit_target_start',
+                'limit_target_end', 'distinct', 'count', 'disable_variables',
+                'aggregation_type',
+            )
+        }
+        self.assertEquivalent(
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, config=null_config),
+            se.get_select_query([self.table], self.source_columns, [self.target_column], [], use_target_slicer=True, config={}),
+        )
+
+    def test_config_present_but_null_aggregation_type_still_groups(self):
+        # aggregation_type is the only one of the nine not consumed by truthiness — it
+        # drives the rollup/sets/cube equality chain. It is also the only one whose
+        # signature default is not None ('group'), so its config value is reachable only
+        # when the caller passes the argument as None explicitly. Assert the emitted
+        # GROUP BY so this exercises the chain rather than comparing two no-ops.
+        aggregated = [self.groupby_column_1, self.sum_column_2]
+        query = se.get_select_query(
+            [self.table], self.source_columns, aggregated, [],
+            aggregation_type=None, config={'aggregate': True, 'aggregation_type': None},
+        )
+        self.assertIn('GROUP BY', compiled(query)[0])
+        # Compared against an explicit 'group', not against another null, so the
+        # assertion pins plain grouping rather than just "both sides agree".
+        self.assertEquivalent(
+            query,
+            se.get_select_query(
+                [self.table], self.source_columns, aggregated, [],
+                aggregation_type='group', config={'aggregate': True},
+            ),
+        )
+
     def test_order(self):
         # everything is applied in the right order
         groupby_column_1_new = {'target': 'Category', 'source': 'Column1', 'dtype': 'text', 'agg': 'group'}
