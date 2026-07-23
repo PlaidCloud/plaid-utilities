@@ -1791,6 +1791,25 @@ class TestAlteryxDialectAdditionsDatabend(DatabendTest):
         with self.assertRaises(sqlalchemy.exc.CompileError):
             self._sql(sqlalchemy.func.titlecase('a b'))
 
+    def test_string_agg_without_separator_databend(self):
+        # Default/Databend path is a pure passthrough to the native string_agg.
+        self.assertEqual('string_agg(c)',
+                         self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'))))
+
     def test_array_tail_renders_slice_on_databend(self):
         self.assertEqual("slice(split('a-b', '-'), 2)",
                          self._sql(sqlalchemy.func.array_tail(sqlalchemy.func.split('a-b', '-'), 2)))
+
+
+
+class TestTitlecaseUnspecializedDialect(unittest.TestCase):
+    """StarRocks is the only dialect with a titlecase specialization (initcap); the
+    bare default must fail loud for every other target so a third dialect cannot
+    silently reintroduce the literal titlecase() render."""
+
+    def test_raises_on_a_dialect_without_a_specialization(self):
+        import sqlalchemy, sqlalchemy.exc
+        from sqlalchemy.dialects import postgresql
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            str(sqlalchemy.func.titlecase('a b').compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
