@@ -1124,6 +1124,26 @@ class TestGetSelectQuery(TestSQLExpression):
             ).group_by(sqlalchemy.func.cube(self.from_clause(self.groupby_column_1, aggregate=False, cast=False))),
         )
 
+    def test_special_aggregation_with_no_grouping_columns(self):
+        # ROLLUP()/CUBE()/GROUPING SETS() with an empty argument list is invalid SQL —
+        # Postgres rejects it with 'syntax error at or near ")"'. It is reachable whenever
+        # a caller aggregates but no target column carries agg 'group'/'group_null', as
+        # frame_join_anti's existence subquery does. Fall back to plain grouping, which
+        # emits no GROUP BY at all.
+        no_grouping_columns = [{'source': 'Column1', 'target': 'Column1', 'dtype': 'text'}]
+        plain = se.get_select_query(
+            [self.table], self.source_columns, no_grouping_columns, [],
+            aggregate=True, aggregation_type='group',
+        )
+        for aggregation_type in ('rollup', 'sets', 'cube'):
+            with self.subTest(aggregation_type=aggregation_type):
+                query = se.get_select_query(
+                    [self.table], self.source_columns, no_grouping_columns, [],
+                    aggregate=True, aggregation_type=aggregation_type,
+                )
+                self.assertNotIn('GROUP BY', compiled(query)[0])
+                self.assertEquivalent(query, plain)
+
     def test_aggregate_false(self):
         # don't group by if aggregate is turned off
         self.assertEquivalent(
