@@ -1774,6 +1774,88 @@ for _fn_name, _unit in _SNOWFLAKE_DATE_ADD_FUNCS.items():
     _register_snowflake_dateadd(globals()[_fn_name], _unit)
 
 
+class array_tail(GenericFunction):
+    """array_tail(array, offset): the array from 1-based `offset` to the end.
+
+    Named rather than reusing `slice` because SQLAlchemy already registers that
+    name for the PostgreSQL hstore slice function.
+    """
+    name = 'array_tail'
+    inherit_cache = True
+
+@compiles(array_tail)
+def compile_array_tail(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'slice({rendered})'
+
+@compiles(array_tail, 'starrocks')
+def compile_array_tail_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'array_slice({rendered})'
+
+
+class string_agg(GenericFunction):
+    name = 'string_agg'
+    inherit_cache = True
+
+@compiles(string_agg, 'starrocks')
+def compile_string_agg_starrocks(element, compiler, **kw):
+    # StarRocks has no string_agg; group_concat is the equivalent, but it takes
+    # the delimiter as a SEPARATOR clause — passing it as a second argument
+    # concatenates it onto every value instead ('a-,b-,c-' rather than 'a-b-c').
+    value, *separator = list(element.clauses)
+    rendered = compiler.process(value, **kw)
+    if separator:
+        rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
+    return f'group_concat({rendered})'
+
+
+class titlecase(GenericFunction):
+    """Alteryx TitleCase() -- upper-case the first letter of each word."""
+    name = 'titlecase'
+    inherit_cache = True
+
+@compiles(titlecase, 'starrocks')
+def compile_titlecase_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'initcap({rendered})'
+
+
+class median(GenericFunction):
+    """Alteryx Median aggregate."""
+    name = 'median'
+    inherit_cache = True
+
+@compiles(median, 'starrocks')
+def compile_median_starrocks(element, compiler, **kw):
+    # StarRocks has no median(); percentile_approx(col, 0.5) is the documented
+    # equivalent. Approximate, like Alteryx's own median on large inputs.
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'percentile_approx({rendered}, 0.5)'
+
+
+class any_(GenericFunction):
+    """Databend any() -- pick an arbitrary value from the group."""
+    name = 'any'
+    inherit_cache = True
+
+@compiles(any_, 'starrocks')
+def compile_any_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'any_value({rendered})'
+
+
+class array_to_string(GenericFunction):
+    """Databend array_to_string(array, sep); StarRocks spells it array_join."""
+    name = 'array_to_string'
+    inherit_cache = True
+
+@compiles(array_to_string, 'starrocks')
+def compile_array_to_string_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'array_join({rendered})'
+
+
 class to_string(GenericFunction):
     name = 'to_string'
     inherit_cache = True

@@ -1738,3 +1738,38 @@ class TestSnowflakeDefaultOk(unittest.TestCase):
         expr = sqlalchemy.func.regexp_substr('s', 'p')
         compiled = expr.compile(dialect=eng.dialect, compile_kwargs={"literal_binds": True})
         self.assertEqual("regexp_substr('s', 'p')", str(compiled))
+
+
+class TestAlteryxDialectAdditions(StarrocksTest):
+    """array_tail / array_to_string / string_agg / titlecase / median / any."""
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+
+    def test_array_tail_becomes_array_slice(self):
+        # Text To Columns overflow-to-last-field: array_to_string(array_tail(split(...), i), d)
+        self.assertEqual("array_slice(split('a-b', '-'), 2)",
+                         self._sql(sqlalchemy.func.array_tail(
+                             sqlalchemy.func.split('a-b', '-'), 2)))
+
+    def test_array_to_string_becomes_array_join(self):
+        self.assertEqual("array_join(split('a-b', '-'), '-')",
+                         self._sql(sqlalchemy.func.array_to_string(
+                             sqlalchemy.func.split('a-b', '-'), '-')))
+
+    def test_string_agg_becomes_group_concat_with_separator_clause(self):
+        # Passing the delimiter as a second argument concatenates it onto every
+        # value on StarRocks; it has to be a SEPARATOR clause.
+        self.assertEqual("group_concat(c SEPARATOR '-')",
+                         self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'), '-')))
+
+    def test_titlecase_becomes_initcap(self):
+        self.assertEqual("initcap('a b')", self._sql(sqlalchemy.func.titlecase('a b')))
+
+    def test_median_becomes_percentile_approx(self):
+        # StarRocks has no median(); percentile_approx(col, 0.5) is the equivalent.
+        self.assertEqual('percentile_approx(c, 0.5)',
+                         self._sql(sqlalchemy.func.median(sqlalchemy.column('c'))))
+
+    def test_any_becomes_any_value(self):
+        self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
