@@ -1287,6 +1287,41 @@ def compile_string_agg_starrocks(element, compiler, **kw):
     return f'group_concat({rendered})'
 
 
+class titlecase(GenericFunction):
+    """Alteryx TitleCase() -- upper-case the first letter of each word."""
+    name = 'titlecase'
+    inherit_cache = True
+
+@compiles(titlecase, 'starrocks')
+def compile_titlecase_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'initcap({rendered})'
+
+
+class median(GenericFunction):
+    """Alteryx Median aggregate."""
+    name = 'median'
+    inherit_cache = True
+
+@compiles(median, 'starrocks')
+def compile_median_starrocks(element, compiler, **kw):
+    # StarRocks has no median(); percentile_approx(col, 0.5) is the documented
+    # equivalent. Approximate, like Alteryx's own median on large inputs.
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'percentile_approx({rendered}, 0.5)'
+
+
+class any_(GenericFunction):
+    """Databend any() -- pick an arbitrary value from the group."""
+    name = 'any'
+    inherit_cache = True
+
+@compiles(any_, 'starrocks')
+def compile_any_starrocks(element, compiler, **kw):
+    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
+    return f'any_value({rendered})'
+
+
 class to_string(GenericFunction):
     name = 'to_string'
     inherit_cache = True

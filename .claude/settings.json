@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3.11 -c \"import ast; ast.parse\\(open\\(''plaidcloud/utilities/sqlalchemy_functions.py''\\).read\\(\\)\\); print\\(''sqlalchemy_functions.py: Syntax OK''\\)\")",
+      "Bash(python3.11 -c \"import ast; ast.parse\\(open\\(''plaidcloud/utilities/starrocks_compat.py''\\).read\\(\\)\\); print\\(''starrocks_compat.py: Syntax OK''\\)\")",
+      "Bash(python3 -c \"from plaidcloud.rpc.type_conversion import postgres_to_python_date_format; import inspect; print\\(inspect.getsource\\(postgres_to_python_date_format\\)\\)\")",
+      "Bash(find /Users/inviscid/Projects -name type_conversion.py -path */rpc/*)",
+      "Bash(python3 -c \"from plaidcloud.rpc.type_conversion import postgres_to_python_date_format; print\\(''found''\\)\")",
+      "Read(//opt/homebrew/lib/python3.11/site-packages/plaidcloud/rpc/**)",
+      "Bash(for t:*)",
+      "Bash(do echo:*)",
+      "Bash(grep -c \"\\\\b$t\\\\b\" /Users/inviscid/Projects/plaid-utilities/plaidcloud/utilities/starrocks_compat.py)",
+      "Bash(done)",
+      "Bash(python3 -m pytest plaidcloud/utilities/tests/test_starrocks_compat.py -v)",
+      "Bash(python3 -c \"import plaidcloud.utilities.starrocks_compat\")",
+      "Read(//Users/inviscid/Projects/plaid-utilities/**)",
+      "Bash(python3.11 -m pytest plaidcloud/utilities/tests/test_sqlalchemy_functions.py -x --tb=short)",
+      "Bash(python3.11 -m pytest plaidcloud/utilities/tests/test_sqlalchemy_functions.py -k \"TestZfill or TestNormalizeWhitespace or TestSliceString or TestTransactionTimestamp or TestStrpos or TestStringToArray or TestToNumber or TestLTrim or TestRTrim or TestToChar\" --tb=short)",
+      "Bash(git stash:*)",
+      "Bash(python3.11 -m pytest plaidcloud/utilities/tests/test_sqlalchemy_functions.py -k \"TestZfill or TestSliceString or TestToChar\" --tb=line)"
+    ]
+  }
+}

@@ -795,6 +795,18 @@ class TestConverterRenamesStarrocks(StarrocksTest):
                          self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'))))
 
 
+    def test_titlecase_becomes_initcap(self):
+        self.assertEqual("initcap('a b')", self._sql(sqlalchemy.func.titlecase('a b')))
+
+    def test_median_becomes_percentile_approx(self):
+        # StarRocks has no median(); percentile_approx(col, 0.5) is the equivalent.
+        self.assertEqual('percentile_approx(c, 0.5)',
+                         self._sql(sqlalchemy.func.median(sqlalchemy.column('c'))))
+
+    def test_any_becomes_any_value(self):
+        self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
+
+
 class TestArrayTailDatabend(DatabendTest):
     """array_tail keeps Databend's slice() spelling."""
 
