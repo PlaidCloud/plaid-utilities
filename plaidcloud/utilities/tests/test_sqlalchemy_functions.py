@@ -1763,6 +1763,10 @@ class TestAlteryxDialectAdditions(StarrocksTest):
         self.assertEqual("group_concat(c SEPARATOR '-')",
                          self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'), '-')))
 
+    def test_string_agg_without_separator(self):
+        self.assertEqual('group_concat(c)',
+                         self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'))))
+
     def test_titlecase_becomes_initcap(self):
         self.assertEqual("initcap('a b')", self._sql(sqlalchemy.func.titlecase('a b')))
 
@@ -1773,3 +1777,20 @@ class TestAlteryxDialectAdditions(StarrocksTest):
 
     def test_any_becomes_any_value(self):
         self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
+
+
+class TestAlteryxDialectAdditionsDatabend(DatabendTest):
+    """Default/Databend path -- notably titlecase, which Databend cannot render and
+    must fail loudly rather than emit a literal `titlecase(...)`."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_titlecase_raises_on_databend(self):
+        import sqlalchemy.exc
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            self._sql(sqlalchemy.func.titlecase('a b'))
+
+    def test_array_tail_renders_slice_on_databend(self):
+        self.assertEqual("slice(split('a-b', '-'), 2)",
+                         self._sql(sqlalchemy.func.array_tail(sqlalchemy.func.split('a-b', '-'), 2)))

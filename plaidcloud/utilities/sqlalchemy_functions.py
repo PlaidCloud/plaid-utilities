@@ -1820,6 +1820,16 @@ def compile_titlecase_starrocks(element, compiler, **kw):
     rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
     return f'initcap({rendered})'
 
+@compiles(titlecase, 'databend')
+def compile_titlecase_databend(element, compiler, **kw):
+    # Databend has only upper/lower -- no initcap and no per-word title-case
+    # primitive -- so there is no faithful rendering. Fail loudly rather than
+    # emit a literal `titlecase(...)` (an unknown-function error at run time) or a
+    # silently-wrong first-letter-only approximation. StarRocks has native initcap.
+    raise CompileError(
+        'titlecase (Alteryx TitleCase) has no Databend equivalent; run this workflow '
+        'on a StarRocks workspace, or replace the TitleCase call.')
+
 
 class median(GenericFunction):
     """Alteryx Median aggregate."""
