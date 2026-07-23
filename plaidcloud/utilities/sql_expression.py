@@ -1023,7 +1023,10 @@ def get_select_query(
         disable_variables:
         table_numbering_start:
         use_row_number_for_serial:
-        aggregation_type: One of 'group', 'rollup', 'sets'
+        aggregation_type: One of 'group', 'rollup', 'sets', 'cube'. Defaults to 'group',
+            so unlike the other config-backed parameters an omitted argument does not
+            fall through to config['aggregation_type'] — callers that want the step
+            config honoured must pass it explicitly.
         cast: if the query should attempt to cast source columns
         trim_zeroes (bool, optional): If True, removes trailing zeroes from numeric fields
 
@@ -1143,7 +1146,19 @@ def get_select_query(
                 and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
             )
         ]
-        if aggregation_type == 'rollup':
+        # ROLLUP()/CUBE()/GROUPING SETS() with an empty argument list is a SQL syntax
+        # error ('syntax error at or near ")"' — the empty grouping set is spelled
+        # 'GROUP BY ()'), whereas group_by() with no columns is a no-op that emits no
+        # GROUP BY at all. Aggregating with nothing to group on is legitimate: a caller
+        # can turn aggregation on and give every output column a real aggregate (sum,
+        # count, …) with none marked agg 'group'/'group_null', which leaves
+        # grouping_columns empty. That is not hypothetical — 22 workflow-runner call
+        # sites forward the step's aggregation_type (the join, union, upsert, lookup,
+        # loader, allocation and export steps among them), so any of them configured
+        # that way emits invalid SQL. Fall through to plain grouping instead.
+        if not grouping_columns:
+            select_query = select_query.group_by(*grouping_columns)
+        elif aggregation_type == 'rollup':
             select_query = select_query.group_by(sqlalchemy.func.rollup(*grouping_columns))
         elif aggregation_type == 'sets':
             select_query = select_query.group_by(sqlalchemy.func.grouping_sets(*grouping_columns))
