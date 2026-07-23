@@ -1032,9 +1032,12 @@ def get_select_query(
     """
 
     def fill_in(var, var_name, default):
-        if var is not None:
-            return var
-        return config.get(var_name, default)
+        # A config key that is present but null means "not supplied", the same as an
+        # explicit None argument. `config.get(var_name, default)` would return the None,
+        # because dict.get only applies its default when the key is absent.
+        if var is None:
+            var = config.get(var_name)
+        return default if var is None else var
 
     config = config or {}
     aggregate = fill_in(aggregate, 'aggregate', False)
