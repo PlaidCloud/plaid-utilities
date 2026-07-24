@@ -269,6 +269,17 @@ class import_col(GenericFunction):
 def compile_import_col(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
     if typed_staging.get():
+        if dtype.value == 'interval':
+            # Interval has no Arrow mapping, so the Parquet converter stages
+            # it as TEXT (parquet_conversion.stages_as_text) — the projection
+            # must keep the old else-branch cast (col::interval /
+            # to_interval), the verified old text-staging shape. A bare
+            # passthrough would rely on the engine implicitly casting string
+            # staging into an Interval temp column, which was never verified
+            # (sc-23281 m-5). No blank CASE: the converter already turned
+            # blanks into real NULLs.
+            return compiler.process(
+                import_cast(col, dtype.value, date_format.value, trailing_negs.value), **kw)
         # Bare column, not CAST(col AS target): the staging column already
         # carries the exact target type from the coercion contract, so a cast
         # is a no-op at best and at worst re-introduces per-dialect cast

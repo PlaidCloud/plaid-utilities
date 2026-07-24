@@ -536,14 +536,39 @@ class TestTypedStagingImportCol(unittest.TestCase):
 
     def test_flag_on_compiles_to_bare_column(self):
         # The converter already parsed/typed/coerced the value, so every dtype
-        # (including snowflake interval, which raises flag-off) passes through.
+        # passes through — except interval, which stages as TEXT and keeps its
+        # projection cast (see test_flag_on_interval_keeps_projection_cast).
         for dialect, dtype in IMPORT_COL_SNAPSHOTS:
+            if dtype == 'interval':
+                continue
             with self.subTest(dialect=dialect, dtype=dtype):
                 with sf.typed_staging_compilation():
                     self.assertEqual(
                         ('%(import_col_1)s', {'import_col_1': 'Column1'}),
                         self._compile(dialect, dtype),
                     )
+
+    def test_flag_on_interval_keeps_projection_cast(self):
+        # Interval has no Arrow mapping: the Parquet converter stages it as
+        # TEXT, so flag-ON must keep the old else-branch import_cast
+        # (col::interval / to_interval) — the verified old text-staging shape
+        # — rather than a bare column, which would lean on an unverified
+        # engine implicit cast of string staging into an Interval temp column
+        # (sc-23281 m-5). No blank CASE: the converter nulls blanks itself.
+        expected = {
+            'greenplum': ('%(import_col_1)s::interval', {'import_col_1': 'Column1'}),
+            'databend': ('to_interval(%(import_col_1)s)', {'import_col_1': 'Column1'}),
+            'starrocks': ('%(import_col_1)s::interval', {'import_col_1': 'Column1'}),
+            'snowflake': CompileError,  # no GA INTERVAL type — same loud refusal as flag-off
+        }
+        for dialect, snapshot in expected.items():
+            with self.subTest(dialect=dialect):
+                with sf.typed_staging_compilation():
+                    if snapshot is CompileError:
+                        with self.assertRaises(CompileError):
+                            self._compile(dialect, 'interval')
+                    else:
+                        self.assertEqual(snapshot, self._compile(dialect, 'interval'))
 
     def test_flag_off_snowflake_trailing_negatives_numeric(self):
         # Pins the one flag-off branch the (dialect, dtype) grid can't reach:
