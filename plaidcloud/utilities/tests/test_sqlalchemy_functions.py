@@ -1,6 +1,10 @@
 # coding=utf-8
 import asyncio
+import os
 import pickle
+import subprocess
+import sys
+import textwrap
 import unittest
 import uuid as uuid_mod
 
@@ -247,6 +251,9 @@ class TestImportColStarrocks(TestImportCol, StarrocksTest):
 #: compiled with render_postcompile, captured on master BEFORE the
 #: typed_staging switch existed. Flag-off compilation must stay byte-identical
 #: to these: the CSV import path is untouched by the typed-staging work.
+#: (time/bigint/smallint were captured on this branch — the flag-off path is
+#: purely additive vs master, and one of them, databend/bigint, was hand-
+#: compiled against master's copy of the module and matched byte-for-byte.)
 #: (hana is the one import_cast dialect variant not covered — sqlalchemy-hana
 #: isn't an installable test dependency; it is reachable only through
 #: compile_import_col, so the switch covers it by construction.)
@@ -290,6 +297,22 @@ IMPORT_COL_SNAPSHOTS = {
     ('greenplum', 'interval'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
          '%(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::interval END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), '
+         'CAST(%(to_timestamp_1)s AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'to_timestamp_1': 'HH24:MI:SS'},
+    ),
+    ('greenplum', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
     ('databend', 'text'): (
@@ -344,6 +367,24 @@ IMPORT_COL_SNAPSHOTS = {
          '%(regexp_replace_3)s) THEN NULL ELSE to_interval(%(import_col_1)s) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
+    ('databend', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
+    ),
+    ('databend', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_int64(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s,'
+         ' %(regexp_replace_5)s)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('databend', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_int16(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s,'
+         ' %(regexp_replace_5)s)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
     ('starrocks', 'text'): (
         '%(import_col_1)s',
         {'import_col_1': 'Column1'},
@@ -383,6 +424,22 @@ IMPORT_COL_SNAPSHOTS = {
     ('starrocks', 'interval'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
          '%(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::interval END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s AS'
+         ' CHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
+    ),
+    ('starrocks', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
     ('snowflake', 'text'): (
@@ -428,6 +485,24 @@ IMPORT_COL_SNAPSHOTS = {
          '%(regexp_replace_3)s) THEN NULL ELSE to_boolean(CAST(%(import_col_1)s AS VARCHAR)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
+    ('snowflake', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 'HH24:MI:SS'},
+    ),
+    ('snowflake', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) AS BIGINT) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('snowflake', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) AS SMALLINT) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
     ('snowflake', 'interval'): CompileError,
 }
 
@@ -435,9 +510,18 @@ IMPORT_COL_SNAPSHOTS = {
 class TestTypedStagingImportCol(unittest.TestCase):
 
     @staticmethod
-    def _compile(dialect, dtype):
+    def _compile(dialect, dtype, trailing_negs=False):
+        # Build via the canonical module reference, NOT sqlalchemy.func: this
+        # repo's CI pytest invocation (--doctest-modules on a namespace
+        # package) imports sqlalchemy_functions a second time as
+        # 'utilities.sqlalchemy_functions', and the duplicate's registration
+        # wins the sqlalchemy.func registry — func.import_col() would then
+        # dispatch to the duplicate's @compiles handler, which reads the
+        # duplicate module's typed_staging ContextVar while these tests set
+        # sf's. sf.import_col guarantees element class, handler and contextvar
+        # are same-module regardless of import order.
         eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/')
-        expr = sqlalchemy.func.import_col('Column1', dtype, 'YYYY-MM-DD', False)
+        expr = sf.import_col('Column1', dtype, 'YYYY-MM-DD', trailing_negs)
         compiled = expr.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
         return str(compiled), dict(compiled.params)
 
@@ -461,9 +545,64 @@ class TestTypedStagingImportCol(unittest.TestCase):
                         self._compile(dialect, dtype),
                     )
 
+    def test_flag_off_snowflake_trailing_negatives_numeric(self):
+        # Pins the one flag-off branch the (dialect, dtype) grid can't reach:
+        # trailing_negs=True routes numerics through the regexp_like/concat
+        # sign-folding CASE on Snowflake.
+        sql, params = self._compile('snowflake', 'numeric', trailing_negs=True)
+        self.assertEqual(
+            ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+             '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN (to_varchar(CASE WHEN '
+             'regexp_like(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s), '
+             '%(regexp_like_1)s) THEN concat(%(concat_1)s, replace(regexp_replace(%(import_col_1)s, '
+             '%(regexp_replace_4)s, %(regexp_replace_5)s), %(replace_1)s, %(replace_2)s)) ELSE '
+             'regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s) END) = '
+             '%(to_string_1)s) THEN NULL ELSE CASE WHEN regexp_like(regexp_replace(%(import_col_1)s, '
+             '%(regexp_replace_4)s, %(regexp_replace_5)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
+             'replace(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s), '
+             '%(replace_1)s, %(replace_2)s)) ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+             '%(regexp_replace_5)s) END END AS NUMERIC(38, 10)) END'),
+            sql,
+        )
+        self.assertEqual(
+            {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '',
+             'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '',
+             'regexp_like_1': '^[0-9]*\\.?[0-9]*-$', 'concat_1': '-', 'replace_1': '-', 'replace_2': '',
+             'to_string_1': 'NaN'},
+            params,
+        )
+
+    def test_registry_construction_honours_flag_in_fresh_interpreter(self):
+        # Production builds the element through SQLAlchemy's registry, not the
+        # module attribute: import_data_query renders each column expression as
+        # the string 'func.import_col(...)' (sql_expression.py, ~line 1351) and
+        # eval_expression evals it with {'func': sqlalchemy.func}
+        # (get_safe_dict). Pin that THAT construction path honours the flag
+        # when only the canonical module is loaded — in a fresh interpreter,
+        # because under this repo's own pytest invocation the doctest-duplicate
+        # module can hijack the func registry (see _compile), which is a test-
+        # harness artifact production never has.
+        script = textwrap.dedent('''
+            import sqlalchemy
+            import plaidcloud.utilities.sqlalchemy_functions as sf
+            expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+            eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
+            with sf.typed_staging_compilation():
+                on = str(expr.compile(dialect=eng.dialect))
+            off = str(expr.compile(dialect=eng.dialect))
+            assert on == '%(import_col_1)s', f'flag ignored: {on}'
+            assert 'CASE WHEN' in off, f'flag leaked: {off}'
+        ''')
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        result = subprocess.run(
+            [sys.executable, '-c', script], cwd=repo_root,
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_same_tree_swaps_modes_without_cache_leakage(self):
         eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
-        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        expr = sf.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
         off_before = str(expr.compile(dialect=eng.dialect))
         with sf.typed_staging_compilation():
             on = str(expr.compile(dialect=eng.dialect))
@@ -510,7 +649,7 @@ class TestTypedStagingImportCol(unittest.TestCase):
         # compile/execute on a thread via asyncio.to_thread, which copies the
         # caller's context — the flag must survive that hop.
         eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
-        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        expr = sf.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
 
         async def compile_in_thread():
             with sf.typed_staging_compilation():
