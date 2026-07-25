@@ -2242,6 +2242,14 @@ class TestAlteryxDialectAdditions(StarrocksTest):
         self.assertEqual('CAST(d AS DECIMAL(38, 10))',
                          self._sql(sqlalchemy.cast(sqlalchemy.column('d'), sqlalchemy.Numeric(38, 10))))
 
+    def test_fixed_char_and_uuid_casts_are_unchanged(self):
+        # A fixed CHAR is ≤255 and valid on StarRocks; the uuid type (GUIDHyphens)
+        # is a CHAR(36) decorator. Neither is rewritten to STRING.
+        from plaidcloud.rpc.database import GUIDHyphens
+        self.assertIn('CHAR', self._sql(sqlalchemy.cast(sqlalchemy.column('u'), GUIDHyphens())))
+        self.assertNotIn('STRING', self._sql(sqlalchemy.cast(sqlalchemy.column('c'),
+                                                             sqlalchemy.CHAR(36))))
+
 
 class TestStringCastOtherDialects(DatabendTest):
     """The STRING cast rewrite is StarRocks-only; other dialects are untouched."""

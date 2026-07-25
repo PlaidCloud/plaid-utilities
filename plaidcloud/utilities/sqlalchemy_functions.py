@@ -2150,14 +2150,17 @@ _SNOWFLAKE_DEFAULT_OK = frozenset({
 # STRING/varchar column ("input cols type not equal with output cols type"). The
 # physical string columns are STRING (varchar-max), so render a string CAST as
 # STRING to match. Non-string casts are untouched.
-_STARROCKS_CAST_STRING = sqlalchemy.sql.sqltypes.String
-
-
 def _cast_targets_string(cast_type):
+    # Only the variable-length string family (VARCHAR/NVARCHAR/Text, and the
+    # PlaidUnicode decorator over NVARCHAR) is rewritten to STRING. A *fixed* CHAR
+    # (incl. GUIDHyphens' CHAR(36) uuid impl) is ≤255 and valid on StarRocks, so it
+    # is left alone; an Enum (a String subclass) keeps its own rendering.
     t = cast_type
     while isinstance(t, sqlalchemy.sql.sqltypes.TypeDecorator):
         t = t.impl
-    return isinstance(t, _STARROCKS_CAST_STRING)
+    return (isinstance(t, sqlalchemy.sql.sqltypes.String)
+            and not isinstance(t, (sqlalchemy.sql.sqltypes.CHAR,
+                                   sqlalchemy.sql.sqltypes.Enum)))
 
 
 @compiles(sqlalchemy.sql.elements.Cast, 'starrocks')
