@@ -2,6 +2,8 @@
 # pylint: disable=function-redefined
 
 import warnings
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import sqlalchemy
 from sqlalchemy.exc import SAWarning, CompileError
@@ -235,6 +237,30 @@ def compile_custom_values(element, compiler, asfrom=False, **kw):
     return v
 
 
+#: Typed-staging compile switch (sc-23281). When set, `import_col` compiles to
+#: the bare staging column: the Parquet converter already parsed, typed and
+#: coerced every value at conversion time (blank -> 0.0 for numeric/currency,
+#: blank -> NULL for temporal/integer/boolean, dates parsed per date_format,
+#: trailing negatives folded), so the text-parsing CASE machinery below must
+#: not run against an already-typed column (`to_timestamp(<timestamp>, fmt)`
+#: breaks outright). A contextvar rather than an argument because the
+#: workflow-runner ships a pickled expression tree built against the OLD
+#: signature; the flag is observed here, in the import worker, at compile
+#: time — so old and new runners need no change and there is no deploy skew.
+#: `asyncio.to_thread` copies the context, so setting it around query
+#: execution propagates into worker threads.
+typed_staging = ContextVar('typed_staging', default=False)
+
+
+@contextmanager
+def typed_staging_compilation():
+    token = typed_staging.set(True)
+    try:
+        yield
+    finally:
+        typed_staging.reset(token)
+
+
 class import_col(GenericFunction):
     name = 'import_col'
     inherit_cache = False
@@ -242,6 +268,25 @@ class import_col(GenericFunction):
 @compiles(import_col)
 def compile_import_col(element, compiler, **kw):
     col, dtype, date_format, trailing_negs = list(element.clauses)
+    if typed_staging.get():
+        if dtype.value == 'interval':
+            # Interval has no Arrow mapping, so the Parquet converter stages
+            # it as TEXT (parquet_conversion.stages_as_text) — the projection
+            # must keep the old else-branch cast (col::interval /
+            # to_interval), the verified old text-staging shape. A bare
+            # passthrough would rely on the engine implicitly casting string
+            # staging into an Interval temp column, which was never verified
+            # (sc-23281 m-5). No blank CASE: the converter already turned
+            # blanks into real NULLs.
+            return compiler.process(
+                import_cast(col, dtype.value, date_format.value, trailing_negs.value), **kw)
+        # Bare column, not CAST(col AS target): the staging column already
+        # carries the exact target type from the coercion contract, so a cast
+        # is a no-op at best and at worst re-introduces per-dialect cast
+        # quirks (e.g. Snowflake bare-NUMERIC rounding) on correct values.
+        # date_format and trailing_negs are deliberately ignored — both were
+        # consumed by the converter.
+        return compiler.process(col, **kw)
     dtype = dtype.value
     date_format = date_format.value
     trailing_negs = trailing_negs.value

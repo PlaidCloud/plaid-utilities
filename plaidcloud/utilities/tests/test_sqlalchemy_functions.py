@@ -1,11 +1,17 @@
 # coding=utf-8
+import asyncio
+import os
 import pickle
+import subprocess
+import sys
+import textwrap
 import unittest
 import uuid as uuid_mod
 
 import datetime
 
 import sqlalchemy
+from sqlalchemy.exc import CompileError
 # from toolz.functoolz import curry
 # from toolz.functoolz import identity as ident
 
@@ -237,6 +243,444 @@ class TestImportColStarrocks(TestImportCol, StarrocksTest):
         expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', True)
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual('CAST(%(import_cast_1)s AS DECIMAL(38, 10))', str(compiled))
+
+
+# --- Typed staging compile switch (sc-23281) --------------------------------
+
+#: (sql, params) of import_col('Column1', <dtype>, 'YYYY-MM-DD', False)
+#: compiled with render_postcompile, captured on master BEFORE the
+#: typed_staging switch existed. Flag-off compilation must stay byte-identical
+#: to these: the CSV import path is untouched by the typed-staging work.
+#: (time/bigint/smallint were captured on this branch — the flag-off path is
+#: purely additive vs master, and one of them, databend/bigint, was hand-
+#: compiled against master's copy of the module and matched byte-for-byte.)
+#: (hana is the one import_cast dialect variant not covered — sqlalchemy-hana
+#: isn't an installable test dependency; it is reachable only through
+#: compile_import_col, so the switch covers it by construction.)
+IMPORT_COL_SNAPSHOTS = {
+    ('greenplum', 'text'): (
+        '%(import_col_1)s',
+        {'import_col_1': 'Column1'},
+    ),
+    ('greenplum', 'numeric'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+    ),
+    ('greenplum', 'currency'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE %(import_col_1)s END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+    ),
+    ('greenplum', 'integer'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'date'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_date(nullif(trim(CAST(CAST(%(import_col_1)s AS TEXT) AS '
+         'TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': 'YYYY-MM-DD'},
+    ),
+    ('greenplum', 'timestamp'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), '
+         'CAST(%(to_timestamp_1)s AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'to_timestamp_1': 'YYYY-MM-DD'},
+    ),
+    ('greenplum', 'boolean'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::boolean END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'interval'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::interval END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), '
+         'CAST(%(to_timestamp_1)s AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'to_timestamp_1': 'HH24:MI:SS'},
+    ),
+    ('greenplum', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('greenplum', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS NUMERIC) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('databend', 'text'): (
+        '%(import_col_1)s',
+        {'import_col_1': 'Column1'},
+    ),
+    ('databend', 'numeric'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN '
+         '(to_string(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s)) = '
+         '%(to_string_1)s) THEN NULL ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) END AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '', 'to_string_1': 'NaN'},
+    ),
+    ('databend', 'currency'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN '
+         '(to_string(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s)) = '
+         '%(to_string_1)s) THEN NULL ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) END AS DECIMAL(18, 4)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '', 'to_string_1': 'NaN'},
+    ),
+    ('databend', 'integer'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_int32(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('databend', 'date'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_date(to_timestamp(nullif(TRIM(CAST(CAST(%(import_col_1)s AS '
+         'TEXT) AS TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT))) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': '%Y-%m-%d'},
+    ),
+    ('databend', 'timestamp'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%Y-%m-%d'},
+    ),
+    ('databend', 'boolean'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_boolean(CAST(CASE WHEN (to_string(%(import_col_1)s) = '
+         '%(to_string_1)s) THEN %(param_1)s WHEN (to_string(%(import_col_1)s) = %(to_string_2)s) THEN '
+         '%(param_2)s WHEN (to_string(%(import_col_1)s) = %(to_string_3)s) THEN %(param_3)s WHEN '
+         '(to_string(%(import_col_1)s) = %(to_string_4)s) THEN %(param_4)s ELSE %(import_col_1)s END AS '
+         'VARCHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'to_string_1': 't', 'param_1': 'TRUE', 'to_string_2': '1', 'param_2': 'TRUE', 'to_string_3': 'f', 'param_3': 'FALSE', 'to_string_4': '0', 'param_4': 'FALSE'},
+    ),
+    ('databend', 'interval'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_interval(%(import_col_1)s) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('databend', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
+    ),
+    ('databend', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_int64(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s,'
+         ' %(regexp_replace_5)s)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('databend', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_int16(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s,'
+         ' %(regexp_replace_5)s)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('starrocks', 'text'): (
+        '%(import_col_1)s',
+        {'import_col_1': 'Column1'},
+    ),
+    ('starrocks', 'numeric'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+    ),
+    ('starrocks', 'currency'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(18, 4)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+    ),
+    ('starrocks', 'integer'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'date'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE str2date(nullif(trim(CAST(CAST(%(import_col_1)s AS CHAR) AS '
+         'CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': '%Y-%m-%d'},
+    ),
+    ('starrocks', 'timestamp'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s '
+         'AS CHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%Y-%m-%d'},
+    ),
+    ('starrocks', 'boolean'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS BOOLEAN) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'interval'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE %(import_col_1)s::interval END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s AS'
+         ' CHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
+    ),
+    ('starrocks', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('starrocks', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('snowflake', 'text'): (
+        '%(import_col_1)s',
+        {'import_col_1': 'Column1'},
+    ),
+    ('snowflake', 'numeric'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN '
+         '(to_varchar(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s)) = '
+         '%(to_string_1)s) THEN NULL ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) END AS NUMERIC(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '', 'to_string_1': 'NaN'},
+    ),
+    ('snowflake', 'currency'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN '
+         '(to_varchar(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s)) = '
+         '%(to_string_1)s) THEN NULL ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) END AS NUMERIC(18, 4)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '', 'to_string_1': 'NaN'},
+    ),
+    ('snowflake', 'integer'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) AS INTEGER) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('snowflake', 'date'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_date(nullif(trim(CAST(CAST(%(import_col_1)s AS TEXT) AS '
+         'TEXT)), %(nullif_1)s), CAST(%(param_1)s AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': 'YYYY-MM-DD'},
+    ),
+    ('snowflake', 'timestamp'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 'YYYY-MM-DD'},
+    ),
+    ('snowflake', 'boolean'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_boolean(CAST(%(import_col_1)s AS VARCHAR)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+    ),
+    ('snowflake', 'time'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE to_timestamp(CAST(%(import_col_1)s AS TEXT), CAST(%(param_1)s '
+         'AS TEXT)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 'HH24:MI:SS'},
+    ),
+    ('snowflake', 'bigint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) AS BIGINT) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('snowflake', 'smallint'): (
+        ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+         '%(regexp_replace_5)s) AS SMALLINT) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
+    ),
+    ('snowflake', 'interval'): CompileError,
+}
+
+
+class TestTypedStagingImportCol(unittest.TestCase):
+
+    @staticmethod
+    def _compile(dialect, dtype, trailing_negs=False):
+        # Build via the canonical module reference, NOT sqlalchemy.func: this
+        # repo's CI pytest invocation (--doctest-modules on a namespace
+        # package) imports sqlalchemy_functions a second time as
+        # 'utilities.sqlalchemy_functions', and the duplicate's registration
+        # wins the sqlalchemy.func registry — func.import_col() would then
+        # dispatch to the duplicate's @compiles handler, which reads the
+        # duplicate module's typed_staging ContextVar while these tests set
+        # sf's. sf.import_col guarantees element class, handler and contextvar
+        # are same-module regardless of import order.
+        eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/')
+        expr = sf.import_col('Column1', dtype, 'YYYY-MM-DD', trailing_negs)
+        compiled = expr.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
+        return str(compiled), dict(compiled.params)
+
+    def test_flag_off_is_byte_identical_to_pre_switch_sql(self):
+        for (dialect, dtype), expected in IMPORT_COL_SNAPSHOTS.items():
+            with self.subTest(dialect=dialect, dtype=dtype):
+                if expected is CompileError:
+                    with self.assertRaises(CompileError):
+                        self._compile(dialect, dtype)
+                else:
+                    self.assertEqual(expected, self._compile(dialect, dtype))
+
+    def test_flag_on_compiles_to_bare_column(self):
+        # The converter already parsed/typed/coerced the value, so every dtype
+        # passes through — except interval, which stages as TEXT and keeps its
+        # projection cast (see test_flag_on_interval_keeps_projection_cast).
+        for dialect, dtype in IMPORT_COL_SNAPSHOTS:
+            if dtype == 'interval':
+                continue
+            with self.subTest(dialect=dialect, dtype=dtype):
+                with sf.typed_staging_compilation():
+                    self.assertEqual(
+                        ('%(import_col_1)s', {'import_col_1': 'Column1'}),
+                        self._compile(dialect, dtype),
+                    )
+
+    def test_flag_on_interval_keeps_projection_cast(self):
+        # Interval has no Arrow mapping: the Parquet converter stages it as
+        # TEXT, so flag-ON must keep the old else-branch import_cast
+        # (col::interval / to_interval) — the verified old text-staging shape
+        # — rather than a bare column, which would lean on an unverified
+        # engine implicit cast of string staging into an Interval temp column
+        # (sc-23281 m-5). No blank CASE: the converter nulls blanks itself.
+        expected = {
+            'greenplum': ('%(import_col_1)s::interval', {'import_col_1': 'Column1'}),
+            'databend': ('to_interval(%(import_col_1)s)', {'import_col_1': 'Column1'}),
+            'starrocks': ('%(import_col_1)s::interval', {'import_col_1': 'Column1'}),
+            'snowflake': CompileError,  # no GA INTERVAL type — same loud refusal as flag-off
+        }
+        for dialect, snapshot in expected.items():
+            with self.subTest(dialect=dialect):
+                with sf.typed_staging_compilation():
+                    if snapshot is CompileError:
+                        with self.assertRaises(CompileError):
+                            self._compile(dialect, 'interval')
+                    else:
+                        self.assertEqual(snapshot, self._compile(dialect, 'interval'))
+
+    def test_flag_off_snowflake_trailing_negatives_numeric(self):
+        # Pins the one flag-off branch the (dialect, dtype) grid can't reach:
+        # trailing_negs=True routes numerics through the regexp_like/concat
+        # sign-folding CASE on Snowflake.
+        sql, params = self._compile('snowflake', 'numeric', trailing_negs=True)
+        self.assertEqual(
+            ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
+             '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(CASE WHEN (to_varchar(CASE WHEN '
+             'regexp_like(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s), '
+             '%(regexp_like_1)s) THEN concat(%(concat_1)s, replace(regexp_replace(%(import_col_1)s, '
+             '%(regexp_replace_4)s, %(regexp_replace_5)s), %(replace_1)s, %(replace_2)s)) ELSE '
+             'regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s) END) = '
+             '%(to_string_1)s) THEN NULL ELSE CASE WHEN regexp_like(regexp_replace(%(import_col_1)s, '
+             '%(regexp_replace_4)s, %(regexp_replace_5)s), %(regexp_like_1)s) THEN concat(%(concat_1)s, '
+             'replace(regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, %(regexp_replace_5)s), '
+             '%(replace_1)s, %(replace_2)s)) ELSE regexp_replace(%(import_col_1)s, %(regexp_replace_4)s, '
+             '%(regexp_replace_5)s) END END AS NUMERIC(38, 10)) END'),
+            sql,
+        )
+        self.assertEqual(
+            {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '',
+             'regexp_replace_3': '', 'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': '',
+             'regexp_like_1': '^[0-9]*\\.?[0-9]*-$', 'concat_1': '-', 'replace_1': '-', 'replace_2': '',
+             'to_string_1': 'NaN'},
+            params,
+        )
+
+    def test_registry_construction_honours_flag_in_fresh_interpreter(self):
+        # Production builds the element through SQLAlchemy's registry, not the
+        # module attribute: import_data_query renders each column expression as
+        # the string 'func.import_col(...)' (sql_expression.py, ~line 1351) and
+        # eval_expression evals it with {'func': sqlalchemy.func}
+        # (get_safe_dict). Pin that THAT construction path honours the flag
+        # when only the canonical module is loaded — in a fresh interpreter,
+        # because under this repo's own pytest invocation the doctest-duplicate
+        # module can hijack the func registry (see _compile), which is a test-
+        # harness artifact production never has.
+        script = textwrap.dedent('''
+            import sqlalchemy
+            import plaidcloud.utilities.sqlalchemy_functions as sf
+            expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+            eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
+            with sf.typed_staging_compilation():
+                on = str(expr.compile(dialect=eng.dialect))
+            off = str(expr.compile(dialect=eng.dialect))
+            assert on == '%(import_col_1)s', f'flag ignored: {on}'
+            assert 'CASE WHEN' in off, f'flag leaked: {off}'
+        ''')
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        result = subprocess.run(
+            [sys.executable, '-c', script], cwd=repo_root,
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_same_tree_swaps_modes_without_cache_leakage(self):
+        eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
+        expr = sf.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+        off_before = str(expr.compile(dialect=eng.dialect))
+        with sf.typed_staging_compilation():
+            on = str(expr.compile(dialect=eng.dialect))
+        off_after = str(expr.compile(dialect=eng.dialect))
+        self.assertEqual(off_before, off_after)
+        self.assertEqual('%(import_col_1)s', on)
+        self.assertNotEqual(off_before, on)
+        # inherit_cache=False must keep any statement containing import_col out
+        # of SQLAlchemy's compiled-query cache, or one mode's SQL could be
+        # replayed under the other.
+        self.assertIsNone(sqlalchemy.select(expr)._generate_cache_key())
+
+    def test_pickled_import_data_query_compiles_passthrough(self):
+        # Deploy safety: the workflow-runner pickles the extract query built by
+        # its own (possibly older) plaidcloud-utilities; the import worker
+        # unpickles it and compiles at execution time. The switch must take
+        # effect on that unpickled tree with no runner change.
+        query = sql_expression.import_data_query(
+            '_schema',
+            'table_54321',
+            [{'source': 'Column1', 'dtype': 'text'}, {'source': 'Column2', 'dtype': 'numeric'}],
+            [
+                {'target': 'NumCol', 'source': 'Column2', 'dtype': 'numeric'},
+                {'target': 'TsCol', 'source': 'Column1', 'dtype': 'timestamp'},
+            ],
+            date_format='YYYY-MM-DD',
+            temp_table_id='temp_table',
+            config={'project_schema': 'anlz_schema'},
+        )
+        restored = pickle.loads(pickle.dumps(query))
+        eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
+        with sf.typed_staging_compilation():
+            passthrough_sql = str(restored.compile(dialect=eng.dialect))
+        self.assertNotIn('regexp_replace', passthrough_sql)
+        self.assertNotIn('to_timestamp', passthrough_sql)
+        self.assertIn('text_import."Column2"', passthrough_sql)
+        # and the same unpickled tree still compiles the CSV machinery flag-off
+        csv_sql = str(restored.compile(dialect=eng.dialect))
+        self.assertIn('regexp_replace', csv_sql)
+        self.assertIn('to_timestamp', csv_sql)
+
+    def test_flag_propagates_into_asyncio_to_thread(self):
+        # The worker sets the flag around query execution and runs the actual
+        # compile/execute on a thread via asyncio.to_thread, which copies the
+        # caller's context — the flag must survive that hop.
+        eng = sqlalchemy.create_engine('greenplum://127.0.0.1/')
+        expr = sf.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
+
+        async def compile_in_thread():
+            with sf.typed_staging_compilation():
+                return await asyncio.to_thread(lambda: str(expr.compile(dialect=eng.dialect)))
+
+        self.assertEqual('%(import_col_1)s', asyncio.run(compile_in_thread()))
 
 
 class TestZfill(BaseTest):
