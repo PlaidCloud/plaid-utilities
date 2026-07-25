@@ -404,16 +404,18 @@ IMPORT_COL_SNAPSHOTS = {
          '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
+    # StarRocks string casts render STRING, not CHAR (sc-23267) — re-baselined
+    # from the pre-switch CHAR form for the three string→date dtypes below.
     ('starrocks', 'date'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str2date(nullif(trim(CAST(CAST(%(import_col_1)s AS CHAR) AS '
-         'CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str2date(nullif(trim(CAST(CAST(%(import_col_1)s AS STRING) AS '
+         'STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': '%Y-%m-%d'},
     ),
     ('starrocks', 'timestamp'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s '
-         'AS CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS STRING), CAST(%(param_1)s '
+         'AS STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%Y-%m-%d'},
     ),
     ('starrocks', 'boolean'): (
@@ -428,8 +430,8 @@ IMPORT_COL_SNAPSHOTS = {
     ),
     ('starrocks', 'time'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s AS'
-         ' CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS STRING), CAST(%(param_1)s AS'
+         ' STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
     ),
     ('starrocks', 'bigint'): (
