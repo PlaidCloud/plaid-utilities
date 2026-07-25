@@ -54,16 +54,49 @@ _ALIAS_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
 # the bare `table` is in RESERVED_ALIASES. An alias matching these would be silently shadowed.
 _POSITIONAL_TABLE_RE = re.compile(r'table\d+')
 _COLUMN_REF_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*')
-_COLUMN_ID_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
 
-# Allowed sqlalchemy dtype tokens (per plaidcloud.rpc.type_conversion.sqlalchemy_from_dtype).
-# Closed set keeps the cross-layer contract tight — adding new types requires updating both
-# this set and the dtype mapper.
+# A column id / target name is a real column name. get_table_rep (sql_expression.py) wraps
+# each in a sqlalchemy.Column, so SQLAlchemy's IdentifierPreparer quotes it at compile time —
+# spaces and punctuation ('Position Title', 'Years (1st grade)') are emitted safely. So this is
+# a break-out gate only: reject control characters, the identifier-quote characters every
+# dialect uses (`"` for Databend/Postgres, backtick for StarRocks) and backslash; everything
+# else the emit quotes. Also bound length and forbid empty.
+_COLUMN_ID_FORBIDDEN = re.compile(r'[\x00-\x1f"`\\]')
+_MAX_COLUMN_ID_LEN = 255
+
+
+def _column_id_ok(value) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= _MAX_COLUMN_ID_LEN
+        and _COLUMN_ID_FORBIDDEN.search(value) is None
+    )
+
+
+# Canonical lowercase dtype tokens — a fast path that avoids the rpc import for the common case.
 _DTYPE_ENUM = frozenset({
     'text', 'integer', 'bigint', 'smallint', 'tinyint', 'numeric', 'decimal',
     'float', 'double', 'boolean', 'currency', 'date', 'timestamp', 'time', 'interval',
     'json', 'uuid', 'serial', 'bigserial', 'largebinary',
 })
+
+
+def _dtype_ok(dtype) -> bool:
+    if not isinstance(dtype, str):
+        return False
+    if dtype.lower().split('(')[0] in _DTYPE_ENUM:
+        return True
+    # The enum above is only a fast path. The executor builds each column's type via
+    # sqlalchemy_from_dtype (regex-based), which also resolves the PlaidCloud/pandas aliases
+    # real emitters produce (String, Int32, Float64, datetime64, geometry, …). Accept exactly
+    # what the executor can resolve so the validator never rejects a dtype the executor handles.
+    # sqlalchemy_from_dtype raises RegexMapKeyError on an unresolvable dtype.
+    try:
+        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+        sqlalchemy_from_dtype(dtype)
+        return True
+    except Exception:
+        return False
 
 # Allowed aggregation tokens. Anything not in this set would still be accepted by
 # get_agg_fn() via getattr(sqlalchemy.func, ...) and emit a bogus SQL function call.
@@ -185,20 +218,18 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         for j, c in enumerate(source_columns):
             if not isinstance(c, dict) or 'id' not in c:
                 _err('source_column_invalid', f'{sfield}.source_columns[{j}]')
-            # Round-8 added isinstance check (TypeError leak); round-9 tightens to regex
-            # match so empty strings, reserved words, identifier-unfriendly characters
-            # ('col with space', '1col', 'order' etc.) don't slip through to SQL emit time.
-            if not isinstance(c['id'], str) or not _COLUMN_ID_RE.fullmatch(c['id']):
+            # Break-out gate only — the emit quotes the name (see _column_id_ok). Empty
+            # strings and quote/control characters are still rejected before SQL emit time.
+            if not _column_id_ok(c['id']):
                 _err('source_column_invalid', f'{sfield}.source_columns[{j}].id')
             if c['id'] in col_names:
                 # Duplicate ids silently dedupe in a set but cause sqlalchemy Table-build
                 # failure at SQL emit time. Reject at save (round-7).
                 _err('source_column_duplicate_id', f'{sfield}.source_columns[{j}].id')
-            # dtype: required + closed enum. Round-11 caught that sqlalchemy_from_dtype(None)
-            # raises RegexMapKeyError, and an unvalidated string can mask the actual column
-            # type (e.g., defaulting INTEGER to text produces lexicographic comparison bugs).
-            dtype = c.get('dtype')
-            if not isinstance(dtype, str) or dtype.lower().split('(')[0] not in _DTYPE_ENUM:
+            # dtype: required + resolvable by the executor's dtype mapper (see _dtype_ok).
+            # An unvalidated string can mask the actual column type (e.g. defaulting INTEGER
+            # to text produces lexicographic comparison bugs).
+            if not _dtype_ok(c.get('dtype')):
                 _err('source_column_dtype_invalid', f'{sfield}.source_columns[{j}].dtype')
             col_names.add(c['id'])
         alias_to_columnset[alias] = col_names
@@ -337,15 +368,16 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
 
         # `target`: the OUTPUT column name. Required by get_insert_query and _propagate_column_properties.
         target_name = tc.get('target')
-        if not isinstance(target_name, str) or not _COLUMN_ID_RE.fullmatch(target_name):
+        if not _column_id_ok(target_name):
             _err('target_name_invalid', f'{tfield}.target')
         if target_name in seen_targets:
             _err('target_name_duplicate', f'{tfield}.target')
         seen_targets.add(target_name)
 
-        # `dtype`: required + closed enum. Same rationale as source_columns[*].dtype above.
+        # `dtype`: required + resolvable by the executor's dtype mapper. Same rationale as
+        # source_columns[*].dtype above.
         dtype = tc.get('dtype')
-        if not isinstance(dtype, str) or dtype.lower().split('(')[0] not in _DTYPE_ENUM:
+        if not _dtype_ok(dtype):
             _err('target_column_dtype_invalid', f'{tfield}.dtype')
 
         # `agg`: optional, but if set must be a closed-enum string. Anything outside the enum

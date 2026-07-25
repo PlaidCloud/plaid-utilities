@@ -466,6 +466,68 @@ class TestRound11ContractGaps(unittest.TestCase):
         cfg['target_columns'][0]['dtype'] = 'currency'
         validate_frame_join_multi_config(cfg)  # no raise
 
+
+class TestRealColumnNamesAndDtypeAliases(unittest.TestCase):
+    """sc-23307: real Alteryx column names carry spaces/punctuation, and the converter emits
+    PlaidCloud/pandas dtype aliases (String, Int32, …). Both are what the executor already
+    handles (get_table_rep quotes the name; sqlalchemy_from_dtype resolves the alias), so the
+    validator must accept them — while still blocking quote/control break-out characters and
+    genuinely unresolvable dtypes."""
+
+    def _base(self):
+        return copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+
+    def test_spaced_and_punctuated_source_column_id_accepted(self):
+        # Append the real-named column (rather than rename a join-referenced one) so the test
+        # isolates the id-shape rule from the cross-reference rules.
+        for name in ('Position Title', 'Years (starting at 1st grade)', '1st Choice', 'A/B split'):
+            cfg = self._base()
+            cfg['sources'][0]['source_columns'].append({'id': name, 'dtype': 'text'})
+            with self.subTest(name=name):
+                validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_spaced_target_name_accepted(self):
+        cfg = self._base()
+        cfg['target_columns'][0]['target'] = 'Sale Id (primary)'
+        validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_quote_and_control_chars_in_source_column_id_rejected(self):
+        for bad in ('col"name', 'col`name', 'col\\name', 'col\nname', 'col\x00name'):
+            cfg = self._base()
+            cfg['sources'][0]['source_columns'][0]['id'] = bad
+            with self.subTest(bad=repr(bad)):
+                with self.assertRaises(JoinMultiValidationError) as ctx:
+                    validate_frame_join_multi_config(cfg)
+                self.assertEqual(ctx.exception.reason, 'source_column_invalid')
+
+    def test_empty_and_overlong_source_column_id_rejected(self):
+        for bad in ('', 'x' * 256):
+            cfg = self._base()
+            cfg['sources'][0]['source_columns'][0]['id'] = bad
+            with self.subTest(length=len(bad)):
+                with self.assertRaises(JoinMultiValidationError) as ctx:
+                    validate_frame_join_multi_config(cfg)
+                self.assertEqual(ctx.exception.reason, 'source_column_invalid')
+
+    def test_plaidcloud_dtype_aliases_accepted(self):
+        # These are exactly what map_alteryx_type / the converter emit; the executor resolves
+        # each via sqlalchemy_from_dtype, so the validator must too.
+        for dtype in ('String', 'Int32', 'Int64', 'Float64', 'Boolean', 'Decimal', 'varchar', 'datetime64'):
+            cfg = self._base()
+            cfg['sources'][0]['source_columns'][0]['dtype'] = dtype
+            cfg['target_columns'][0]['dtype'] = dtype
+            with self.subTest(dtype=dtype):
+                validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_unresolvable_dtype_still_rejected(self):
+        for dtype in ('bogus', 'notatype', ''):
+            cfg = self._base()
+            cfg['sources'][0]['source_columns'][0]['dtype'] = dtype
+            with self.subTest(dtype=dtype):
+                with self.assertRaises(JoinMultiValidationError) as ctx:
+                    validate_frame_join_multi_config(cfg)
+                self.assertEqual(ctx.exception.reason, 'source_column_dtype_invalid')
+
     def test_user_supplied_datastore_dialect_rejected_at_save_time(self):
         """Save-time hook (dialect=None) must reject user-supplied datastore_dialect to
         prevent FULL OUTER bypass on Databend tenants."""
