@@ -694,6 +694,18 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
     return process_fn(sort_type, cancellable_cast_type, agg_type, name, trim_zeroes)(col)
 
 
+def _sort_ascending(sort_config) -> bool | None:
+    """Normalize a column-mapping ``sort`` entry to an ascending flag.
+
+    The UI persists a dict (``{'ascending': bool, 'order': int}``) or null, but
+    REST/MCP step saves have written the string enum ``'asc'``/``'desc'``/``'none'``
+    (sc-23317). Returns True/False if the column should be sorted, None otherwise.
+    """
+    if isinstance(sort_config, dict):
+        return sort_config.get('ascending')
+    return {'asc': True, 'desc': False}.get(sort_config)
+
+
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
@@ -714,8 +726,8 @@ def get_from_clause(
     else:
         agg_type = None
 
-    if sort and 'sort' in target_column_config:
-        sort_type = target_column_config['sort']['ascending']
+    if sort:
+        sort_type = _sort_ascending(target_column_config.get('sort'))
     else:
         sort_type = None
 
@@ -1059,14 +1071,13 @@ def get_select_query(
         for stc in target_columns
         if (
             stc.get('dtype') not in ('serial', 'bigserial')
-            and stc.get('sort')
-            and stc['sort'].get('ascending') is not None
+            and _sort_ascending(stc.get('sort')) is not None
         )
     ]
     sort_columns = None
     if columns_to_sort_on:
-        columns_with_order = [tc for tc in columns_to_sort_on if 'order' in tc['sort']]
-        columns_without_order = [tc for tc in columns_to_sort_on if 'order' not in tc['sort']]
+        columns_with_order = [tc for tc in columns_to_sort_on if isinstance(tc['sort'], dict) and 'order' in tc['sort']]
+        columns_without_order = [tc for tc in columns_to_sort_on if not isinstance(tc['sort'], dict) or 'order' not in tc['sort']]
         sort_order = sorted(columns_with_order, key=lambda tc: tc['sort']['order']) + columns_without_order
         sort_columns = [
             get_from_clause(

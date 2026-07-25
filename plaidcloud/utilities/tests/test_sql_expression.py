@@ -703,6 +703,51 @@ class TestGetFromClause(TestSQLExpression):
             sqlalchemy.desc(sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000))).label('TargetColumn')
         )
 
+    def test_sort_string_asc(self):
+        # REST/MCP saves have written the string enum instead of a dict (sc-23317)
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': "Column1", 'target': 'TargetColumn', 'dtype': 'text', 'sort': 'asc'},
+                self.source_column_configs,
+                sort=True
+            ),
+            sqlalchemy.asc(sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000))).label('TargetColumn')
+        )
+
+    def test_sort_string_desc(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': "Column1", 'target': 'TargetColumn', 'dtype': 'text', 'sort': 'desc'},
+                self.source_column_configs,
+                sort=True
+            ),
+            sqlalchemy.desc(sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000))).label('TargetColumn')
+        )
+
+    def test_sort_string_none(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': "Column1", 'target': 'TargetColumn', 'dtype': 'text', 'sort': 'none'},
+                self.source_column_configs,
+                sort=True
+            ),
+            sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000)).label('TargetColumn')
+        )
+
+    def test_sort_null(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': "Column1", 'target': 'TargetColumn', 'dtype': 'text', 'sort': None},
+                self.source_column_configs,
+                sort=True
+            ),
+            sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000)).label('TargetColumn')
+        )
+
     def test_sort_but_no_sort_columns(self):
         self.assertEquivalent(
             se.get_from_clause(
@@ -979,6 +1024,38 @@ class TestGetSelectQuery(TestSQLExpression):
                 self.from_clause(malformed_sort),
                 self.from_clause(self.column_3_descending),
             ).order_by(self.from_clause(self.column_3_descending, sort=True)),
+        )
+
+    def test_sort_string_none_ignored(self):
+        # sc-23317 crash repro: REST/MCP step saves wrote sort: "none" (string) into
+        # column mappings; get_select_query must treat it like no sort at all.
+        sort_none = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': 'none'}
+        self.assertEquivalent(
+            se.get_select_query([self.table], self.source_columns, [self.target_column, sort_none], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, self.column_2], []),
+        )
+
+    def test_sort_string_asc_matches_dict(self):
+        string_asc = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': 'asc'}
+        dict_asc = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': True}}
+        self.assertEquivalent(
+            se.get_select_query([self.table], self.source_columns, [self.target_column, string_asc], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, dict_asc], []),
+        )
+
+    def test_sort_string_desc_matches_dict(self):
+        string_desc = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': 'desc'}
+        dict_desc = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': {'ascending': False}}
+        self.assertEquivalent(
+            se.get_select_query([self.table], self.source_columns, [self.target_column, string_desc], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, dict_desc], []),
+        )
+
+    def test_sort_null_ignored(self):
+        sort_null = {'target': 'Column2', 'source': 'Column2', 'dtype': 'numeric', 'sort': None}
+        self.assertEquivalent(
+            se.get_select_query([self.table], self.source_columns, [self.target_column, sort_null], []),
+            se.get_select_query([self.table], self.source_columns, [self.target_column, self.column_2], []),
         )
 
     # In v1.0.0 this kind of config just errors. I'm not sure it's possible to produce a config like this in the UI, but there is a reasonable way to handle such a config, so that's better than erroring
