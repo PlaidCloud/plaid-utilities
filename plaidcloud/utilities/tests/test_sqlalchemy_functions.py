@@ -404,16 +404,18 @@ IMPORT_COL_SNAPSHOTS = {
          '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
+    # StarRocks string casts render STRING, not CHAR (sc-23267) — re-baselined
+    # from the pre-switch CHAR form for the three string→date dtypes below.
     ('starrocks', 'date'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str2date(nullif(trim(CAST(CAST(%(import_col_1)s AS CHAR) AS '
-         'CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str2date(nullif(trim(CAST(CAST(%(import_col_1)s AS STRING) AS '
+         'STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'nullif_1': '', 'param_1': '%Y-%m-%d'},
     ),
     ('starrocks', 'timestamp'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s '
-         'AS CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS STRING), CAST(%(param_1)s '
+         'AS STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%Y-%m-%d'},
     ),
     ('starrocks', 'boolean'): (
@@ -428,8 +430,8 @@ IMPORT_COL_SNAPSHOTS = {
     ),
     ('starrocks', 'time'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS CHAR), CAST(%(param_1)s AS'
-         ' CHAR)) END'),
+         '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS STRING), CAST(%(param_1)s AS'
+         ' STRING)) END'),
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
     ),
     ('starrocks', 'bigint'): (
@@ -1065,14 +1067,14 @@ class TestSafeToDateSR(StarrocksTest):
     def test_to_date(self):
         expr = sqlalchemy.func.to_date('2019-01-05')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s))', str(compiled))
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('', compiled.params['nullif_1'])
 
     def test_to_date_specifier(self):
         expr = sqlalchemy.func.to_date('2019-01-05', '%Y-%m-%d')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR))', str(compiled))
+        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
@@ -1080,7 +1082,7 @@ class TestSafeToDateSR(StarrocksTest):
     def test_to_date_specifier_postgres(self):
         expr = sqlalchemy.func.to_date('2019-01-05', 'YYYY-MM-DD')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR))', str(compiled))
+        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
@@ -1494,7 +1496,7 @@ class TestOnlyAsciiStarrocks(StarrocksTest):
         expr = sqlalchemy.func.ascii('abc')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'regexp_replace(CAST(%(ascii_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            'regexp_replace(CAST(%(ascii_1)s AS STRING), %(regexp_replace_1)s, %(regexp_replace_2)s)',
             str(compiled),
         )
         self.assertEqual('abc', compiled.params['ascii_1'])
@@ -1508,7 +1510,7 @@ class TestNormalizeWhitespaceStarrocks(StarrocksTest):
         expr = sqlalchemy.func.normalize_whitespace('foobar')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'regexp_replace(CAST(%(normalize_whitespace_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            'regexp_replace(CAST(%(normalize_whitespace_1)s AS STRING), %(regexp_replace_1)s, %(regexp_replace_2)s)',
             str(compiled),
         )
         self.assertEqual('foobar', compiled.params['normalize_whitespace_1'])
@@ -1895,10 +1897,10 @@ class TestNumericizeStarrocks(StarrocksTest):
         expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'coalesce(nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_extract_1)s, '
-            '%(regexp_extract_2)s), %(nullif_1)s), nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), '
+            'coalesce(nullif(regexp_extract(trim(CAST(CAST(t AS STRING) AS STRING)), %(regexp_extract_1)s, '
+            '%(regexp_extract_2)s), %(nullif_1)s), nullif(regexp_extract(trim(CAST(CAST(t AS STRING) AS STRING)), '
             '%(regexp_extract_3)s, %(regexp_extract_4)s), %(nullif_2)s), '
-            'nullif(regexp_replace(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_replace_1)s, '
+            'nullif(regexp_replace(trim(CAST(CAST(t AS STRING) AS STRING)), %(regexp_replace_1)s, '
             '%(regexp_replace_2)s), %(nullif_3)s))',
             str(compiled))
 
@@ -2221,6 +2223,43 @@ class TestAlteryxDialectAdditions(StarrocksTest):
 
     def test_any_becomes_any_value(self):
         self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
+
+    def test_string_cast_renders_string_not_char(self):
+        # StarRocks inherits MySQL's CAST rules (string types -> CHAR), but CHAR
+        # maxes at 255 so CHAR(4000) is rejected by the strict INSERT ... UNION
+        # type check against a STRING/varchar column. Render string casts as STRING.
+        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+        self.assertEqual('CAST(x AS STRING)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('x'),
+                                                   sqlalchemy_from_dtype('String'))))
+        self.assertEqual('CAST(NULL AS STRING)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.null(),
+                                                   sqlalchemy_from_dtype('String'))))
+
+    def test_non_string_casts_are_unchanged(self):
+        # Only string-target casts are rewritten; numeric/decimal casts keep the
+        # MySQL-inherited rendering.
+        self.assertEqual('CAST(n AS SIGNED INTEGER)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('n'), sqlalchemy.Integer())))
+        self.assertEqual('CAST(d AS DECIMAL(38, 10))',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('d'), sqlalchemy.Numeric(38, 10))))
+
+    def test_fixed_char_and_uuid_casts_are_unchanged(self):
+        # A fixed CHAR is ≤255 and valid on StarRocks; the uuid type (GUIDHyphens)
+        # is a CHAR(36) decorator. Neither is rewritten to STRING.
+        from plaidcloud.rpc.database import GUIDHyphens
+        self.assertIn('CHAR', self._sql(sqlalchemy.cast(sqlalchemy.column('u'), GUIDHyphens())))
+        self.assertNotIn('STRING', self._sql(sqlalchemy.cast(sqlalchemy.column('c'),
+                                                             sqlalchemy.CHAR(36))))
+
+
+class TestStringCastOtherDialects(DatabendTest):
+    """The STRING cast rewrite is StarRocks-only; other dialects are untouched."""
+    def test_databend_string_cast_unchanged(self):
+        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+        rendered = str(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy_from_dtype('String'))
+                       .compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+        self.assertNotIn('AS STRING', rendered)
 
 
 class TestAlteryxDialectAdditionsDatabend(DatabendTest):
