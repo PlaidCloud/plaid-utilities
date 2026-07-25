@@ -2222,6 +2222,35 @@ class TestAlteryxDialectAdditions(StarrocksTest):
     def test_any_becomes_any_value(self):
         self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
 
+    def test_string_cast_renders_string_not_char(self):
+        # StarRocks inherits MySQL's CAST rules (string types -> CHAR), but CHAR
+        # maxes at 255 so CHAR(4000) is rejected by the strict INSERT ... UNION
+        # type check against a STRING/varchar column. Render string casts as STRING.
+        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+        self.assertEqual('CAST(x AS STRING)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('x'),
+                                                   sqlalchemy_from_dtype('String'))))
+        self.assertEqual('CAST(NULL AS STRING)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.null(),
+                                                   sqlalchemy_from_dtype('String'))))
+
+    def test_non_string_casts_are_unchanged(self):
+        # Only string-target casts are rewritten; numeric/decimal casts keep the
+        # MySQL-inherited rendering.
+        self.assertEqual('CAST(n AS SIGNED INTEGER)',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('n'), sqlalchemy.Integer())))
+        self.assertEqual('CAST(d AS DECIMAL(38, 10))',
+                         self._sql(sqlalchemy.cast(sqlalchemy.column('d'), sqlalchemy.Numeric(38, 10))))
+
+
+class TestStringCastOtherDialects(DatabendTest):
+    """The STRING cast rewrite is StarRocks-only; other dialects are untouched."""
+    def test_databend_string_cast_unchanged(self):
+        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+        rendered = str(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy_from_dtype('String'))
+                       .compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+        self.assertNotIn('AS STRING', rendered)
+
 
 class TestAlteryxDialectAdditionsDatabend(DatabendTest):
     """Default/Databend path -- notably titlecase, which Databend cannot render and
