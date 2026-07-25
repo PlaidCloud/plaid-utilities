@@ -1065,14 +1065,14 @@ class TestSafeToDateSR(StarrocksTest):
     def test_to_date(self):
         expr = sqlalchemy.func.to_date('2019-01-05')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s))', str(compiled))
+        self.assertEqual('to_date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('', compiled.params['nullif_1'])
 
     def test_to_date_specifier(self):
         expr = sqlalchemy.func.to_date('2019-01-05', '%Y-%m-%d')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR))', str(compiled))
+        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
@@ -1080,7 +1080,7 @@ class TestSafeToDateSR(StarrocksTest):
     def test_to_date_specifier_postgres(self):
         expr = sqlalchemy.func.to_date('2019-01-05', 'YYYY-MM-DD')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS CHAR) AS CHAR)), %(nullif_1)s), CAST(%(param_1)s AS CHAR))', str(compiled))
+        self.assertEqual('str2date(nullif(trim(CAST(CAST(%(to_date_1)s AS STRING) AS STRING)), %(nullif_1)s), CAST(%(param_1)s AS STRING))', str(compiled))
         self.assertEqual('2019-01-05', compiled.params['to_date_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
@@ -1494,7 +1494,7 @@ class TestOnlyAsciiStarrocks(StarrocksTest):
         expr = sqlalchemy.func.ascii('abc')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'regexp_replace(CAST(%(ascii_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            'regexp_replace(CAST(%(ascii_1)s AS STRING), %(regexp_replace_1)s, %(regexp_replace_2)s)',
             str(compiled),
         )
         self.assertEqual('abc', compiled.params['ascii_1'])
@@ -1508,7 +1508,7 @@ class TestNormalizeWhitespaceStarrocks(StarrocksTest):
         expr = sqlalchemy.func.normalize_whitespace('foobar')
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'regexp_replace(CAST(%(normalize_whitespace_1)s AS CHAR), %(regexp_replace_1)s, %(regexp_replace_2)s)',
+            'regexp_replace(CAST(%(normalize_whitespace_1)s AS STRING), %(regexp_replace_1)s, %(regexp_replace_2)s)',
             str(compiled),
         )
         self.assertEqual('foobar', compiled.params['normalize_whitespace_1'])
@@ -1895,10 +1895,10 @@ class TestNumericizeStarrocks(StarrocksTest):
         expr = sqlalchemy.func.numericize(sqlalchemy.column('t'))
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual(
-            'coalesce(nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_extract_1)s, '
-            '%(regexp_extract_2)s), %(nullif_1)s), nullif(regexp_extract(trim(CAST(CAST(t AS CHAR) AS CHAR)), '
+            'coalesce(nullif(regexp_extract(trim(CAST(CAST(t AS STRING) AS STRING)), %(regexp_extract_1)s, '
+            '%(regexp_extract_2)s), %(nullif_1)s), nullif(regexp_extract(trim(CAST(CAST(t AS STRING) AS STRING)), '
             '%(regexp_extract_3)s, %(regexp_extract_4)s), %(nullif_2)s), '
-            'nullif(regexp_replace(trim(CAST(CAST(t AS CHAR) AS CHAR)), %(regexp_replace_1)s, '
+            'nullif(regexp_replace(trim(CAST(CAST(t AS STRING) AS STRING)), %(regexp_replace_1)s, '
             '%(regexp_replace_2)s), %(nullif_3)s))',
             str(compiled))
 

@@ -2151,16 +2151,19 @@ _SNOWFLAKE_DEFAULT_OK = frozenset({
 # physical string columns are STRING (varchar-max), so render a string CAST as
 # STRING to match. Non-string casts are untouched.
 def _cast_targets_string(cast_type):
-    # Only the variable-length string family (VARCHAR/NVARCHAR/Text, and the
-    # PlaidUnicode decorator over NVARCHAR) is rewritten to STRING. A *fixed* CHAR
-    # (incl. GUIDHyphens' CHAR(36) uuid impl) is ≤255 and valid on StarRocks, so it
-    # is left alone; an Enum (a String subclass) keeps its own rendering.
+    # Rewrite only the string casts StarRocks would otherwise render as an
+    # *invalid* CHAR: unbounded, or length > 255 (StarRocks CHAR maxes at 255).
+    # A bounded CHAR(n≤255) — a fixed CHAR, GUIDHyphens' CHAR(36) uuid impl, or a
+    # short PlaidUnicode dtype like `s8`/`cidr` — is valid StarRocks and enforces
+    # its width, so it is left alone; an Enum keeps its own rendering.
     t = cast_type
     while isinstance(t, sqlalchemy.sql.sqltypes.TypeDecorator):
         t = t.impl
-    return (isinstance(t, sqlalchemy.sql.sqltypes.String)
-            and not isinstance(t, (sqlalchemy.sql.sqltypes.CHAR,
-                                   sqlalchemy.sql.sqltypes.Enum)))
+    if (not isinstance(t, sqlalchemy.sql.sqltypes.String)
+            or isinstance(t, (sqlalchemy.sql.sqltypes.CHAR, sqlalchemy.sql.sqltypes.Enum))):
+        return False
+    length = getattr(t, 'length', None)
+    return length is None or length > 255
 
 
 @compiles(sqlalchemy.sql.elements.Cast, 'starrocks')
