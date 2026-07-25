@@ -2153,9 +2153,10 @@ _SNOWFLAKE_DEFAULT_OK = frozenset({
 def _cast_targets_string(cast_type):
     # Rewrite only the string casts StarRocks would otherwise render as an
     # *invalid* CHAR: unbounded, or length > 255 (StarRocks CHAR maxes at 255).
-    # A bounded CHAR(n≤255) — a fixed CHAR, GUIDHyphens' CHAR(36) uuid impl, or a
-    # short PlaidUnicode dtype like `s8`/`cidr` — is valid StarRocks and enforces
-    # its width, so it is left alone; an Enum keeps its own rendering.
+    # Any CHAR is left alone — a fixed CHAR, GUIDHyphens' CHAR uuid impl, or a
+    # short PlaidUnicode dtype like `s8`/`cidr` — since a bounded CHAR(n≤255) is
+    # valid StarRocks and enforces its width; the CHAR exclusion is by isinstance,
+    # independent of length. An Enum keeps its own rendering.
     t = cast_type
     while isinstance(t, sqlalchemy.sql.sqltypes.TypeDecorator):
         t = t.impl
