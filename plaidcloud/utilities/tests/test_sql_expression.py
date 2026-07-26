@@ -653,6 +653,37 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
+    def test_expression_none_raises(self):
+        # A standalone expression that evaluates to Python None (unmapped/empty
+        # Alteryx formula) must fail closed with a clear SQLExpressionError
+        # naming the column, not reach the INSERT scan as None and raise an
+        # opaque AttributeError ('NoneType' object has no attribute 'is_sequence').
+        for expression in ('None', 'Null', 'null', 'NULL'):
+            for dtype in ('text', 'numeric'):
+                with self.subTest(expression=expression, dtype=dtype):
+                    with self.assertRaises(se.SQLExpressionError) as ctx:
+                        se.get_from_clause(
+                            [self.table],
+                            {'expression': expression, 'target': 'TargetColumn', 'dtype': dtype},
+                            self.source_column_configs,
+                        )
+                    self.assertIn('TargetColumn', str(ctx.exception))
+
+    def test_expression_explicit_null_still_compiles(self):
+        # A genuine NULL column expressed as a real clause (cast(null, <type>) or
+        # sqlalchemy.null()) evaluates to a ColumnElement, not bare None, so it
+        # passes the guard and compiles.
+        for expression in ('cast(null, integer)', 'sqlalchemy.null()'):
+            with self.subTest(expression=expression):
+                self.assertIsInstance(
+                    se.get_from_clause(
+                        [self.table],
+                        {'expression': expression, 'target': 'TargetColumn', 'dtype': 'integer'},
+                        self.source_column_configs,
+                    ),
+                    sqlalchemy.sql.elements.Label,
+                )
+
     def test_expression_aggregate(self):
         # aggregate means pay attention to the agg param
         self.assertEquivalent(
@@ -957,6 +988,44 @@ class TestGetSelectQuery(TestSQLExpression):
         self.assertEquivalent(
             se.get_select_query([self.table], self.source_columns, [self.target_column], []),
             sqlalchemy.select(self.from_clause(self.target_column))
+        )
+
+    def test_none_expression_column_fails_closed_before_insert_scan(self):
+        # Direct reproduction of the is_sequence crash: a target column whose
+        # expression evaluates to None used to flow through the SELECT into
+        # insert().from_select(...), where SQLAlchemy's INSERT default-column
+        # scan hit None.is_sequence. The guard now rejects it while building the
+        # SELECT, before any insert is constructed, with a clear error naming
+        # the column. A valid RecordID serial alongside is irrelevant to the raise.
+        none_expr_tc = {'target': 'Calc', 'expression': 'None', 'dtype': 'numeric'}
+        record_id_tc = {'target': 'RecordID', 'dtype': 'serial'}
+        with self.assertRaises(se.SQLExpressionError) as ctx:
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.target_column, none_expr_tc, record_id_tc],
+                [],
+            )
+        self.assertIn('Calc', str(ctx.exception))
+
+    def test_valid_expression_with_record_id_compiles(self):
+        # Regression: a normal valid expression plus a RecordID row_number serial
+        # still compiles clean through get_select_query.
+        calc_tc = {'target': 'Calc', 'expression': "'foobar'", 'dtype': 'text'}
+        record_id_tc = {'target': 'RecordID', 'dtype': 'serial'}
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.target_column, calc_tc, record_id_tc],
+                [],
+                use_row_number_for_serial=True,
+            ),
+            sqlalchemy.select(
+                self.from_clause(self.target_column),
+                self.from_clause(calc_tc),
+                self.from_clause(record_id_tc),
+            ),
         )
 
     def test_serial(self):
