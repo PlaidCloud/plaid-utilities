@@ -1556,6 +1556,15 @@ _GEOM_UNSUPPORTED = [
     ('geom_centroid', 'st_centroid(g)', lambda: sqlalchemy.func.geom_centroid(sqlalchemy.column('g'))),
     ('geom_distance', 'st_distance(a, b)',
      lambda: sqlalchemy.func.geom_distance(sqlalchemy.column('a'), sqlalchemy.column('b'))),
+    # Bounding-rectangle edges + CreatePolygon fallback: the Databend spelling is
+    # the registered name (StarRocks has no envelope/makepolygon functions).
+    ('st_xmin', 'st_xmin(g)', lambda: sqlalchemy.func.st_xmin(sqlalchemy.column('g'))),
+    ('st_xmax', 'st_xmax(g)', lambda: sqlalchemy.func.st_xmax(sqlalchemy.column('g'))),
+    ('st_ymin', 'st_ymin(g)', lambda: sqlalchemy.func.st_ymin(sqlalchemy.column('g'))),
+    ('st_ymax', 'st_ymax(g)', lambda: sqlalchemy.func.st_ymax(sqlalchemy.column('g'))),
+    ('st_makepolygon', 'st_makepolygon(a, b, c)',
+     lambda: sqlalchemy.func.st_makepolygon(
+         sqlalchemy.column('a'), sqlalchemy.column('b'), sqlalchemy.column('c'))),
 ]
 
 
@@ -2221,6 +2230,13 @@ class TestAlteryxDialectAdditions(StarrocksTest):
         self.assertEqual('percentile_approx(c, 0.5)',
                          self._sql(sqlalchemy.func.median(sqlalchemy.column('c'))))
 
+    def test_mode_raises_on_starrocks(self):
+        # StarRocks has no mode() aggregate and no single-aggregate equivalent;
+        # fail closed rather than emit a cryptic 'No matching function' error.
+        import sqlalchemy.exc
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            self._sql(sqlalchemy.func.mode(sqlalchemy.column('c')))
+
     def test_any_becomes_any_value(self):
         self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
 
@@ -2278,6 +2294,12 @@ class TestAlteryxDialectAdditionsDatabend(DatabendTest):
         # Default/Databend path is a pure passthrough to the native string_agg.
         self.assertEqual('string_agg(c)',
                          self._sql(sqlalchemy.func.string_agg(sqlalchemy.column('c'))))
+
+    def test_mode_renders_native_on_databend(self):
+        # Databend has a native mode() aggregate; attaching a StarRocks-only
+        # compiler leaves the Databend/default rendering byte-identical.
+        self.assertEqual('mode(c)',
+                         self._sql(sqlalchemy.func.mode(sqlalchemy.column('c'))))
 
     def test_array_tail_renders_slice_on_databend(self):
         self.assertEqual("slice(split('a-b', '-'), 2)",

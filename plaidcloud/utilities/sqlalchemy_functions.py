@@ -8,7 +8,7 @@ from contextvars import ContextVar
 import sqlalchemy
 from sqlalchemy.exc import SAWarning, CompileError
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum
+from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum, mode as sa_mode
 from sqlalchemy.types import Numeric, Boolean, Double
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
@@ -1892,6 +1892,22 @@ def compile_median_starrocks(element, compiler, **kw):
     return f'percentile_approx({rendered}, 0.5)'
 
 
+# Statistical mode aggregate (Alteryx Summarize Mode -> agg 'mode' ->
+# sql_expression.get_agg_fn -> func.mode). `mode` is SQLAlchemy's own built-in
+# GenericFunction (an ordered-set aggregate); attach a StarRocks compiler to it
+# rather than override the class, so the Databend/default rendering (mode(col))
+# stays byte-identical and the ordered-set within-group form is left intact.
+@compiles(sa_mode, 'starrocks')
+def compile_mode_starrocks(element, compiler, **kw):
+    # StarRocks has no mode() aggregate and no single-aggregate equivalent (the
+    # most-frequent value needs a GROUP BY / ORDER BY count() / LIMIT 1 subquery
+    # that does not fit an aggregate slot). Fail closed with a clear message
+    # rather than let 'No matching function: mode(...)' surface from StarRocks.
+    raise CompileError(
+        'mode (statistical mode aggregate) has no StarRocks equivalent; run this '
+        'workflow on a Databend workspace, or replace the Mode aggregation.')
+
+
 class any_(GenericFunction):
     """Databend any() -- pick an arbitrary value from the group."""
     name = 'any'
@@ -2108,6 +2124,37 @@ geom_centroid = _register_geom_fn(
 geom_distance = _register_geom_fn(
     'geom_distance', 'st_distance',
     starrocks_unsupported='st_distance (planar, two geometries) has no transparent StarRocks equivalent; emit st_distance_sphere(lon0, lat0, lon1, lat1) — longitude first, per StarRocks ST_Distance_Sphere(x,y,...) — with unit reconciliation at the call site.')
+
+# Bounding-rectangle edges (Alteryx SpatialInfo RectXY). Here the Databend
+# spelling IS the registered name — there is nothing to translate TO, because
+# StarRocks ships no envelope/bounding-box functions (st_xmin/st_xmax/st_ymin/
+# st_ymax all fail with 'No matching function', verified live on StarRocks 3).
+# The Alteryx mapper emits these names directly (alteryx_mapper._SPATIAL_INFO_FIELDS);
+# registering them keeps the Databend rendering byte-identical while turning the
+# StarRocks path into a clear compile-time CompileError instead of a cryptic
+# warehouse error, matching the geom_area/geom_length fail-closed pattern.
+st_xmin = _register_geom_fn(
+    'st_xmin', 'st_xmin',
+    starrocks_unsupported='st_xmin (bounding-rectangle edge) has no StarRocks equivalent; run this workflow on a Databend workspace.')
+st_xmax = _register_geom_fn(
+    'st_xmax', 'st_xmax',
+    starrocks_unsupported='st_xmax (bounding-rectangle edge) has no StarRocks equivalent; run this workflow on a Databend workspace.')
+st_ymin = _register_geom_fn(
+    'st_ymin', 'st_ymin',
+    starrocks_unsupported='st_ymin (bounding-rectangle edge) has no StarRocks equivalent; run this workflow on a Databend workspace.')
+st_ymax = _register_geom_fn(
+    'st_ymax', 'st_ymax',
+    starrocks_unsupported='st_ymax (bounding-rectangle edge) has no StarRocks equivalent; run this workflow on a Databend workspace.')
+
+# Alteryx converter fallback for CreatePolygon when the point args cannot be
+# statically resolved to a portable POLYGON WKT string
+# (alteryx_expression_converter._convert_special_function). StarRocks has st_polygon,
+# but it takes a WKT string, not Databend's point-geometry args — no clean 1:1 — so
+# fail closed rather than emit a mis-typed call. The converter already flags this
+# fallback path low-confidence (it adds 'st_createpolygon' to `unmapped`).
+st_makepolygon = _register_geom_fn(
+    'st_makepolygon', 'st_makepolygon',
+    starrocks_unsupported='st_makepolygon has no transparent StarRocks equivalent (st_polygon takes WKT text, not point geometries); build the POLYGON WKT explicitly or run on Databend.')
 
 
 # ---------------------------------------------------------------------------
