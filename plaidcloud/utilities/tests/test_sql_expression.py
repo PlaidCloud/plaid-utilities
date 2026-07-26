@@ -653,6 +653,41 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
+    def test_expression_none_raises(self):
+        # A standalone expression that evaluates to Python None (unmapped/empty
+        # Alteryx formula) must fail closed with a clear SQLExpressionError
+        # naming the column, rather than surface as an opaque failure whose exact
+        # shape varies by dtype/SQLAlchemy version (a silent CAST(NULL), or an
+        # AttributeError deep in the INSERT scan -- 'NoneType' has no attribute
+        # 'is_sequence' when a cast_type is present, or '...has no attribute
+        # 'label'' for serial columns, where cast_type is falsy). 'serial' and
+        # 'bigserial' exercise that falsy-cast_type .label path specifically.
+        for expression in ('None', 'Null', 'null', 'NULL'):
+            for dtype in ('text', 'numeric', 'serial', 'bigserial'):
+                with self.subTest(expression=expression, dtype=dtype):
+                    with self.assertRaises(se.SQLExpressionError) as ctx:
+                        se.get_from_clause(
+                            [self.table],
+                            {'expression': expression, 'target': 'TargetColumn', 'dtype': dtype},
+                            self.source_column_configs,
+                        )
+                    self.assertIn('TargetColumn', str(ctx.exception))
+
+    def test_expression_explicit_null_still_compiles(self):
+        # A genuine NULL column expressed as a real clause (cast(null, <type>) or
+        # sqlalchemy.null()) evaluates to a ColumnElement, not bare None, so it
+        # passes the guard and compiles.
+        for expression in ('cast(null, integer)', 'sqlalchemy.null()'):
+            with self.subTest(expression=expression):
+                self.assertIsInstance(
+                    se.get_from_clause(
+                        [self.table],
+                        {'expression': expression, 'target': 'TargetColumn', 'dtype': 'integer'},
+                        self.source_column_configs,
+                    ),
+                    sqlalchemy.sql.elements.Label,
+                )
+
     def test_expression_aggregate(self):
         # aggregate means pay attention to the agg param
         self.assertEquivalent(
@@ -958,6 +993,56 @@ class TestGetSelectQuery(TestSQLExpression):
             se.get_select_query([self.table], self.source_columns, [self.target_column], []),
             sqlalchemy.select(self.from_clause(self.target_column))
         )
+
+    def test_none_expression_column_fails_closed_at_select_build(self):
+        # Pre-fix, a target column whose expression evaluates to None compiled
+        # into the SELECT and only blew up later in insert().from_select(...)'s
+        # column scan. The guard now rejects it while building the SELECT, so the
+        # None never reaches get_insert_query at all: the full select->insert
+        # pipeline raises a clear SQLExpressionError naming the column at the
+        # select step. A valid RecordID serial alongside is irrelevant to the raise.
+        none_expr_tc = {'target': 'Calc', 'expression': 'None', 'dtype': 'numeric'}
+        record_id_tc = {'target': 'RecordID', 'dtype': 'serial'}
+        target_columns = [self.target_column, none_expr_tc, record_id_tc]
+        target_table = se.get_table_rep(
+            'table_54321',
+            [{'source': 'TargetColumn', 'dtype': 'text'}, {'source': 'Calc', 'dtype': 'numeric'}, {'source': 'RecordID', 'dtype': 'bigint'}],
+            'anlz_schema',
+        )
+        with self.assertRaises(se.SQLExpressionError) as ctx:
+            select_query = se.get_select_query([self.table], self.source_columns, target_columns, [])
+            se.get_insert_query(target_table, target_columns, select_query)  # unreached: guard raised above
+        self.assertIn('Calc', str(ctx.exception))
+
+    def test_valid_expression_with_record_id_compiles_through_insert(self):
+        # Regression: a normal valid expression plus a RecordID row_number serial
+        # still compiles clean all the way through insert().from_select(...) --
+        # genuinely exercising the INSERT default-column scan that used to crash
+        # on a None element -- and the select alone matches the hand-built form.
+        calc_tc = {'target': 'Calc', 'expression': "'foobar'", 'dtype': 'text'}
+        record_id_tc = {'target': 'RecordID', 'dtype': 'serial'}
+        target_columns = [self.target_column, calc_tc, record_id_tc]
+        select_query = se.get_select_query(
+            [self.table], self.source_columns, target_columns, [], use_row_number_for_serial=True,
+        )
+        self.assertEquivalent(
+            select_query,
+            sqlalchemy.select(
+                self.from_clause(self.target_column),
+                self.from_clause(calc_tc),
+                self.from_clause(record_id_tc),
+            ),
+        )
+        target_table = se.get_table_rep(
+            'table_54321',
+            [{'source': 'TargetColumn', 'dtype': 'text'}, {'source': 'Calc', 'dtype': 'text'}, {'source': 'RecordID', 'dtype': 'bigint'}],
+            'anlz_schema',
+        )
+        insert_sql, _params = compiled(
+            se.get_insert_query(target_table, target_columns, select_query, use_row_number_for_serial=True)
+        )
+        self.assertIn('INSERT INTO', insert_sql)
+        self.assertIn('RecordID', insert_sql)
 
     def test_serial(self):
         # serial are ignored
