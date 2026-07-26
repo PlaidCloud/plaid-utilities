@@ -60,6 +60,9 @@ full = [
 xray = [
     "yxdb>=1.0.0",
 ]
+jupyter = [
+    "ipython",
+]
 
 [project.urls]
 Homepage = "https://plaidcloud.com"
