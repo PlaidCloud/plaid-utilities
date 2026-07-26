@@ -661,10 +661,12 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
     )
     # Fail closed: a standalone expression that evaluates to Python None (an
     # unmapped/empty formula, or a bare null/NULL/Null which get_safe_dict maps
-    # to None) is not a SQL clause. Left alone it either becomes a silent
-    # CAST(NULL) (wrong data) or reaches SQLAlchemy's INSERT column scan as None
-    # and raises an opaque AttributeError ('NoneType' has no attribute
-    # 'is_sequence'). A genuine NULL column must use cast(null, <type>) or
+    # to None) is not a SQL clause. Left alone it surfaces as an opaque failure
+    # whose exact shape depends on dtype and SQLAlchemy version -- a silent
+    # CAST(NULL) (wrong data) when a cast_type is present, or an AttributeError
+    # deep in SQLAlchemy's INSERT column scan ('NoneType' has no attribute
+    # 'is_sequence', or '...has no attribute 'label'' for serial columns, whose
+    # cast_type is falsy). A genuine NULL column must use cast(null, <type>) or
     # sqlalchemy.null(), both of which evaluate to a real ColumnElement.
     if expr is None:
         raise SQLExpressionError(
