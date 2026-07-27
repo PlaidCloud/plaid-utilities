@@ -1,12 +1,9 @@
-argparse
 chardet
-avro
 numpy
 pandas<3.0.0
 plaidcloud-rpc>=1.11.0
 PyYAML
 requests
-setuptools
 orjson
 SQLAlchemy
 texttable
