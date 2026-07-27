@@ -117,8 +117,14 @@ def jupyter_table(input):
     line wrapping is not desired.
     """
 
-    # Importing here because IPython is a big import that we don't need for anything else in data_helpers
-    from IPython.core.display import HTML
+    # Imported lazily: IPython is an optional [jupyter] extra, not a base dependency of this package.
+    try:
+        from IPython.core.display import HTML
+    except ImportError as exc:
+        raise ImportError(
+            "jupyter_table requires IPython, which is an optional dependency. "
+            "Install it with: pip install plaidcloud-utilities[jupyter]"
+        ) from exc
 
     # TODO: Just make this an option of inspect
     jupyter_wrapper = ''.join(['<div style="font-weight: normal;font-family: monospace;white-space:pre;">', input, '</div>'])

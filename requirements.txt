@@ -1,7 +1,6 @@
 argparse
 chardet
 avro
-ipython
 numpy
 pandas<3.0.0
 plaidcloud-rpc>=1.11.0
