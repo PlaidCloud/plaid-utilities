@@ -653,40 +653,75 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
-    def test_expression_none_raises(self):
-        # A standalone expression that evaluates to Python None (unmapped/empty
-        # Alteryx formula) must fail closed with a clear SQLExpressionError
-        # naming the column, rather than surface as an opaque failure whose exact
-        # shape varies by dtype/SQLAlchemy version (a silent CAST(NULL), or an
-        # AttributeError deep in the INSERT scan -- 'NoneType' has no attribute
-        # 'is_sequence' when a cast_type is present, or '...has no attribute
-        # 'label'' for serial columns, where cast_type is falsy). 'serial' and
-        # 'bigserial' exercise that falsy-cast_type .label path specifically.
+    def test_expression_none_coerces_to_sql_null(self):
+        # An expression that evaluates to Python None -- an Alteryx Null(), an
+        # empty formula, or a bare null/NULL/Null -- means SQL NULL, so it must
+        # compile to a NULL clause labelled with the target column rather than
+        # raising or letting bare None reach SQLAlchemy.
         for expression in ('None', 'Null', 'null', 'NULL'):
             for dtype in ('text', 'numeric', 'serial', 'bigserial'):
                 with self.subTest(expression=expression, dtype=dtype):
-                    with self.assertRaises(se.SQLExpressionError) as ctx:
-                        se.get_from_clause(
+                    with self.assertLogs(se.logger, level='WARNING') as logs:
+                        clause = se.get_from_clause(
                             [self.table],
                             {'expression': expression, 'target': 'TargetColumn', 'dtype': dtype},
                             self.source_column_configs,
                         )
-                    self.assertIn('TargetColumn', str(ctx.exception))
+                    self.assertIsInstance(clause, sqlalchemy.sql.elements.Label)
+                    sql, _params = compiled(sqlalchemy.select(clause))
+                    self.assertIn('NULL', sql)
+                    self.assertIn('"TargetColumn"', sql)
+                    # The warning names the column and the source expression.
+                    # Match the reprs, so the boilerplate wording can't satisfy this.
+                    self.assertIn("'TargetColumn'", logs.output[0])
+                    self.assertIn(f'expression {expression!r}', logs.output[0])
+
+    def test_expression_none_casts_to_column_dtype(self):
+        # When the dtype resolves to a sqlalchemy type, the coerced NULL is cast
+        # to it -- byte-for-byte the clause a hand-written cast(null, <type>)
+        # produces, which is what these columns compiled to before v1.20.0.
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'expression': 'None', 'target': 'TargetColumn', 'dtype': 'numeric'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(sqlalchemy.null(), sqlalchemy.NUMERIC).label('TargetColumn'),
+        )
 
     def test_expression_explicit_null_still_compiles(self):
         # A genuine NULL column expressed as a real clause (cast(null, <type>) or
-        # sqlalchemy.null()) evaluates to a ColumnElement, not bare None, so it
-        # passes the guard and compiles.
+        # sqlalchemy.null()) already evaluates to a ColumnElement, so it takes
+        # the normal path with no coercion and no warning.
         for expression in ('cast(null, integer)', 'sqlalchemy.null()'):
             with self.subTest(expression=expression):
-                self.assertIsInstance(
-                    se.get_from_clause(
+                with self.assertNoLogs(se.logger, level='WARNING'):
+                    clause = se.get_from_clause(
                         [self.table],
                         {'expression': expression, 'target': 'TargetColumn', 'dtype': 'integer'},
                         self.source_column_configs,
-                    ),
-                    sqlalchemy.sql.elements.Label,
-                )
+                    )
+                self.assertIsInstance(clause, sqlalchemy.sql.elements.Label)
+
+    def test_expression_valid_is_unchanged(self):
+        # Regression: the coercion must not touch expressions that evaluate to a
+        # real clause, including window functions like the RecordID row_number.
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'expression': 'table1.Column1', 'target': 'TargetColumn', 'dtype': 'text'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000)).label('TargetColumn'),
+        )
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'expression': 'func.row_number().over()', 'target': 'RowNum', 'dtype': 'bigint'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(sqlalchemy.func.row_number().over(), sqlalchemy.BIGINT).label('RowNum'),
+        )
 
     def test_expression_aggregate(self):
         # aggregate means pay attention to the agg param
@@ -994,13 +1029,12 @@ class TestGetSelectQuery(TestSQLExpression):
             sqlalchemy.select(self.from_clause(self.target_column))
         )
 
-    def test_none_expression_column_fails_closed_at_select_build(self):
-        # Pre-fix, a target column whose expression evaluates to None compiled
-        # into the SELECT and only blew up later in insert().from_select(...)'s
-        # column scan. The guard now rejects it while building the SELECT, so the
-        # None never reaches get_insert_query at all: the full select->insert
-        # pipeline raises a clear SQLExpressionError naming the column at the
-        # select step. A valid RecordID serial alongside is irrelevant to the raise.
+    def test_none_expression_column_compiles_to_null_through_insert(self):
+        # The original is_sequence reproduction, now asserting the coerced
+        # outcome: a target column whose expression evaluates to None used to
+        # reach insert().from_select(...)'s column scan as bare None and blow up
+        # with an opaque AttributeError. It now compiles clean, all the way
+        # through the INSERT, as a SQL NULL -- no raise, no AttributeError.
         none_expr_tc = {'target': 'Calc', 'expression': 'None', 'dtype': 'numeric'}
         record_id_tc = {'target': 'RecordID', 'dtype': 'serial'}
         target_columns = [self.target_column, none_expr_tc, record_id_tc]
@@ -1009,10 +1043,17 @@ class TestGetSelectQuery(TestSQLExpression):
             [{'source': 'TargetColumn', 'dtype': 'text'}, {'source': 'Calc', 'dtype': 'numeric'}, {'source': 'RecordID', 'dtype': 'bigint'}],
             'anlz_schema',
         )
-        with self.assertRaises(se.SQLExpressionError) as ctx:
+        with self.assertLogs(se.logger, level='WARNING') as logs:
             select_query = se.get_select_query([self.table], self.source_columns, target_columns, [])
-            se.get_insert_query(target_table, target_columns, select_query)  # unreached: guard raised above
-        self.assertIn('Calc', str(ctx.exception))
+        insert_sql, _params = compiled(
+            se.get_insert_query(target_table, target_columns, select_query)
+        )
+        self.assertIn('INSERT INTO', insert_sql)
+        # The None column lands in the INSERT as a typed NULL under its own name,
+        # and the neighbouring serial/valid columns are untouched.
+        self.assertIn('CAST(NULL AS NUMERIC) AS "Calc"', insert_sql)
+        self.assertIn('"TargetColumn", "Calc", "RecordID"', insert_sql)
+        self.assertIn("'Calc'", logs.output[0])
 
     def test_valid_expression_with_record_id_compiles_through_insert(self):
         # Regression: a normal valid expression plus a RecordID row_number serial

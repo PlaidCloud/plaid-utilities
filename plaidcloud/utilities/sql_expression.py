@@ -4,6 +4,7 @@
 """Utility library for sqlalchemy metaprogramming used in analyze transforms"""
 
 import ast
+import logging
 import re
 import uuid
 from copy import deepcopy
@@ -25,6 +26,8 @@ __author__ = 'Adams Tower'
 __maintainer__ = 'Adams Tower <adams.tower@tartansolutions.com>'
 __copyright__ = '© Copyright 2017-2023, Tartan Solutions, Inc'
 __license__ = 'Apache 2.0'
+
+logger = logging.getLogger(__name__)
 
 # TODO: move transform functions here, document them, and refactor their api
 
@@ -659,21 +662,25 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
         table_numbering_start=table_numbering_start,
         tables_by_alias=tables_by_alias,
     )
-    # Fail closed: a standalone expression that evaluates to Python None (an
-    # unmapped/empty formula, or a bare null/NULL/Null which get_safe_dict maps
-    # to None) is not a SQL clause. Left alone it surfaces as an opaque failure
-    # whose exact shape depends on dtype and SQLAlchemy version -- a silent
-    # CAST(NULL) (wrong data) when a cast_type is present, or an AttributeError
-    # deep in SQLAlchemy's INSERT column scan ('NoneType' has no attribute
-    # 'is_sequence', or '...has no attribute 'label'' for serial columns, whose
-    # cast_type is falsy). A genuine NULL column must use cast(null, <type>) or
-    # sqlalchemy.null(), both of which evaluate to a real ColumnElement.
+    # An expression that evaluates to Python None -- an Alteryx Null(), an empty
+    # formula, or a bare null/NULL/Null, all of which get_safe_dict maps to None
+    # -- means SQL NULL. Bare None is not a SQL clause though: left alone it
+    # either gets implicitly wrapped into an unlabelled CAST(NULL) or reaches
+    # SQLAlchemy as None and fails opaquely (an AttributeError in the INSERT
+    # from_select column scan, or on .label when there is no cast_type), naming
+    # neither the step nor the column. So substitute an explicit null() --
+    # process_fn casts it to the column's dtype -- and log which column and
+    # expression it came from. Genuinely unmappable converted formulas are caught
+    # fail-closed at convert time; the executor cannot tell one from a deliberate
+    # NULL, so it must not fail here.
     if expr is None:
-        raise SQLExpressionError(
-            f"Target column {name!r}: expression {expression!r} compiled to None/NULL; "
-            "a calculated column must produce a SQL clause "
-            "(check for an unmapped or empty formula)."
+        logger.warning(
+            "Target column %r: expression %r evaluated to None; using SQL NULL. "
+            "Expected for an intentional Null()/empty formula; otherwise check for an "
+            "unmapped converted formula.",
+            name, expression,
         )
+        expr = sqlalchemy.null()
     return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
 
 # TODO: write tests, though TestGetFromClause already covers this
