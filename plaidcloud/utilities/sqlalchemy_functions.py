@@ -1893,17 +1893,12 @@ def compile_median_starrocks(element, compiler, **kw):
     # used for a cross-warehouse median: percentile_disc returns an actual member
     # (3, not 2.5, for [1, 2, 3, 10]) and percentile_approx is a t-digest estimate.
     # percentile_cont accepts numeric, DATE and DATETIME (percentile_approx is
-    # numeric-only), so this widens the accepted input types as well.
+    # numeric-only), so this widens the accepted input types as well. Verified
+    # live on StarRocks 4.1.3 as a bare GROUP BY aggregate (no OVER clause is
+    # needed, unlike the SQL-standard ordered-set form) over INT, DECIMAL and
+    # DATE columns, and wrapped in a CAST.
     rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
     return f'percentile_cont({rendered}, 0.5)'
-
-
-#: Space-Saving counter budget for the StarRocks `mode` rewrite. StarRocks:
-#: "Expressions that have fewer than counter_num distinct items will yield exact
-#: item counts", and 100000 is the documented maximum. Counters are allocated as
-#: distinct values are encountered, so a low-cardinality column pays nothing for
-#: the high ceiling.
-_STARROCKS_APPROX_TOP_K_COUNTERS = 100000
 
 
 # Statistical mode aggregate (Alteryx Summarize Mode -> agg 'mode' ->
@@ -1921,13 +1916,16 @@ def compile_mode_starrocks(element, compiler, **kw):
     aggregate slot in a SELECT list and has no access to the enclosing query's
     GROUP BY keys (they are assembled separately in
     sql_expression.get_select_query). The single-expression stand-in is
-    approx_top_k, whose result is EXACT for any group with fewer than
-    _STARROCKS_APPROX_TOP_K_COUNTERS (100000) distinct values and only degrades
-    to a Space-Saving estimate above that. Divergences to know about:
+    approx_top_k, called with the documented maximum counter_num of 100000.
+    Divergences to know about:
 
-    * Above 100k distinct values in one group the winner is approximate (count
-      error up to ``2.0 * numRows / counter_num``), where Databend's mode() is
-      always exact.
+    * The winner is EXACT for any group with fewer than counter_num distinct
+      values (StarRocks: "Expressions that have fewer than counter_num distinct
+      items will yield exact item counts"), and only above that degrades to a
+      Space-Saving estimate (count error up to ``2.0 * numRows / counter_num``),
+      where Databend's mode() is always exact. Counters are allocated as distinct
+      values are encountered, so a low-cardinality column pays nothing for the
+      high ceiling.
     * Ties are broken by approx_top_k's internal counter order -- arbitrary but
       deterministic for a given input. Alteryx's Summarize->Mode returns the
       first-encountered value on a tie, and Databend's mode() is likewise
@@ -1942,16 +1940,15 @@ def compile_mode_starrocks(element, compiler, **kw):
     """
     clauses = list(element.clauses)
     if len(clauses) != 1:
-        # Notably the ordered-set spelling func.mode().within_group(col), which
-        # arrives here with no clauses; there is nothing to count.
         raise CompileError(
-            'mode on StarRocks takes exactly one argument (the column to find the '
-            f'most frequent value of); got {len(clauses)}. Use mode(col), not the '
-            'mode() WITHIN GROUP (ORDER BY col) ordered-set form.')
+            'mode on StarRocks takes exactly one argument (the column whose most '
+            f'frequent value to find); got {len(clauses)}. The ordered-set spelling '
+            'mode() WITHIN GROUP (ORDER BY col) arrives with none — there is nothing '
+            'to count — so write mode(col) instead.')
     value = compiler.process(clauses[0], **kw)
-    # Rendered by hand rather than via func.* so literal_binds -- used for view
-    # DDL -- reaches k and counter_num instead of leaving bind placeholders.
-    top_k = f'approx_top_k({value}, 2, {_STARROCKS_APPROX_TOP_K_COUNTERS})'
+    # k=2 and counter_num rendered by hand rather than via func.* so literal_binds
+    # -- used for view DDL -- reaches them instead of leaving bind placeholders.
+    top_k = f'approx_top_k({value}, 2, 100000)'
     # approx_top_k returns ARRAY<STRUCT<item, count>> sorted by count descending.
     # StarRocks' analyzer rejects struct field access applied straight to an
     # aggregate's subscript ("approx_top_k(...)[1].item must appear in the GROUP
