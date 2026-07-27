@@ -1886,10 +1886,24 @@ class median(GenericFunction):
 
 @compiles(median, 'starrocks')
 def compile_median_starrocks(element, compiler, **kw):
-    # StarRocks has no median(); percentile_approx(col, 0.5) is the documented
-    # equivalent. Approximate, like Alteryx's own median on large inputs.
+    # StarRocks has no median(). percentile_cont(col, 0.5) is exact and linearly
+    # interpolates the two middle values on an even count -- the same answer both
+    # Alteryx's Summarize->Median and Databend's median() give. The two
+    # alternatives both diverge from Databend on the same data and so cannot be
+    # used for a cross-warehouse median: percentile_disc returns an actual member
+    # (3, not 2.5, for [1, 2, 3, 10]) and percentile_approx is a t-digest estimate.
+    # percentile_cont accepts numeric, DATE and DATETIME (percentile_approx is
+    # numeric-only), so this widens the accepted input types as well.
     rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
-    return f'percentile_approx({rendered}, 0.5)'
+    return f'percentile_cont({rendered}, 0.5)'
+
+
+#: Space-Saving counter budget for the StarRocks `mode` rewrite. StarRocks:
+#: "Expressions that have fewer than counter_num distinct items will yield exact
+#: item counts", and 100000 is the documented maximum. Counters are allocated as
+#: distinct values are encountered, so a low-cardinality column pays nothing for
+#: the high ceiling.
+_STARROCKS_APPROX_TOP_K_COUNTERS = 100000
 
 
 # Statistical mode aggregate (Alteryx Summarize Mode -> agg 'mode' ->
@@ -1899,13 +1913,51 @@ def compile_median_starrocks(element, compiler, **kw):
 # stays byte-identical and the ordered-set within-group form is left intact.
 @compiles(sa_mode, 'starrocks')
 def compile_mode_starrocks(element, compiler, **kw):
-    # StarRocks has no mode() aggregate and no single-aggregate equivalent (the
-    # most-frequent value needs a GROUP BY / ORDER BY count() / LIMIT 1 subquery
-    # that does not fit an aggregate slot). Fail closed with a clear message
-    # rather than let 'No matching function: mode(...)' surface from StarRocks.
-    raise CompileError(
-        'mode (statistical mode aggregate) has no StarRocks equivalent; run this '
-        'workflow on a Databend workspace, or replace the Mode aggregation.')
+    """Render Alteryx/Databend `mode(col)` as StarRocks approx_top_k.
+
+    StarRocks has no `mode()` aggregate. The exact rewrite is a two-stage
+    query -- count per (group, value) in a CTE, then pick the value with the
+    highest count -- which cannot be expressed here: this hook fills a single
+    aggregate slot in a SELECT list and has no access to the enclosing query's
+    GROUP BY keys (they are assembled separately in
+    sql_expression.get_select_query). The single-expression stand-in is
+    approx_top_k, whose result is EXACT for any group with fewer than
+    _STARROCKS_APPROX_TOP_K_COUNTERS (100000) distinct values and only degrades
+    to a Space-Saving estimate above that. Divergences to know about:
+
+    * Above 100k distinct values in one group the winner is approximate (count
+      error up to ``2.0 * numRows / counter_num``), where Databend's mode() is
+      always exact.
+    * Ties are broken by approx_top_k's internal counter order -- arbitrary but
+      deterministic for a given input. Alteryx's Summarize->Mode returns the
+      first-encountered value on a tie, and Databend's mode() is likewise
+      unspecified, so no target agrees with any other here.
+
+    NULL handling is made to match: approx_top_k counts NULL as its own item and
+    will return it as the winner (verified live on StarRocks 4.1.3), where
+    Databend/Alteryx ignore nulls. k=2 plus an ``IS NOT NULL`` array_filter fixes
+    that -- NULL is at most one item, so the top two always contain the most
+    frequent non-null value if the group has one. A group with no non-null value
+    yields NULL, as an aggregate over no rows should.
+    """
+    clauses = list(element.clauses)
+    if len(clauses) != 1:
+        # Notably the ordered-set spelling func.mode().within_group(col), which
+        # arrives here with no clauses; there is nothing to count.
+        raise CompileError(
+            'mode on StarRocks takes exactly one argument (the column to find the '
+            f'most frequent value of); got {len(clauses)}. Use mode(col), not the '
+            'mode() WITHIN GROUP (ORDER BY col) ordered-set form.')
+    value = compiler.process(clauses[0], **kw)
+    # Rendered by hand rather than via func.* so literal_binds -- used for view
+    # DDL -- reaches k and counter_num instead of leaving bind placeholders.
+    top_k = f'approx_top_k({value}, 2, {_STARROCKS_APPROX_TOP_K_COUNTERS})'
+    # approx_top_k returns ARRAY<STRUCT<item, count>> sorted by count descending.
+    # StarRocks' analyzer rejects struct field access applied straight to an
+    # aggregate's subscript ("approx_top_k(...)[1].item must appear in the GROUP
+    # BY clause"), so project the items out with array_map first.
+    items = f'array_map(sr_mode_e -> sr_mode_e.item, {top_k})'
+    return f'array_filter({items}, sr_mode_i -> sr_mode_i IS NOT NULL)[1]'
 
 
 class any_(GenericFunction):

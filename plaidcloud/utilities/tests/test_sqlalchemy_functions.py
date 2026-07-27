@@ -2225,17 +2225,28 @@ class TestAlteryxDialectAdditions(StarrocksTest):
     def test_titlecase_becomes_initcap(self):
         self.assertEqual("initcap('a b')", self._sql(sqlalchemy.func.titlecase('a b')))
 
-    def test_median_becomes_percentile_approx(self):
-        # StarRocks has no median(); percentile_approx(col, 0.5) is the equivalent.
-        self.assertEqual('percentile_approx(c, 0.5)',
+    def test_median_becomes_percentile_cont(self):
+        # StarRocks has no median(); percentile_cont(col, 0.5) is the exact
+        # equivalent and interpolates the two middle values on an even count,
+        # matching Alteryx's Median and Databend's median().
+        self.assertEqual('percentile_cont(c, 0.5)',
                          self._sql(sqlalchemy.func.median(sqlalchemy.column('c'))))
 
-    def test_mode_raises_on_starrocks(self):
-        # StarRocks has no mode() aggregate and no single-aggregate equivalent;
-        # fail closed rather than emit a cryptic 'No matching function' error.
-        import sqlalchemy.exc
-        with self.assertRaises(sqlalchemy.exc.CompileError):
-            self._sql(sqlalchemy.func.mode(sqlalchemy.column('c')))
+    def test_mode_becomes_approx_top_k(self):
+        # StarRocks has no mode(); approx_top_k is the single-expression stand-in.
+        # k=2 + the IS NOT NULL filter drops the NULL item approx_top_k counts
+        # (Databend/Alteryx ignore nulls); counter_num=100000 keeps the counts
+        # exact for any group with fewer than 100000 distinct values. Rendered
+        # by hand so literal_binds leaves no bind placeholders (view DDL).
+        self.assertEqual(
+            'array_filter(array_map(sr_mode_e -> sr_mode_e.item, '
+            'approx_top_k(c, 2, 100000)), sr_mode_i -> sr_mode_i IS NOT NULL)[1]',
+            self._sql(sqlalchemy.func.mode(sqlalchemy.column('c'))))
+
+    def test_mode_within_group_form_raises_on_starrocks(self):
+        # The ordered-set spelling arrives with no clauses -- nothing to count.
+        with self.assertRaises(CompileError):
+            self._sql(sqlalchemy.func.mode().within_group(sqlalchemy.column('c')))
 
     def test_any_becomes_any_value(self):
         self.assertEqual('any_value(c)', self._sql(sqlalchemy.func.any(sqlalchemy.column('c'))))
@@ -2300,6 +2311,18 @@ class TestAlteryxDialectAdditionsDatabend(DatabendTest):
         # compiler leaves the Databend/default rendering byte-identical.
         self.assertEqual('mode(c)',
                          self._sql(sqlalchemy.func.mode(sqlalchemy.column('c'))))
+
+    def test_median_renders_native_on_databend(self):
+        # The StarRocks percentile_cont rewrite must not leak into Databend,
+        # which has a native median().
+        self.assertEqual('median(c)',
+                         self._sql(sqlalchemy.func.median(sqlalchemy.column('c'))))
+
+    def test_mode_within_group_renders_native_on_databend(self):
+        # The StarRocks arity guard is StarRocks-only: the ordered-set form still
+        # compiles unchanged everywhere else.
+        self.assertEqual('mode() WITHIN GROUP (ORDER BY c)',
+                         self._sql(sqlalchemy.func.mode().within_group(sqlalchemy.column('c'))))
 
     def test_array_tail_renders_slice_on_databend(self):
         self.assertEqual("slice(split('a-b', '-'), 2)",
