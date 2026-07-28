@@ -17,6 +17,7 @@ the token to a translated message. Reason tokens are listed in `_REASONS` below.
 
 import json
 import re
+import string
 
 __all__ = [
     'validate_frame_join_multi_config',
@@ -42,13 +43,58 @@ RESERVED_ALIASES = frozenset({
     'union', 'table', 'inner', 'left', 'right', 'full', 'cross', 'on',
 })
 
-# A source/target table reference is the canonical `analyzetable_<uuid>` id that table_find/
-# table_upsert return and that frame_extract and frame_join_inner/outer also accept (get_frame()
-# resolves it). This is an identifier-shape safety gate only — it keeps dots, quotes, and
-# whitespace out of the SQL the executor emits; the real existence check is get_frame() at execute
-# time. Match the same id shape the rest of the platform uses (cf. core query.py _TABLE_ID_RE)
-# rather than the old `tab`-prefix that never matched a real `analyzetable_` id.
-_TABLE_ID_RE = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_-]{0,127}')
+# A source/target table reference is whatever the executor's get_frame() accepts, which is the
+# same set every other step accepts:
+#   * the canonical `analyzetable_<uuid>` id (used as-is),
+#   * a table name,
+#   * a project path (`/Folder/Table`),
+#   * any of the latter two carrying `{variable}` tokens, substituted at execute time.
+# See workflow_runner.function.utility.transform_handler.get_frame.
+#
+# This is deliberately a REFERENCE-shape gate, not an identifier-shape gate. An earlier version
+# required a bare identifier on the theory that it kept dots, quotes, and whitespace out of the
+# emitted SQL — but the reference never reaches SQL: get_frame() resolves it to a canonical id
+# first and the query is built from that (see the comment in workflow-runner's frame_join_multi
+# executor), and the lookups it does on the way are parameterised RPC calls. So the identifier
+# rule bought no safety and rejected valid dynamic configs that every other step accepts.
+#
+# What is still worth rejecting at save time is a reference that cannot resolve at run time
+# no matter what the variables hold: a non-string, an empty/whitespace-only value, one long
+# enough to be corruption rather than a path, control characters, or malformed braces — that
+# last one raises ValueError inside apply_variables' `string.Formatter().parse()`, so catching
+# it here turns a mid-run crash into a save-time message.
+#
+# This is a syntax gate, not a resolution gate. A *resolvable-looking* reference naming a
+# variable that doesn't exist still fails at run time, by design — which variables exist is a
+# run-time fact. (One narrow case is reported less well than the rest: a nested replacement
+# field, `{scenario:>{width}}`, hides `width` from apply_variables' undefined-key check and so
+# surfaces as a raw KeyError from str.format rather than the friendly "variables are invalid or
+# undefined" message. That is a pre-existing wart in apply_variables, not something this gate
+# can see — the field name is well-formed.)
+_MAX_TABLE_REF_LEN = 512
+
+
+def _is_valid_table_reference(value) -> bool:
+    """True when `value` is a table reference get_frame() could resolve.
+
+    Existence is NOT checked — that is get_frame()'s job at execute time, and for a reference
+    carrying variables it is unknowable until the run supplies them.
+    """
+    if not isinstance(value, str):
+        return False
+    if not value.strip() or len(value) > _MAX_TABLE_REF_LEN:
+        return False
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        return False
+    try:
+        # Mirrors apply_variables: positional `{}` tokens are stripped before parsing.
+        list(string.Formatter().parse(value.replace('{}', '')))
+    except ValueError:
+        # Unbalanced or malformed braces — `{unclosed`, a stray `}`.
+        return False
+    return True
+
+
 _ALIAS_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,62}')
 # Positional table names the executor's expression namespace reserves (`table1`, `table2`, ...);
 # the bare `table` is in RESERVED_ALIASES. An alias matching these would be silently shadowed.
@@ -205,7 +251,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         aliases_lower_to_alias[alias.lower()] = alias
 
         source = s.get('source')
-        if not isinstance(source, str) or not _TABLE_ID_RE.fullmatch(source):
+        if not _is_valid_table_reference(source):
             _err('source_not_table_id', f'{sfield}.source')
 
         source_columns = s.get('source_columns')
@@ -506,7 +552,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
     # target_frame: the destination table id. Required by the executor's get_frame() call.
     # Validator round-11 closed the gap (was unchecked).
     target_frame = config.get('target_frame')
-    if not isinstance(target_frame, str) or not _TABLE_ID_RE.fullmatch(target_frame):
+    if not _is_valid_table_reference(target_frame):
         _err('target_frame_invalid', 'target_frame')
 
     # datastore_dialect: derived server-side from tenant context, NOT user config. Save-time

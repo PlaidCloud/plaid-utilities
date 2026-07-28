@@ -177,47 +177,72 @@ class TestAliasRules(unittest.TestCase):
 
 
 class TestSourceField(unittest.TestCase):
-    """source must be an identifier-shaped table id — accepts the canonical analyzetable_<uuid>
-    that table_find/table_upsert return (and every other step uses), while still closing the
-    apply_variables + path-lookup surface in workflow_runner's transform_handler.get_frame
-    (no dots, slashes, braces, or whitespace reach SQL emit)."""
+    """source is a table REFERENCE, i.e. whatever transform_handler.get_frame() resolves: the
+    canonical analyzetable_<uuid> id, a table name, a project path, or any of those carrying
+    {variable} tokens. Only references that cannot resolve under ANY variable values are
+    rejected here — existence is get_frame()'s job at execute time."""
 
     def _base(self):
         return copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
 
-    def test_path_style_source_rejected(self):
+    def _accepts(self, source):
         cfg = self._base()
-        cfg['sources'][0]['source'] = 'folder/path/to/table'
-        with self.assertRaises(JoinMultiValidationError) as ctx:
-            validate_frame_join_multi_config(cfg)
-        self.assertEqual(ctx.exception.reason, 'source_not_table_id')
+        cfg['sources'][0]['source'] = source
+        validate_frame_join_multi_config(cfg)  # no raise
 
-    def test_source_with_format_braces_rejected(self):
+    def _rejects(self, source):
         cfg = self._base()
-        cfg['sources'][0]['source'] = 'tab{tenant_secret}'
-        with self.assertRaises(JoinMultiValidationError) as ctx:
-            validate_frame_join_multi_config(cfg)
-        self.assertEqual(ctx.exception.reason, 'source_not_table_id')
-
-    def test_source_with_dot_dot_rejected(self):
-        cfg = self._base()
-        cfg['sources'][0]['source'] = 'tab..secrets'
+        cfg['sources'][0]['source'] = source
         with self.assertRaises(JoinMultiValidationError) as ctx:
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'source_not_table_id')
 
     def test_canonical_analyzetable_source_accepted(self):
-        # Regression for the reported bug: the canonical analyzetable_<uuid> id that
-        # table_find/table_upsert return — and that frame_extract/frame_join_inner|outer
-        # already accept — must validate. The old `tab`-prefix regex rejected it.
-        cfg = self._base()
-        cfg['sources'][0]['source'] = 'analyzetable_53867b49-c8d9-4ceb-8272-79017344b3bb'
-        validate_frame_join_multi_config(cfg)  # no raise
+        # The canonical analyzetable_<uuid> id that table_find/table_upsert return — and that
+        # frame_extract/frame_join_inner|outer already accept.
+        self._accepts('analyzetable_53867b49-c8d9-4ceb-8272-79017344b3bb')
 
-    def test_valid_table_prefix_accepted(self):
-        cfg = self._base()
-        cfg['sources'][0]['source'] = 'tabABC123_xyz-456'
-        validate_frame_join_multi_config(cfg)  # no raise
+    def test_bare_name_accepted(self):
+        self._accepts('FACT_GL')
+        self._accepts('Monthly Close 2026')
+
+    def test_path_style_source_accepted(self):
+        # get_frame() routes a reference containing '/' to lookup_by_full_path, exactly as it
+        # does for every other step. Previously rejected outright.
+        self._accepts('/03 Results/FACT_GL')
+        self._accepts('folder/path/to/table')
+
+    def test_variable_tokens_accepted(self):
+        # apply_variables() substitutes these at execute time. This is not a new capability:
+        # the variables are the caller's own project/workflow variables, the same ones
+        # frame_extract has always resolved, and apply_variables runs strict — a field_name
+        # that isn't a plain defined variable (e.g. `{x.__class__}`) fails its undefined-key
+        # check before str.format ever sees it, so attribute traversal is not reachable.
+        self._accepts('FACT_GL_{year}')
+        self._accepts('/03 Results/{scenario}/FACT_GL')
+        self._accepts('{table_name}')
+
+    def test_unbalanced_braces_rejected(self):
+        # These raise inside apply_variables' Formatter().parse at execute time; rejecting at
+        # save turns a mid-run crash into a message on the step form.
+        self._rejects('FACT_{year')
+        self._rejects('FACT_year}')
+
+    def test_empty_or_whitespace_rejected(self):
+        self._rejects('')
+        self._rejects('   ')
+
+    def test_non_string_rejected(self):
+        self._rejects(None)
+        self._rejects(42)
+        self._rejects(['analyzetable_x'])
+
+    def test_control_characters_rejected(self):
+        self._rejects('FACT\nGL')
+        self._rejects('FACT\x00GL')
+
+    def test_absurd_length_rejected(self):
+        self._rejects('x' * 513)
 
 
 class TestConditionShapes(unittest.TestCase):
@@ -356,17 +381,32 @@ class TestRound11ContractGaps(unittest.TestCase):
             validate_frame_join_multi_config(cfg)
         self.assertEqual(ctx.exception.reason, 'target_frame_invalid')
 
-    def test_target_frame_rejects_non_identifier(self):
-        cfg = self._base()
-        cfg['target_frame'] = 'folder/path/table'  # slash isn't an identifier char
-        with self.assertRaises(JoinMultiValidationError) as ctx:
-            validate_frame_join_multi_config(cfg)
-        self.assertEqual(ctx.exception.reason, 'target_frame_invalid')
-
     def test_target_frame_canonical_id_accepted(self):
         cfg = self._base()
         cfg['target_frame'] = 'analyzetable_27d0dd09-971f-4392-a84a-9426ba76342a'
         validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_target_frame_accepts_dynamic_references(self):
+        # The executor calls get_frame(target_frame, create_if_missing=True), so a name or
+        # path — with or without {variable} tokens — resolves and is created if absent, the
+        # same as every other step's target. Previously rejected outright, which meant the
+        # step could not be saved with the table picker's Dynamic mode at all.
+        for target in ('/03 Results/FACT_GL', 'FACT_GL',
+                       'FACT_GL_{year}', '/03 Results/{scenario}/FACT_GL'):
+            with self.subTest(target=target):
+                cfg = self._base()
+                cfg['target_frame'] = target
+                validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_target_frame_rejects_unresolvable_references(self):
+        for target in ('', '   ', None, 42, 'FACT_{year', 'FACT_year}',
+                       'FACT\nGL', 'x' * 513):
+            with self.subTest(target=target):
+                cfg = self._base()
+                cfg['target_frame'] = target
+                with self.assertRaises(JoinMultiValidationError) as ctx:
+                    validate_frame_join_multi_config(cfg)
+                self.assertEqual(ctx.exception.reason, 'target_frame_invalid')
 
     def test_target_columns_target_required(self):
         cfg = self._base()
