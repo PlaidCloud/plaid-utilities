@@ -66,6 +66,73 @@
     ],
     "target_frame": "tabOut01"
   },
+  "valid_dynamic_table_references": {
+    "operation": "frame_join_multi",
+    "sources": [
+      {
+        "alias": "sales",
+        "source": "/01 Source Data/{scenario}/GL_DETAIL",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "customer_id",
+            "dtype": "text"
+          },
+          {
+            "id": "total",
+            "dtype": "text"
+          }
+        ]
+      },
+      {
+        "alias": "cust",
+        "source": "tabCust01",
+        "source_columns": [
+          {
+            "id": "id",
+            "dtype": "text"
+          },
+          {
+            "id": "name",
+            "dtype": "text"
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from_alias": "sales",
+        "to_alias": "cust",
+        "join_type": "inner",
+        "conditions": [
+          {
+            "left_expr": "sales.customer_id",
+            "operator": "=",
+            "right_expr": "cust.id"
+          }
+        ]
+      }
+    ],
+    "target_columns": [
+      {
+        "source_alias": "sales",
+        "source": "sales.id",
+        "target": "sale_id",
+        "dtype": "integer"
+      },
+      {
+        "source_alias": "cust",
+        "source": "cust.name",
+        "target": "customer",
+        "dtype": "text"
+      }
+    ],
+    "target_frame": "/03 Results/FACT_GL_{year}",
+    "_doc": "Dynamic table references: get_frame() substitutes {variable} tokens and looks the result up by path (when it contains '/') or by name, then creates the target if missing. Same shape every other step accepts."
+  },
   "valid_three_source_tree": {
     "operation": "frame_join_multi",
     "sources": [
@@ -942,33 +1009,13 @@
     "target_frame": "tabOut01"
   },
   "invalid_source_not_table_id": {
-    "_doc": "source must be TABLE_PREFIX-prefixed UUID; path-style values rejected.",
+    "_doc": "A source reference that cannot resolve under any variable values: the unbalanced brace raises inside apply_variables' Formatter().parse at execute time.",
     "_expected_reason": "source_not_table_id",
     "operation": "frame_join_multi",
     "sources": [
       {
         "alias": "a",
-        "source": "folder/path/to/table",
-        "source_columns": [
-          {
-            "id": "id",
-            "dtype": "text"
-          }
-        ]
-      }
-    ],
-    "edges": [],
-    "target_columns": [],
-    "target_frame": "tabOut01"
-  },
-  "invalid_source_with_format_chars": {
-    "_doc": "source containing { triggers str.format injection in apply_variables. Rejected.",
-    "_expected_reason": "source_not_table_id",
-    "operation": "frame_join_multi",
-    "sources": [
-      {
-        "alias": "a",
-        "source": "tab{secret}",
+        "source": "FACT_{year",
         "source_columns": [
           {
             "id": "id",
