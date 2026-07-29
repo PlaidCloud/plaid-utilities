@@ -1297,6 +1297,55 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     return update_query.values(values)
 
 
+def get_update_rewrite_query(table, source_columns, target_columns, wheres, dtype_map, variables=None):
+    """Projection form of get_update_query, for update steps that write to a target table.
+
+    The wheres select which rows get *updated*, not which rows are returned, so they become
+    a CASE condition instead of a WHERE and every source row is emitted. CASE falls through
+    to ELSE for both FALSE and NULL, which is exactly what UPDATE ... WHERE does — filtering
+    the rows out instead would drop every row whose condition evaluates to NULL.
+    """
+    combined_wheres = get_combined_wheres(wheres, [table], variables)
+    condition = sqlalchemy.and_(*combined_wheres) if combined_wheres else None
+
+    new_values = {}
+    for tc in target_columns:
+        include, value = get_update_value(tc, table, dtype_map, variables)
+        if include:
+            new_values[tc['source']] = value
+
+    unknown = sorted(name for name in new_values if name not in table.columns)
+    if unknown:
+        # update().values() rejects these outright; a projection would silently ignore them
+        # and report success having updated nothing.
+        raise SQLExpressionError(f'Update columns not present in the source table: {unknown}')
+
+    if not new_values:
+        # An UPDATE with nothing to set is invalid SQL, so this config always failed
+        # loudly before. A projection of it is a valid query -- an exact copy of the
+        # source -- so without this it would report success having changed nothing.
+        raise SQLExpressionError(
+            'No columns to update: every update column is missing a constant, an '
+            'expression and Set Null.'
+        )
+
+    projection = []
+    for sc in source_columns:
+        name = sc['source']
+        column = table.columns[name]
+        if name not in new_values:
+            projection.append(column.label(name))
+            continue
+        value = new_values[name]
+        if not isinstance(value, sqlalchemy.sql.expression.ClauseElement):
+            value = sqlalchemy.literal(value, type_=sqlalchemy_from_dtype(dtype_map.get(name, 'text')))
+        if condition is not None:
+            value = sqlalchemy.case((condition, value), else_=column)
+        projection.append(value.label(name))
+
+    return sqlalchemy.select(*projection).select_from(table)
+
+
 def get_delete_query(table, wheres, variables=None):
     delete_query = sqlalchemy.delete(table)
 

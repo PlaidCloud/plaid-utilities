@@ -2184,5 +2184,140 @@ class TestGetUpdateQuery(TestSQLExpression):
         )
 
 
+class TestGetUpdateRewriteQuery(TestSQLExpression):
+    """The projection form: wheres pick which rows change, not which rows come back."""
+
+    def setUp(self):
+        self.source_columns = [
+            {'source': 'Column1', 'dtype': 'text'},
+            {'source': 'Column2', 'dtype': 'numeric'},
+            {'source': 'Column3', 'dtype': 'numeric'},
+        ]
+        self.table = se.get_table_rep('table_12345', self.source_columns, 'anlz_schema')
+        self.dtype_map = {sc['source']: sc['dtype'] for sc in self.source_columns}
+
+    def rewrite(self, target_columns, wheres=None, variables=None):
+        return se.get_update_rewrite_query(
+            self.table, self.source_columns, target_columns,
+            wheres or [], self.dtype_map, variables,
+        )
+
+    def test_filter_becomes_a_case(self):
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column2', 'expression': 'table.Column2 * 2'}],
+                         ['table.Column1 == "foobar"']),
+            sqlalchemy.select(
+                c.Column1.label('Column1'),
+                sqlalchemy.case((c.Column1 == 'foobar', c.Column2 * 2), else_=c.Column2).label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_filter_never_becomes_a_where(self):
+        sql, _ = compiled(self.rewrite(
+            [{'source': 'Column2', 'expression': 'table.Column2 * 2'}],
+            ['table.Column1 == "foobar"'],
+        ))
+        self.assertNotIn('WHERE', sql.upper())
+
+    def test_projects_every_source_column_in_order(self):
+        query = self.rewrite([{'source': 'Column2', 'constant': '5'}])
+        self.assertEqual(
+            [col.name for col in query.selected_columns],
+            [sc['source'] for sc in self.source_columns],
+        )
+
+    def test_no_filter_emits_the_value_unconditionally(self):
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column2', 'nullify': True}]),
+            sqlalchemy.select(
+                c.Column1.label('Column1'),
+                sqlalchemy.literal(None, type_=se.sqlalchemy_from_dtype('numeric')).label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_nullify_with_a_filter(self):
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column2', 'nullify': True}], ['table.Column1 == "foobar"']),
+            sqlalchemy.select(
+                c.Column1.label('Column1'),
+                sqlalchemy.case(
+                    (c.Column1 == 'foobar',
+                     sqlalchemy.literal(None, type_=se.sqlalchemy_from_dtype('numeric'))),
+                    else_=c.Column2,
+                ).label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_text_column_with_no_value_blanks_matching_rows_only(self):
+        # get_update_value's quirk: a text column listed with no constant/expression/
+        # nullify is set to ''. Under a filter that must reach matching rows only.
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column1'}], ['table.Column2 == 1']),
+            sqlalchemy.select(
+                sqlalchemy.case(
+                    (c.Column2 == 1, sqlalchemy.literal(u'', type_=se.sqlalchemy_from_dtype('text'))),
+                    else_=c.Column1,
+                ).label('Column1'),
+                c.Column2.label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_unmapped_non_text_column_passes_through(self):
+        # A numeric column with no value is excluded from the update, so it does not
+        # reach the projection -- only the columns beside it do.
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column2'}, {'source': 'Column1', 'constant': 'x'}]),
+            sqlalchemy.select(
+                sqlalchemy.literal('x', type_=se.sqlalchemy_from_dtype('text')).label('Column1'),
+                c.Column2.label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_unknown_update_column_raises(self):
+        with self.assertRaises(se.SQLExpressionError):
+            self.rewrite([{'source': 'ghost', 'constant': 'X'}])
+
+    def test_nothing_to_update_raises(self):
+        # The equivalent UPDATE was invalid SQL, so this always failed loudly. The
+        # projection form is a valid query -- an exact copy -- so it must be rejected
+        # here or the step reports success having changed nothing.
+        for target_columns in ([], [{'source': 'Column2'}]):
+            with self.assertRaises(se.SQLExpressionError):
+                self.rewrite(target_columns)
+
+    def test_variables_are_applied(self):
+        c = self.table.c
+        self.assertEquivalent(
+            self.rewrite([{'source': 'Column1', 'constant': '{env}'}], variables={'env': 'prod'}),
+            sqlalchemy.select(
+                sqlalchemy.literal('prod', type_=se.sqlalchemy_from_dtype('text')).label('Column1'),
+                c.Column2.label('Column2'),
+                c.Column3.label('Column3'),
+            ).select_from(self.table),
+        )
+
+    def test_awkward_column_names(self):
+        source_columns = [
+            {'source': 'Calendar Date', 'dtype': 'date'},
+            {'source': '1.0', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep('table_12345', source_columns, 'anlz_schema')
+        query = se.get_update_rewrite_query(
+            table, source_columns, [{'source': '1.0', 'constant': '5'}], [],
+            {sc['source']: sc['dtype'] for sc in source_columns},
+        )
+        self.assertEqual([col.name for col in query.selected_columns], ['Calendar Date', '1.0'])
+
+
 if __name__ == '__main__':
     unittest.main()
