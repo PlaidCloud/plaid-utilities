@@ -2,6 +2,7 @@
 import unittest
 
 import sqlalchemy
+from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
@@ -532,6 +533,27 @@ class TestGetFromClause(TestSQLExpression):
             ),
             self.table.c.Column1.label('TargetColumn'),
         )
+
+    def test_source_dtype_largebinary_does_not_cast(self):
+        source_columns = [[{'source': 'RowVersionId', 'dtype': 'largebinary'}]]
+        table = se.get_table_rep('table_12345', source_columns[0], 'anlz_schema')
+        target = {'source': 'RowVersionId', 'target': 'RowVersionId', 'dtype': 'largebinary'}
+        self.assertEquivalent(
+            se.get_from_clause(
+                [table],
+                target,
+                source_columns,
+            ),
+            table.c.RowVersionId.label('RowVersionId'),
+        )
+        sql = str(sqlalchemy.select(
+            se.get_from_clause(
+                [table],
+                target,
+                source_columns,
+            )
+        ).compile(dialect=mssql.dialect()))
+        self.assertNotIn('CAST', sql)
 
     def test_source_column_with_dot(self):
         # weird edge case - column with dot in the name that doesn't represent a relationship to a self.table

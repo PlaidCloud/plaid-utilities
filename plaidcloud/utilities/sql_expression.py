@@ -708,7 +708,7 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
         raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
 
     # cast can be turned off
-    if cast:
+    if cast and target_column_config.get('dtype') != 'largebinary':
         cancellable_cast_type = cast_type
     else:
         cancellable_cast_type = None
