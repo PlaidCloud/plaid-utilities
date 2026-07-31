@@ -555,6 +555,58 @@ class TestGetFromClause(TestSQLExpression):
         ).compile(dialect=mssql.dialect()))
         self.assertNotIn('CAST', sql)
 
+    def test_null_dtype_falls_back_to_the_source_column(self):
+        # sc-23460: the join/lookup forms write dtype: null for a hand-added
+        # output column. Casting it to text would silently stringify a sum.
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': 'Column2', 'target': 'TargetColumn', 'dtype': None},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column2, sqlalchemy.NUMERIC).label(
+                'TargetColumn'
+            ),
+        )
+
+    def test_null_dtype_resolves_a_table_qualified_source(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': 'table.Column2', 'target': 'TargetColumn', 'dtype': None},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column2, sqlalchemy.NUMERIC).label(
+                'TargetColumn'
+            ),
+        )
+
+    def test_null_dtype_without_a_source_falls_back_to_text(self):
+        for dtype in (None, ''):
+            with self.subTest(dtype=dtype):
+                self.assertEquivalent(
+                    se.get_from_clause(
+                        [self.table],
+                        {'constant': 'foobar', 'target': 'TargetColumn', 'dtype': dtype},
+                        self.source_column_configs,
+                    ),
+                    sqlalchemy.cast(
+                        sqlalchemy.literal('foobar'), PlaidUnicode(length=5000)
+                    ).label('TargetColumn'),
+                )
+
+    def test_null_dtype_on_a_largebinary_source_still_does_not_cast(self):
+        source_columns = [[{'source': 'RowVersionId', 'dtype': 'largebinary'}]]
+        table = se.get_table_rep('table_12345', source_columns[0], 'anlz_schema')
+        sql = str(sqlalchemy.select(
+            se.get_from_clause(
+                [table],
+                {'source': 'RowVersionId', 'target': 'RowVersionId', 'dtype': None},
+                source_columns,
+            )
+        ).compile(dialect=mssql.dialect()))
+        self.assertNotIn('CAST', sql)
+
     def test_source_column_with_dot(self):
         # weird edge case - column with dot in the name that doesn't represent a relationship to a self.table
         edge_source_column_configs = [[

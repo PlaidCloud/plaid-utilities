@@ -708,7 +708,7 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
         raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
 
     # cast can be turned off
-    if cast and target_column_config.get('dtype') != 'largebinary':
+    if cast and _target_dtype(target_column_config, source_column_configs) != 'largebinary':
         cancellable_cast_type = cast_type
     else:
         cancellable_cast_type = None
@@ -728,6 +728,37 @@ def _sort_ascending(sort_config) -> bool | None:
     return {'asc': True, 'desc': False}.get(sort_config)
 
 
+def _target_dtype(target_column_config: dict, source_column_configs: list[list[dict]]) -> str:
+    """Resolve a target column's dtype, tolerating a missing or null one.
+
+    The join/lookup step forms write ``dtype: null`` for a hand-added output
+    column (sc-23460), and `sqlalchemy_from_dtype(None)` raises
+    `RegexMapKeyError: 'none'` rather than returning a type — a 500 on save and
+    a crashed step at run time. Fall back to the source column's dtype so a
+    numeric column isn't silently stringified, then to text, which is what the
+    forms' own column default has always been.
+
+    The source lookup matches the configured name first, then the name with a
+    table qualifier stripped — so a column genuinely named ``a.b`` wins over
+    the ``b`` of a ``table.b`` reading. It is not alias-aware: a *qualified*
+    source takes the first list carrying that bare name, which can be the wrong
+    side when both tables share a column name. That only ever applies where the
+    config used to raise outright, and lands no worse than the forms' own text
+    default, so it isn't worth threading alias resolution through here.
+    """
+    dtype = target_column_config.get('dtype')
+    if dtype:
+        return dtype
+    source = target_column_config.get('source')
+    if source:
+        source_columns = [sc for scs in source_column_configs or [] for sc in scs or []]
+        for name in (source, source.split('.', 1)[-1]):
+            for sc in source_columns:
+                if sc.get('source') == name and sc.get('dtype'):
+                    return sc['dtype']
+    return 'text'
+
+
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
@@ -741,7 +772,8 @@ def get_from_clause(
     source = target_column_config.get('source')
 
     name = target_column_config.get('target')
-    cast_type = sqlalchemy_from_dtype(target_column_config.get('dtype'))
+    dtype = _target_dtype(target_column_config, source_column_configs)
+    cast_type = sqlalchemy_from_dtype(dtype)
 
     if aggregate:
         agg_type = target_column_config.get('agg')
