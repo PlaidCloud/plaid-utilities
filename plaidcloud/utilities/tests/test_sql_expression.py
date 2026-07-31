@@ -581,6 +581,29 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
+    def test_null_dtype_on_an_ambiguous_source_name_falls_back_to_text(self):
+        # Two source tables carrying the same column name under different
+        # dtypes. Picking a side would risk CAST(<text> AS NUMERIC), which the
+        # warehouse can reject; text always casts.
+        ambiguous = [
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+            [{'source': 'Amount', 'dtype': 'text'}],
+        ]
+        self.assertEqual(
+            se._target_dtype({'source': 'table2.Amount', 'dtype': None}, ambiguous),
+            'text',
+        )
+
+    def test_null_dtype_on_an_agreeing_source_name_still_resolves(self):
+        agreeing = [
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, agreeing),
+            'numeric',
+        )
+
     def test_null_dtype_without_a_source_falls_back_to_text(self):
         for dtype in (None, ''):
             with self.subTest(dtype=dtype):

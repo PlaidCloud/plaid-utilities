@@ -740,11 +740,12 @@ def _target_dtype(target_column_config: dict, source_column_configs: list[list[d
 
     The source lookup matches the configured name first, then the name with a
     table qualifier stripped — so a column genuinely named ``a.b`` wins over
-    the ``b`` of a ``table.b`` reading. It is not alias-aware: a *qualified*
-    source takes the first list carrying that bare name, which can be the wrong
-    side when both tables share a column name. That only ever applies where the
-    config used to raise outright, and lands no worse than the forms' own text
-    default, so it isn't worth threading alias resolution through here.
+    the ``b`` of a ``table.b`` reading. It is deliberately not alias-aware, so
+    a name carried by more than one source table is *ambiguous*: rather than
+    guess a side, an ambiguous name falls through to text. Guessing is the one
+    thing this must not do — picking the wrong side yields a wrongly-typed cast
+    (``CAST(<text column> AS NUMERIC)``), which can fail in the warehouse,
+    whereas casting a numeric column to text cannot.
     """
     dtype = target_column_config.get('dtype')
     if dtype:
@@ -753,9 +754,14 @@ def _target_dtype(target_column_config: dict, source_column_configs: list[list[d
     if source:
         source_columns = [sc for scs in source_column_configs or [] for sc in scs or []]
         for name in (source, source.split('.', 1)[-1]):
-            for sc in source_columns:
-                if sc.get('source') == name and sc.get('dtype'):
-                    return sc['dtype']
+            candidates = {
+                sc['dtype'] for sc in source_columns
+                if sc.get('source') == name and sc.get('dtype')
+            }
+            if len(candidates) == 1:
+                return candidates.pop()
+            if candidates:
+                break
     return 'text'
 
 
