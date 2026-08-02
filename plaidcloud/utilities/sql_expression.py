@@ -1332,6 +1332,14 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
         if include
     }
 
+    if not values:
+        # values({}) compiles to `UPDATE ... SET  WHERE ...`, a syntax error at the
+        # warehouse that names neither the step nor the column.
+        raise SQLExpressionError(
+            'No columns to update: every update column is missing a constant, an '
+            f'expression and Set Null. Columns: {[tc["source"] for tc in target_columns]}'
+        )
+
     return update_query.values(values)
 
 
