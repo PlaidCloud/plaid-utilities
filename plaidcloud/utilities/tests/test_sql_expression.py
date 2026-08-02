@@ -581,16 +581,56 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
-    def test_null_dtype_on_an_ambiguous_source_name_falls_back_to_text(self):
-        # Two source tables carrying the same column name under different
-        # dtypes. Picking a side would risk CAST(<text> AS NUMERIC), which the
-        # warehouse can reject; text always casts.
-        ambiguous = [
-            [{'source': 'Amount', 'dtype': 'numeric'}],
+    def _shared_name_sources(self):
+        """Two sources carrying `Amount` under different dtypes."""
+        configs = [
             [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
         ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        return configs, tables
+
+    def test_null_dtype_follows_a_positional_table_reference(self):
+        # `table2.Amount` names one side outright, so there is nothing to guess:
+        # the dtype must be the one belonging to the column the query selects.
+        configs, tables = self._shared_name_sources()
         self.assertEqual(
-            se._target_dtype({'source': 'table2.Amount', 'dtype': None}, ambiguous),
+            se._target_dtype({'source': 'table2.Amount', 'dtype': None}, configs, tables),
+            'numeric',
+        )
+
+    def test_null_dtype_follows_the_source_alias(self):
+        # frame_join_multi names its side with source_alias.
+        configs, tables = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype(
+                {'source': 'Amount', 'source_alias': 'b', 'dtype': None},
+                configs, tables,
+                tables_by_alias={'a': tables[0], 'b': tables[1]},
+            ),
+            'numeric',
+        )
+
+    def test_null_dtype_follows_the_table_the_query_reads(self):
+        # A bare shared name: `get_column_table` resolves it to the first
+        # source for a 2-table join, and the emitted column comes from there —
+        # so the dtype has to come from there too, or the cast is mistyped.
+        configs, tables = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, configs, tables),
+            'text',
+        )
+
+    def test_null_dtype_on_an_unresolvable_source_name_falls_back_to_text(self):
+        # No tables to resolve against, and the name carries two dtypes.
+        # Picking a side would risk CAST(<text> AS NUMERIC), which the
+        # warehouse can reject; text always casts.
+        configs, _ = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, configs),
             'text',
         )
 

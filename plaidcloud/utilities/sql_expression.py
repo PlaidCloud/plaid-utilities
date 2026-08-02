@@ -708,7 +708,11 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
         raise SQLExpressionError(f'Cannot find source column {source} in table {table.name}')
 
     # cast can be turned off
-    if cast and _target_dtype(target_column_config, source_column_configs) != 'largebinary':
+    resolved_dtype = _target_dtype(
+        target_column_config, source_column_configs, tables, table_numbering_start,
+        tables_by_alias=tables_by_alias,
+    )
+    if cast and resolved_dtype != 'largebinary':
         cancellable_cast_type = cast_type
     else:
         cancellable_cast_type = None
@@ -728,7 +732,48 @@ def _sort_ascending(sort_config) -> bool | None:
     return {'asc': True, 'desc': False}.get(sort_config)
 
 
-def _target_dtype(target_column_config: dict, source_column_configs: list[list[dict]]) -> str:
+def _owning_source_columns(
+    target_column_config: dict, source_column_configs: list[list[dict]],
+    tables: list[sqlalchemy.Table] | None, table_numbering_start: int,
+    *, tables_by_alias: dict | None = None,
+) -> list[dict]:
+    """The source-column list the emitted column will actually be read from.
+
+    Reuses `get_column_table`'s precedence (`source_alias` → legacy
+    `source_table` → positional `tableN.col` → name-intersect) rather than
+    re-deriving a weaker one, so the dtype follows the same column the query
+    selects. That matters for a name several sources carry: `source_from_clause`
+    resolves it to one table regardless, so reading the dtype off a different
+    one — or declining to read it at all — is what would produce a mistyped
+    cast.
+
+    Falls back to every source's columns when the table can't be resolved.
+    `get_column_table` raises on the cases it considers unresolvable, and this
+    must never turn a fallback into a raise: `source_from_clause` calls it again
+    a moment later and owns that error.
+    """
+    everything = [sc for scs in source_column_configs or [] for sc in scs or []]
+    if not tables or len(tables) < 2:
+        return everything
+    try:
+        table = get_column_table(
+            tables, target_column_config, source_column_configs,
+            table_numbering_start=table_numbering_start,
+            tables_by_alias=tables_by_alias,
+        )
+    except Exception:  # pylint: disable=broad-except
+        return everything
+    for candidate, columns in zip(tables, source_column_configs or []):
+        if candidate is table:
+            return list(columns or [])
+    return everything
+
+
+def _target_dtype(
+    target_column_config: dict, source_column_configs: list[list[dict]],
+    tables: list[sqlalchemy.Table] | None = None, table_numbering_start: int = 1,
+    *, tables_by_alias: dict | None = None,
+) -> str:
     """Resolve a target column's dtype, tolerating a missing or null one.
 
     The join/lookup step forms write ``dtype: null`` for a hand-added output
@@ -738,21 +783,24 @@ def _target_dtype(target_column_config: dict, source_column_configs: list[list[d
     numeric column isn't silently stringified, then to text, which is what the
     forms' own column default has always been.
 
-    The source lookup matches the configured name first, then the name with a
-    table qualifier stripped — so a column genuinely named ``a.b`` wins over
-    the ``b`` of a ``table.b`` reading. It is deliberately not alias-aware, so
-    a name carried by more than one source table is *ambiguous*: rather than
-    guess a side, an ambiguous name falls through to text. Guessing is the one
-    thing this must not do — picking the wrong side yields a wrongly-typed cast
-    (``CAST(<text column> AS NUMERIC)``), which can fail in the warehouse,
-    whereas casting a numeric column to text cannot.
+    The source is narrowed to the table the query will read from (see
+    `_owning_source_columns`) before the name is matched — the configured name
+    first, then the name with a table qualifier stripped, so a column genuinely
+    named ``a.b`` wins over the ``b`` of a ``table.b`` reading. Only a name that
+    survives that narrowing still carrying two different dtypes is treated as
+    ambiguous, and falls through to text rather than picking a side: a wrong
+    guess yields ``CAST(<text column> AS NUMERIC)``, which the warehouse can
+    reject, where casting a numeric column to text cannot.
     """
     dtype = target_column_config.get('dtype')
     if dtype:
         return dtype
     source = target_column_config.get('source')
     if source:
-        source_columns = [sc for scs in source_column_configs or [] for sc in scs or []]
+        source_columns = _owning_source_columns(
+            target_column_config, source_column_configs, tables,
+            table_numbering_start, tables_by_alias=tables_by_alias,
+        )
         for name in (source, source.split('.', 1)[-1]):
             candidates = {
                 sc['dtype'] for sc in source_columns
@@ -778,7 +826,10 @@ def get_from_clause(
     source = target_column_config.get('source')
 
     name = target_column_config.get('target')
-    dtype = _target_dtype(target_column_config, source_column_configs)
+    dtype = _target_dtype(
+        target_column_config, source_column_configs, tables, table_numbering_start,
+        tables_by_alias=tables_by_alias,
+    )
     cast_type = sqlalchemy_from_dtype(dtype)
 
     if aggregate:
