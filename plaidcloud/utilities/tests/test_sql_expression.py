@@ -2183,6 +2183,18 @@ class TestGetUpdateQuery(TestSQLExpression):
             sqlalchemy.update(self.table).values({'Column1': u''})
         )
 
+    def test_nothing_to_update_raises(self):
+        # Every excluded column leaves an empty values dict, which compiles to
+        # `UPDATE ... SET  WHERE ...` -- a syntax error at the warehouse.
+        for target_columns in ([], [{'source': 'Column2'}], [{'source': 'Column2'}, {'source': 'Column3'}]):
+            with self.assertRaises(se.SQLExpressionError):
+                se.get_update_query(self.table, target_columns, ['table.Column1 == "foobar"'], self.dtype_map)
+
+    def test_nothing_to_update_error_names_the_columns(self):
+        with self.assertRaises(se.SQLExpressionError) as caught:
+            se.get_update_query(self.table, [{'source': 'Column2'}], [], self.dtype_map)
+        self.assertIn('Column2', str(caught.exception))
+
 
 class TestGetUpdateRewriteQuery(TestSQLExpression):
     """The projection form: wheres pick which rows change, not which rows come back."""
