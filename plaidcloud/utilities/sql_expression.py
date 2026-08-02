@@ -1284,15 +1284,11 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     if combined_wheres:
         update_query = update_query.where(*combined_wheres)
 
-    # Build values dict
-    values = {
-        col_name: value
-        for col_name, include, value in [
-            (tc['source'],) + get_update_value(tc, table, dtype_map, variables)
-            for tc in target_columns
-        ]
-        if include
-    }
+    values = {}
+    for tc in target_columns:
+        include, value = get_update_value(tc, table, dtype_map, variables)
+        if include:
+            values[tc['source']] = value
 
     if not values:
         # values({}) compiles to `UPDATE ... SET  WHERE ...`, a syntax error at the
