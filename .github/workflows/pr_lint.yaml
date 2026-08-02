@@ -14,6 +14,10 @@ jobs:
           python-version: '3.12'
       - name: Checkout code
         uses: actions/checkout@v7.0.0
+        with:
+          # diff-cover needs the merge-base with the base branch; the default
+          # depth-1 clone has no history to diff against.
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -23,6 +27,7 @@ jobs:
         run: |
           uv pip install --system -e .[test]
           uv pip install --system -q ruff
+          uv pip install --system -q diff-cover==10.4.1
       - name: License Checker
         uses: andersy005/gh-action-py-liccheck@main
         with:
@@ -40,6 +45,20 @@ jobs:
       - name: Perform Tests
         run: |
           pytest
+      # Gates coverage of the lines this PR changed. A global threshold is useless
+      # here -- the repo sits at ~57% overall, which is historical debt, not this
+      # PR's quality. Deliberately NOT `!cancelled()` like the report steps below:
+      # a failed pytest leaves coverage.xml stale or absent, so diff-cover would
+      # report a meaningless number on top of the real failure. Default `success()`
+      # skips it and lets pytest be the reported cause.
+      - name: Check Patch Coverage
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          diff-cover coverage.xml \
+            --compare-branch="origin/${BASE_REF}" \
+            --fail-under=80 \
+            --format markdown:"${GITHUB_STEP_SUMMARY}"
       - name: Test Report
         uses: dorny/test-reporter@v3
         if: success() || failure()    # run this step even if previous step failed
@@ -48,10 +67,17 @@ jobs:
           path: pytestresult.xml    # Path to test results
           reporter: java-junit      # Format of test results
           token: ${{ secrets.GITHUB_TOKEN }}
+      # Report-only, and cannot be otherwise: with fail_below_threshold off this
+      # action always reports the `neutral` conclusion, which never fails a PR.
+      # `minimum_coverage` only drives the check/cross icons in the file table, so
+      # it is set to the repo's current global coverage -- a cross then means "worse
+      # than the repo average" rather than implying a gate that does not exist.
+      # The real gate is the Check Patch Coverage step above.
       - name: Prepare Coverage Report
         uses: 5monkeys/cobertura-action@master
         if: success() || failure()    # run this step even if previous step failed
         with:
           path: coverage.xml
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          minimum_coverage: 75
+          fail_below_threshold: false
+          minimum_coverage: 57
