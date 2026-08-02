@@ -2397,6 +2397,16 @@ class TestApplyRules(TestSQLExpression):
         _, query = self.apply(df_rules)
         self.assertIsNotNone(query)
 
+    def test_render_failure_that_is_not_a_sqlalchemy_error_still_passes(self):
+        """A compiler may raise anything — `slice_string` raises NotImplementedError.
+
+        Probing the render must not turn an unrenderable predicate into a failed
+        rule build; whatever it is, it is not empty.
+        """
+        df_rules = self.rules("func.slice_string(get_column(table, 'combo'), -3, 2)=='xx'")
+        _, query = self.apply(df_rules)
+        self.assertIsNotNone(query)
+
     def test_catchall_rule_is_accepted(self):
         """`and_(true)` is a real predicate — the guard must not reject it."""
         df_rules = self.rules("get_column(table, 'combo')=='x'", 'and_(true)')

@@ -1809,12 +1809,17 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
         """
         predicate = eval_rule(rule[condition_column], variables={}, tables=[cte_source])
         try:
-            renders = bool(str(predicate).strip())
-        except sqlalchemy.exc.SQLAlchemyError:
-            # str() compiles under the default dialect, and a construct with a
-            # dialect-only compiler raises there. Whatever it is, it is not empty.
+            renders = predicate is not None and bool(str(predicate).strip())
+        except Exception:
+            # `str()` compiles under the *default* dialect, and a construct whose
+            # compiler is dialect-specific raises there — with anything it likes
+            # (CompileError, but also NotImplementedError, e.g. slice_string).
+            # The only question here is whether the predicate rendered to nothing,
+            # and a failed render is never an empty one, so let it through: if the
+            # expression really is broken it fails again at execution against the
+            # dialect that has to run it, with a message about that dialect.
             renders = True
-        if predicate is None or not renders:
+        if not renders:
             raise SQLExpressionError(
                 f'Rule {rule[rule_id_column]!r} has a condition that compiles to no SQL, so it '
                 f'would either produce an unparseable statement or match every row: '
