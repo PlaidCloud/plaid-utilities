@@ -89,10 +89,18 @@ class Connection:
 
         _dialect_kind = self.rpc.analyze.query.dialect()
 
+        # No fallback: a bare `except` here used to substitute 'postgresql',
+        # which compiles plausible-looking Postgres SQL against a Databend or
+        # StarRocks warehouse rather than failing. An unloadable dialect means
+        # the image is missing that engine's driver, which is a deployment
+        # fault, not something to paper over (sc-23700).
         try:
             dialect_cls = registry.load(_dialect_kind)
-        except:
-            dialect_cls = registry.load('postgresql')
+        except sqlalchemy.exc.NoSuchModuleError as exc:
+            raise RuntimeError(
+                f'No SQLAlchemy driver for the project datastore dialect {_dialect_kind!r} — '
+                'this image cannot compile SQL for that warehouse.'
+            ) from exc
         self.dialect = dialect_cls(paramstyle='pyformat')
         self._variables = self._NOT_LOADED
         self._udf = self._NOT_LOADED
