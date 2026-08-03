@@ -1,4 +1,5 @@
 # coding=utf-8
+import functools
 import unittest
 
 import pandas
@@ -9,7 +10,7 @@ from toolz.functoolz import identity as ident
 
 from plaidcloud.rpc.database import PlaidCurrency, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
-from plaidcloud.utilities.analyze_table import compiled
+from plaidcloud.utilities.analyze_table import compiled as _compiled
 
 __author__ = "Adams Tower"
 __copyright__ = "© Copyright 2009-2023, Tartan Solutions, Inc"
@@ -17,6 +18,12 @@ __credits__ = ["Adams Tower"]
 __license__ = "Apache 2.0"
 __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
+
+
+# These assertions are all written against postgres-family SQL; `compiled` no
+# longer has a default dialect. Postgres, not Greenplum — the rendered SQL is
+# byte-identical here and Greenplum is being removed as an engine.
+compiled = functools.partial(_compiled, dialect='postgresql')
 
 
 #TODO: test allocate
