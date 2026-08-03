@@ -112,6 +112,113 @@ def postgres_to_snowflake_date_format(pg_format):
     return ''.join(out)
 
 
+# ---------------------------------------------------------------------------
+# Postgres date-format tokens → StarRocks (MySQL) format specifiers
+# ---------------------------------------------------------------------------
+#: StarRocks' str_to_date / str2date / date_format take MySQL specifiers, which
+#: collide with Python's strftime on the two most common tokens: on StarRocks
+#: %M is the full month name and %i is the minute, the exact opposite of
+#: Python, where %M is the minute. Handing a Python format to str_to_date
+#: therefore parses to NULL and to date_format renders 'January' where the
+#: minutes belong. Verified live on StarRocks 4.1.3 and against
+#: docs.starrocks.io/docs/sql-reference/sql-functions/date-time-functions/date_format:
+#:   - %i minutes, %M full month name, %W full weekday name, %b abbreviated
+#:     month, %a abbreviated weekday, %h hour 01-12, %H hour 00-23, %f
+#:     microseconds, %j day of year
+#:   - %v/%x are the ISO-8601 (Monday-first) week and its week-numbering year
+#:   - no timezone specifier of any kind exists
+#:   - StarRocks renders an unrecognized specifier as the bare character, so a
+#:     silent passthrough of a real Postgres token would produce wrong output,
+#:     not an error — every token in plaid-rpc's conversion-table vocabulary
+#:     therefore maps to a specifier or to None, and None raises at compile time
+_STARROCKS_DATE_FORMAT_TOKENS = {
+    'IYYY': '%x',
+    'YYYY': '%Y',
+    'YY': '%y',
+    'Month': '%M',
+    'MONTH': '%M',
+    'Mon': '%b',
+    'MON': '%b',
+    'MM': '%m',
+    'DDD': '%j',
+    'DD': '%d',
+    'Day': '%W',
+    'DAY': '%W',
+    'Dy': '%a',
+    'DY': '%a',
+    # Postgres D is 1-7 with Sunday=1; StarRocks %w is 0-6 with Sunday=0.
+    'D': None,
+    'HH24': '%H',
+    'HH12': '%h',
+    'HH': '%h',
+    'MI': '%i',
+    'SS': '%S',
+    'AM': '%p',
+    'PM': '%p',
+    'US': '%f',
+    'TZ': None,
+    'tz': None,
+    'IW': '%v',
+}
+
+_STARROCKS_TOKENS_BY_LENGTH = sorted(_STARROCKS_DATE_FORMAT_TOKENS, key=len, reverse=True)
+
+
+def postgres_to_starrocks_date_format(pg_format):
+    """Translates a Postgres date-format string to StarRocks (MySQL) specifiers.
+
+    Postgres double-quoted literals become bare text — StarRocks has no
+    quoting mechanism in a format string, so "T" must render as T for
+    '2026-08-03T14:22:31' to parse. A literal % inside such a section is
+    escaped to %%.
+
+    Tokens from the plaid-rpc conversion-table vocabulary with no StarRocks
+    specifier raise CompileError. Postgres tokens outside it (Q, WW, W, J, CC,
+    lowercase forms, …) pass through as literal text, the same treatment the
+    databend/snowflake translators give out-of-table tokens.
+    """
+    out = []
+    i = 0
+    while i < len(pg_format):
+        char = pg_format[i]
+        if char == '"':
+            end = pg_format.find('"', i + 1)
+            if end == -1:
+                out.append(pg_format[i + 1:].replace('%', '%%'))
+                break
+            out.append(pg_format[i + 1:end].replace('%', '%%'))
+            i = end + 1
+            continue
+        for token in _STARROCKS_TOKENS_BY_LENGTH:
+            if pg_format.startswith(token, i):
+                mapped = _STARROCKS_DATE_FORMAT_TOKENS[token]
+                if mapped is None:
+                    raise CompileError(
+                        f"Date format token {token!r} in {pg_format!r} has no StarRocks format specifier"
+                    )
+                out.append(mapped)
+                i += len(token)
+                break
+        else:
+            out.append(char)
+            i += 1
+    return ''.join(out)
+
+
+def _starrocks_date_format(datetime_format):
+    """Normalizes any inbound format to StarRocks specifiers.
+
+    Callers pass either a Python strftime format or a Postgres format; the
+    Python one is routed through Postgres first so a single token table covers
+    both, exactly as the snowflake compilers do.
+    """
+    if not datetime_format:
+        return datetime_format
+    if '%' in datetime_format:
+        datetime_format = python_to_postgres_date_format(datetime_format)
+    return postgres_to_starrocks_date_format(datetime_format)
+
+
 class elapsed_seconds(FunctionElement):
     type = Numeric()
     name = 'elapsed_seconds'
@@ -592,9 +699,7 @@ def compile_safe_to_timestamp_starrocks(element, compiler, **kw):
         datetime_format = datetime_format.value
 
     text = func.cast(text, sqlalchemy.Text)
-    if datetime_format and '%' not in datetime_format:
-        datetime_format = postgres_to_python_date_format(datetime_format)
-    datetime_format = func.cast(datetime_format, sqlalchemy.Text)
+    datetime_format = func.cast(_starrocks_date_format(datetime_format), sqlalchemy.Text)
     if args:
         compiled_args = ', '.join([compiler.process(arg) for arg in args])
         return f"str_to_date({compiler.process(text)}, {compiler.process(datetime_format)}, {compiled_args})"
@@ -1122,9 +1227,11 @@ def compile_safe_to_date_starrocks(element, compiler, **kw):
     text, *args = list(element.clauses)
     if len(args):
         date_format = args[0].value
-        if date_format and '%' not in date_format:
+        if date_format:
+            if '%' in date_format:
+                date_format = python_to_postgres_date_format(date_format)
             date_format = date_format_from_datetime_format(date_format)
-            date_format = postgres_to_python_date_format(date_format)
+            date_format = postgres_to_starrocks_date_format(date_format)
         return f"str2date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)}, {compiler.process(func.cast(date_format, sqlalchemy.Text))})"
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
@@ -1546,9 +1653,7 @@ def compile_to_char_starrocks(element, compiler, **kw):
     if format_ is None or '0' in format_ or '9' in format_:
         return f"CAST({compiler.process(source)} AS CHAR)"
 
-    if format_ and '%' not in format_:
-        format_ = postgres_to_python_date_format(format_)
-    return f"date_format({compiler.process(source)}, {compiler.process(sqlalchemy.literal(format_))})"
+    return f"date_format({compiler.process(source)}, {compiler.process(sqlalchemy.literal(_starrocks_date_format(format_)))})"
 
 
 @compiles(sql_to_char, 'snowflake')

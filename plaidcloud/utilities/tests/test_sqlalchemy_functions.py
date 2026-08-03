@@ -2,6 +2,7 @@
 import asyncio
 import os
 import pickle
+import re
 import subprocess
 import sys
 import textwrap
@@ -429,10 +430,12 @@ IMPORT_COL_SNAPSHOTS = {
         {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
     ),
     ('starrocks', 'time'): (
+        # %i, not %M: str_to_date reads MySQL specifiers, where %M is the month
+        # name. See TestStarrocksDateFormatValues for the value-level proof.
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
          '%(regexp_replace_3)s) THEN NULL ELSE str_to_date(CAST(%(import_col_1)s AS STRING), CAST(%(param_1)s AS'
          ' STRING)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%M:%S'},
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': '%H:%i:%S'},
     ),
     ('starrocks', 'bigint'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
@@ -1454,6 +1457,99 @@ class TestToCharStarrocks(StarrocksTest):
         expr = sqlalchemy.func.to_char(sqlalchemy.column('c'))
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertEqual('CAST(c AS CHAR)', str(compiled))
+
+
+#: StarRocks' documented format specifiers mapped to the Python strftime
+#: specifier carrying the same meaning. Built from the StarRocks date_format
+#: reference, not from the Postgres→StarRocks table under test, so the two most
+#: dangerous confusions show up as a parse failure here: on StarRocks %i is the
+#: minute and %M is the full month name, the opposite of Python.
+_STARROCKS_TO_PYTHON_SPECIFIER = {
+    '%Y': '%Y', '%y': '%y',
+    '%m': '%m', '%c': '%m', '%b': '%b', '%M': '%B',
+    '%d': '%d', '%e': '%d', '%j': '%j',
+    '%a': '%a', '%W': '%A',
+    '%H': '%H', '%k': '%H', '%h': '%I', '%I': '%I', '%l': '%I',
+    '%i': '%M',
+    '%S': '%S', '%s': '%S', '%f': '%f',
+    '%p': '%p', '%%': '%%',
+}
+
+
+def as_python_format(starrocks_format):
+    """Reads a StarRocks format string the way StarRocks itself would.
+
+    Raises KeyError on a specifier StarRocks does not define — StarRocks would
+    render it as the bare character, which is never what a caller meant.
+    """
+    return re.sub(
+        r'%.',
+        lambda match: _STARROCKS_TO_PYTHON_SPECIFIER[match.group(0)],
+        starrocks_format,
+    )
+
+
+class TestStarrocksDateFormatValues(StarrocksTest):
+    """Every emitted format must round trip a real value, not just look right.
+
+    str_to_date returns NULL on a format it cannot match, so a wrong specifier
+    empties the column instead of raising — a compiled-string assertion cannot
+    tell the two apart. These parse the value instead. Expectations verified
+    live against StarRocks 4.1.3.
+    """
+
+    SAMPLE = datetime.datetime(2026, 8, 3, 14, 22, 31)
+
+    def format_of(self, expr):
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        return compiled.params['param_1']
+
+    def test_to_timestamp_default_format(self):
+        fmt = self.format_of(sqlalchemy.func.to_timestamp(sqlalchemy.column('t')))
+        self.assertEqual(self.SAMPLE, datetime.datetime.strptime('2026-08-03 14:22:31', as_python_format(fmt)))
+
+    def test_to_timestamp_postgres_iso_format(self):
+        fmt = self.format_of(sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), 'YYYY-MM-DD"T"HH24:MI:SS'))
+        self.assertEqual(self.SAMPLE, datetime.datetime.strptime('2026-08-03T14:22:31', as_python_format(fmt)))
+
+    def test_to_timestamp_python_iso_format(self):
+        fmt = self.format_of(sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), '%Y-%m-%dT%H:%M:%S'))
+        self.assertEqual(self.SAMPLE, datetime.datetime.strptime('2026-08-03T14:22:31', as_python_format(fmt)))
+
+    def test_to_timestamp_twelve_hour_format(self):
+        fmt = self.format_of(sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), 'YYYY-MM-DD HH:MI:SS AM'))
+        self.assertEqual(self.SAMPLE, datetime.datetime.strptime('2026-08-03 02:22:31 PM', as_python_format(fmt)))
+
+    def test_import_col_timestamp(self):
+        # import_col → import_cast → to_timestamp: the path every imported
+        # timestamp column takes.
+        expr = sqlalchemy.func.import_col(sqlalchemy.column('c'), 'timestamp', 'YYYY-MM-DD"T"HH24:MI:SS', False)
+        fmt = self.format_of(expr)
+        self.assertEqual(self.SAMPLE, datetime.datetime.strptime('2026-08-03T14:22:31', as_python_format(fmt)))
+
+    def test_to_date_drops_the_time_part(self):
+        fmt = self.format_of(sqlalchemy.func.to_date('x', 'YYYY-MM-DD HH24:MI:SS'))
+        self.assertEqual(self.SAMPLE.date(), datetime.datetime.strptime('2026-08-03', as_python_format(fmt)).date())
+
+    def test_to_date_keeps_the_time_part_of_a_custom_format(self):
+        fmt = self.format_of(sqlalchemy.func.to_date('x', 'MM-DD-YYYY HH24:MI'))
+        parsed = datetime.datetime.strptime('08-03-2026 14:22', as_python_format(fmt))
+        self.assertEqual(self.SAMPLE.replace(second=0), parsed)
+
+    def test_to_char_renders_the_minute(self):
+        fmt = self.format_of(sqlalchemy.func.to_char(sqlalchemy.column('d'), 'HH24:MI:SS'))
+        self.assertEqual('14:22:31', self.SAMPLE.strftime(as_python_format(fmt)))
+
+    def test_to_char_renders_the_month_name(self):
+        fmt = self.format_of(sqlalchemy.func.to_char(sqlalchemy.column('d'), 'Month DD, YYYY'))
+        self.assertEqual('August 03, 2026', self.SAMPLE.strftime(as_python_format(fmt)))
+
+    def test_unsupported_token_raises(self):
+        # StarRocks has no timezone specifier; passing TZ through would render
+        # a bare 'TZ' rather than erroring.
+        expr = sqlalchemy.func.to_timestamp(sqlalchemy.column('t'), 'YYYY-MM-DD HH24:MI:SS TZ')
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
 
 
 class TestToNumberStarrocks(StarrocksTest):
