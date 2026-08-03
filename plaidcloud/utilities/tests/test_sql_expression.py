@@ -9,7 +9,7 @@ from toolz.functoolz import identity as ident
 
 from plaidcloud.rpc.database import PlaidCurrency, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
-from plaidcloud.utilities.analyze_table import compiled
+from plaidcloud.utilities.analyze_table import compiled as _compiled
 
 __author__ = "Adams Tower"
 __copyright__ = "© Copyright 2009-2023, Tartan Solutions, Inc"
@@ -17,6 +17,12 @@ __credits__ = ["Adams Tower"]
 __license__ = "Apache 2.0"
 __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
+
+
+def compiled(sa_query):
+    """These assertions predate multi-lakehouse and are all written against
+    postgres-family SQL; `compiled` no longer has a default dialect."""
+    return _compiled(sa_query, 'greenplum')
 
 
 #TODO: test allocate

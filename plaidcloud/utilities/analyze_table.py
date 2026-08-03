@@ -124,23 +124,27 @@ class AnalyzeTable(sqlalchemy.Table):
         return send_query(self._rpc, self.project_id, query)  # pylint: disable=no-member
 
 
-def compiled(sa_query, dialect='greenplum'):
+def compiled(sa_query, dialect=None):
     """Returns SQL query for the supplied dialect, in the form of a string, given a sqlalchemy query.
       Also returns a params dict for use when calling engine.execute
 
     Notes:
-        If the requests compilation dialect is not available, an error will be raised
+        If the requested compilation dialect is missing or not available, an error will be raised
 
     Args:
         sa_query (sqlalchemy.sql.expression.Executable):
-        dialect (str, optional): The sqlalchemy dialect with which to compile the query
+        dialect (str): The sqlalchemy dialect with which to compile the query
 
     Returns:
         tuple: containing:
             str: compiled query
             dict: query parameters
     """
-    dialect = dialect or 'greenplum'  # Just in case someone sends a blank string, or a None by mistake
+    # No default: this used to fall back to 'greenplum', which is not a lakehouse
+    # engine any tenant runs, so a missing dialect quietly produced SQL for an
+    # engine that cannot exist (sc-23700).
+    if not dialect:
+        raise ValueError('No dialect supplied — cannot compile SQL without the datastore dialect.')
     eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/', paramstyle='pyformat')
     compiled_query = sa_query.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
     # Flatten to one line with a SPACE, not '': dropping the newline outright
@@ -149,7 +153,7 @@ def compiled(sa_query, dialect='greenplum'):
     return str(compiled_query).replace('\n', ' '), compiled_query.params
 
 
-def send_query(project, query, params=None, rpc=None):
+def send_query(project, query, params=None, rpc=None, dialect=None):
     if not rpc:
         rpc = Connect()
 
@@ -158,7 +162,7 @@ def send_query(project, query, params=None, rpc=None):
     if isinstance(query, str):
         query_string = query
     else:
-        query_string, params = compiled(query)
+        query_string, params = compiled(query, dialect)
 
     return rpc.analyze.query.stream(
         project_id=project_id, query=query_string, params=params,
