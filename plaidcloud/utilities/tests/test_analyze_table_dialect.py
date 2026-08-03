@@ -22,11 +22,12 @@ class TestCompiledRequiresDialect(unittest.TestCase):
     def setUp(self):
         self.query = sqlalchemy.select(sqlalchemy.literal(1))
 
-    def test_missing_dialect_raises(self):
-        for missing in (None, ''):
-            with self.subTest(dialect=missing), self.assertRaisesRegex(ValueError, 'dialect'):
-                compiled(self.query, missing)
+    def test_blank_dialect_raises(self):
+        with self.assertRaisesRegex(ValueError, 'dialect'):
+            compiled(self.query, '')
 
     def test_omitted_dialect_raises(self):
+        # The shape `send_query` uses, and the one an external caller relying on
+        # the old 'greenplum' default hits.
         with self.assertRaisesRegex(ValueError, 'dialect'):
             compiled(self.query)

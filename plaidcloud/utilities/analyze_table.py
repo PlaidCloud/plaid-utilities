@@ -116,12 +116,6 @@ class AnalyzeTable(sqlalchemy.Table):
             keys=keys,
         )
 
-    def head(self, rows=10):
-        if rows is not None:
-            query = self.select().limit(rows)
-        else:
-            query = self.select()
-        return send_query(self._rpc, self.project_id, query)  # pylint: disable=no-member
 
 
 def compiled(sa_query, dialect=None):
@@ -153,7 +147,7 @@ def compiled(sa_query, dialect=None):
     return str(compiled_query).replace('\n', ' '), compiled_query.params
 
 
-def send_query(project, query, params=None, rpc=None, dialect=None):
+def send_query(project, query, params=None, rpc=None):
     if not rpc:
         rpc = Connect()
 
@@ -162,7 +156,10 @@ def send_query(project, query, params=None, rpc=None, dialect=None):
     if isinstance(query, str):
         query_string = query
     else:
-        query_string, params = compiled(query, dialect)
+        # No dialect to compile against here — `compiled` raises rather than
+        # guessing. Build SQLAlchemy queries through
+        # `plaidcloud.utilities.query.Connection`, which knows the datastore.
+        query_string, params = compiled(query)
 
     return rpc.analyze.query.stream(
         project_id=project_id, query=query_string, params=params,

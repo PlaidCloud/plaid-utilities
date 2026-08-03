@@ -1,4 +1,5 @@
 # coding=utf-8
+import functools
 import unittest
 
 import pandas
@@ -19,10 +20,10 @@ __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
 
 
-def compiled(sa_query):
-    """These assertions predate multi-lakehouse and are all written against
-    postgres-family SQL; `compiled` no longer has a default dialect."""
-    return _compiled(sa_query, 'greenplum')
+# These assertions are all written against postgres-family SQL; `compiled` no
+# longer has a default dialect. Postgres, not Greenplum — the rendered SQL is
+# byte-identical here and Greenplum is being removed as an engine.
+compiled = functools.partial(_compiled, dialect='postgresql')
 
 
 #TODO: test allocate
