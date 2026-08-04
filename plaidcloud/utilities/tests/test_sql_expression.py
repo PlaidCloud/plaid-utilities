@@ -563,6 +563,121 @@ class TestGetFromClause(TestSQLExpression):
         ).compile(dialect=mssql.dialect()))
         self.assertNotIn('CAST', sql)
 
+    def test_null_dtype_falls_back_to_the_source_column(self):
+        # sc-23460: the join/lookup forms write dtype: null for a hand-added
+        # output column. Casting it to text would silently stringify a sum.
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': 'Column2', 'target': 'TargetColumn', 'dtype': None},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column2, sqlalchemy.NUMERIC).label(
+                'TargetColumn'
+            ),
+        )
+
+    def test_null_dtype_resolves_a_table_qualified_source(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'source': 'table.Column2', 'target': 'TargetColumn', 'dtype': None},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column2, sqlalchemy.NUMERIC).label(
+                'TargetColumn'
+            ),
+        )
+
+    def _shared_name_sources(self):
+        """Two sources carrying `Amount` under different dtypes."""
+        configs = [
+            [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        return configs, tables
+
+    def test_null_dtype_follows_a_positional_table_reference(self):
+        # `table2.Amount` names one side outright, so there is nothing to guess:
+        # the dtype must be the one belonging to the column the query selects.
+        configs, tables = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype({'source': 'table2.Amount', 'dtype': None}, configs, tables),
+            'numeric',
+        )
+
+    def test_null_dtype_follows_the_source_alias(self):
+        # frame_join_multi names its side with source_alias.
+        configs, tables = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype(
+                {'source': 'Amount', 'source_alias': 'b', 'dtype': None},
+                configs, tables,
+                tables_by_alias={'a': tables[0], 'b': tables[1]},
+            ),
+            'numeric',
+        )
+
+    def test_null_dtype_follows_the_table_the_query_reads(self):
+        # A bare shared name: `get_column_table` resolves it to the first
+        # source for a 2-table join, and the emitted column comes from there —
+        # so the dtype has to come from there too, or the cast is mistyped.
+        configs, tables = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, configs, tables),
+            'text',
+        )
+
+    def test_null_dtype_on_an_unresolvable_source_name_falls_back_to_text(self):
+        # No tables to resolve against, and the name carries two dtypes.
+        # Picking a side would risk CAST(<text> AS NUMERIC), which the
+        # warehouse can reject; text always casts.
+        configs, _ = self._shared_name_sources()
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, configs),
+            'text',
+        )
+
+    def test_null_dtype_on_an_agreeing_source_name_still_resolves(self):
+        agreeing = [
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        self.assertEqual(
+            se._target_dtype({'source': 'Amount', 'dtype': None}, agreeing),
+            'numeric',
+        )
+
+    def test_null_dtype_without_a_source_falls_back_to_text(self):
+        for dtype in (None, ''):
+            with self.subTest(dtype=dtype):
+                self.assertEquivalent(
+                    se.get_from_clause(
+                        [self.table],
+                        {'constant': 'foobar', 'target': 'TargetColumn', 'dtype': dtype},
+                        self.source_column_configs,
+                    ),
+                    sqlalchemy.cast(
+                        sqlalchemy.literal('foobar'), PlaidUnicode(length=5000)
+                    ).label('TargetColumn'),
+                )
+
+    def test_null_dtype_on_a_largebinary_source_still_does_not_cast(self):
+        source_columns = [[{'source': 'RowVersionId', 'dtype': 'largebinary'}]]
+        table = se.get_table_rep('table_12345', source_columns[0], 'anlz_schema')
+        sql = str(sqlalchemy.select(
+            se.get_from_clause(
+                [table],
+                {'source': 'RowVersionId', 'target': 'RowVersionId', 'dtype': None},
+                source_columns,
+            )
+        ).compile(dialect=mssql.dialect()))
+        self.assertNotIn('CAST', sql)
+
     def test_source_column_with_dot(self):
         # weird edge case - column with dot in the name that doesn't represent a relationship to a self.table
         edge_source_column_configs = [[
