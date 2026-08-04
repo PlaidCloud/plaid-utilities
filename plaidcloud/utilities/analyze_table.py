@@ -116,31 +116,29 @@ class AnalyzeTable(sqlalchemy.Table):
             keys=keys,
         )
 
-    def head(self, rows=10):
-        if rows is not None:
-            query = self.select().limit(rows)
-        else:
-            query = self.select()
-        return send_query(self._rpc, self.project_id, query)  # pylint: disable=no-member
 
 
-def compiled(sa_query, dialect='greenplum'):
+def compiled(sa_query, dialect=None):
     """Returns SQL query for the supplied dialect, in the form of a string, given a sqlalchemy query.
       Also returns a params dict for use when calling engine.execute
 
     Notes:
-        If the requests compilation dialect is not available, an error will be raised
+        If the requested compilation dialect is missing or not available, an error will be raised
 
     Args:
         sa_query (sqlalchemy.sql.expression.Executable):
-        dialect (str, optional): The sqlalchemy dialect with which to compile the query
+        dialect (str): The sqlalchemy dialect with which to compile the query
 
     Returns:
         tuple: containing:
             str: compiled query
             dict: query parameters
     """
-    dialect = dialect or 'greenplum'  # Just in case someone sends a blank string, or a None by mistake
+    # No default: this used to fall back to 'greenplum', which is not a lakehouse
+    # engine any tenant runs, so a missing dialect quietly produced SQL for an
+    # engine that cannot exist (sc-23700).
+    if not dialect:
+        raise ValueError('No dialect supplied — cannot compile SQL without the datastore dialect.')
     eng = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/', paramstyle='pyformat')
     compiled_query = sa_query.compile(dialect=eng.dialect, compile_kwargs={"render_postcompile": True})
     # Flatten to one line with a SPACE, not '': dropping the newline outright
@@ -158,6 +156,9 @@ def send_query(project, query, params=None, rpc=None):
     if isinstance(query, str):
         query_string = query
     else:
+        # No dialect to compile against here — `compiled` raises rather than
+        # guessing. Build SQLAlchemy queries through
+        # `plaidcloud.utilities.query.Connection`, which knows the datastore.
         query_string, params = compiled(query)
 
     return rpc.analyze.query.stream(

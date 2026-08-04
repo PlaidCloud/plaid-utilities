@@ -1373,15 +1373,11 @@ def get_update_query(table, target_columns, wheres, dtype_map, variables=None):
     if combined_wheres:
         update_query = update_query.where(*combined_wheres)
 
-    # Build values dict
-    values = {
-        col_name: value
-        for col_name, include, value in [
-            (tc['source'],) + get_update_value(tc, table, dtype_map, variables)
-            for tc in target_columns
-        ]
-        if include
-    }
+    values = {}
+    for tc in target_columns:
+        include, value = get_update_value(tc, table, dtype_map, variables)
+        if include:
+            values[tc['source']] = value
 
     if not values:
         # values({}) compiles to `UPDATE ... SET  WHERE ...`, a syntax error at the
@@ -1886,6 +1882,36 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     iterations.sort()
     iteration_selects = []
 
+    def rule_predicate(rule):
+        """Compile a rule's condition, rejecting one that renders to no SQL at all.
+
+        The filter on `valid_rules` only checks the condition *text*. A condition
+        that is non-empty text but compiles to nothing (`and_()`) does not fail
+        here: under `include_once` it makes `case()` emit `WHEN  THEN <id>`,
+        which the warehouse cannot parse, and without it SQLAlchemy drops the
+        `WHERE` entirely so the rule matches every row and the allocation
+        silently completes with wrong numbers (sc-23440).
+        """
+        predicate = eval_rule(rule[condition_column], variables={}, tables=[cte_source])
+        try:
+            renders = predicate is not None and bool(str(predicate).strip())
+        except Exception:
+            # `str()` compiles under the *default* dialect, and a construct whose
+            # compiler is dialect-specific raises there — with anything it likes
+            # (CompileError, but also NotImplementedError, e.g. slice_string).
+            # The only question here is whether the predicate rendered to nothing,
+            # and a failed render is never an empty one, so let it through: if the
+            # expression really is broken it fails again at execution against the
+            # dialect that has to run it, with a message about that dialect.
+            renders = True
+        if not renders:
+            raise SQLExpressionError(
+                f'Rule {rule[rule_id_column]!r} has a condition that compiles to no SQL, so it '
+                f'would either produce an unparseable statement or match every row: '
+                f'{rule[condition_column]!r}'
+            )
+        return predicate
+
     for iteration in iterations:
         valid_rules = df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True) & (df_rules[condition_column].notnull()) & (df_rules[condition_column] != '')]
         if include_once:
@@ -1894,7 +1920,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
                     *[col for col in cte_source.columns],
                     sqlalchemy.case(
                         *[
-                            (eval_rule(rule[condition_column], variables={}, tables=[cte_source]), rule[rule_id_column])
+                            (rule_predicate(rule), rule[rule_id_column])
                             for index, rule in valid_rules.iterrows()
                         ],
                         else_=None,
@@ -1909,7 +1935,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
                         *[col for col in cte_source.columns],
                         sqlalchemy.literal(rule[rule_id_column]).label('rule_id')
                     ).where(
-                        eval_rule(rule[condition_column], variables={}, tables=[cte_source]),
+                        rule_predicate(rule),
                     )
                 )
             iteration_selects.append(

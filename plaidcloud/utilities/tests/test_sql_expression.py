@@ -1,6 +1,8 @@
 # coding=utf-8
+import functools
 import unittest
 
+import pandas
 import sqlalchemy
 from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
@@ -8,7 +10,7 @@ from toolz.functoolz import identity as ident
 
 from plaidcloud.rpc.database import PlaidCurrency, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
-from plaidcloud.utilities.analyze_table import compiled
+from plaidcloud.utilities.analyze_table import compiled as _compiled
 
 __author__ = "Adams Tower"
 __copyright__ = "© Copyright 2009-2023, Tartan Solutions, Inc"
@@ -16,6 +18,12 @@ __credits__ = ["Adams Tower"]
 __license__ = "Apache 2.0"
 __maintainer__ = "Adams Tower"
 __email__ = "adams.tower@tartansolutions.com"
+
+
+# These assertions are all written against postgres-family SQL; `compiled` no
+# longer has a default dialect. Postgres, not Greenplum — the rendered SQL is
+# byte-identical here and Greenplum is being removed as an engine.
+compiled = functools.partial(_compiled, dialect='postgresql')
 
 
 #TODO: test allocate
@@ -2444,6 +2452,90 @@ class TestGetUpdateRewriteQuery(TestSQLExpression):
             {sc['source']: sc['dtype'] for sc in source_columns},
         )
         self.assertEqual([col.name for col in query.selected_columns], ['Calendar Date', '1.0'])
+
+
+class TestApplyRules(TestSQLExpression):
+    """A rule condition that compiles to no SQL must be rejected, not emitted.
+
+    `valid_rules` only filters on the condition *text*. `and_()` is non-empty text
+    that compiles to nothing: under `include_once` it makes `case()` emit
+    `WHEN  THEN <id>` (unparseable), and without it SQLAlchemy drops the `WHERE`
+    so the rule matches every row (sc-23440).
+    """
+
+    def setUp(self):
+        source_columns = [
+            {'source': 'combo', 'dtype': 'text'},
+            {'source': 'amount', 'dtype': 'numeric'},
+        ]
+        table = se.get_table_rep('table_12345', source_columns, 'anlz_schema')
+        self.source_query = sqlalchemy.select(table.c.combo, table.c.amount)
+
+    def rules(self, *conditions):
+        """One rule per condition, in order, with ids R0001, R0002, ..."""
+        return pandas.DataFrame([
+            {
+                'rule_id': f'R{index + 1:04d}',
+                'condition': condition,
+                'include': True,
+                'value': 'v',
+            }
+            for index, condition in enumerate(conditions)
+        ])
+
+    def apply(self, df_rules, include_once=True):
+        return se.apply_rules(
+            self.source_query, df_rules, rule_id_column='rule_id',
+            target_columns=['value'], include_once=include_once,
+        )
+
+    def test_empty_predicate_raises_naming_the_rule(self):
+        df_rules = self.rules("get_column(table, 'combo')=='x'", 'and_()')
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.apply(df_rules)
+        self.assertIn('R0002', str(raised.exception))
+        self.assertIn('and_()', str(raised.exception))
+
+    def test_empty_predicate_raises_without_include_once(self):
+        """The silent half: `.where(and_())` compiles away rather than failing."""
+        df_rules = self.rules("get_column(table, 'combo')=='x'", 'and_()')
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.apply(df_rules, include_once=False)
+        self.assertIn('R0002', str(raised.exception))
+
+    def test_null_predicate_raises(self):
+        """`str(None)` is the non-empty 'None', so emptiness alone would miss it."""
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.apply(self.rules('null'))
+        self.assertIn('R0001', str(raised.exception))
+
+    def test_dialect_only_construct_is_not_mistaken_for_empty(self):
+        """`str()` compiles under the default dialect, where `titlecase` raises.
+
+        The rule is valid on StarRocks; the guard must not turn "I cannot render
+        this here" into "this is empty".
+        """
+        df_rules = self.rules("func.titlecase(get_column(table, 'combo'))=='X'")
+        _, query = self.apply(df_rules)
+        self.assertIsNotNone(query)
+
+    def test_render_failure_that_is_not_a_sqlalchemy_error_still_passes(self):
+        """A compiler may raise anything — `slice_string` raises NotImplementedError.
+
+        Probing the render must not turn an unrenderable predicate into a failed
+        rule build; whatever it is, it is not empty.
+        """
+        df_rules = self.rules("func.slice_string(get_column(table, 'combo'), -3, 2)=='xx'")
+        _, query = self.apply(df_rules)
+        self.assertIsNotNone(query)
+
+    def test_catchall_rule_is_accepted(self):
+        """`and_(true)` is a real predicate — the guard must not reject it."""
+        df_rules = self.rules("get_column(table, 'combo')=='x'", 'and_(true)')
+        _, query = self.apply(df_rules)
+        sql, _ = compiled(query)
+        self.assertIn('WHEN true THEN', sql)
+        self.assertNotIn('WHEN  THEN', sql)
 
 
 if __name__ == '__main__':

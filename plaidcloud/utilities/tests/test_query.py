@@ -202,10 +202,12 @@ class TestConnectionInit(unittest.TestCase):
         conn = make_connection(rpc=rpc)
         self.assertEqual(conn._project_id, 'rpc-default')
 
-    def test_dialect_falls_back_to_postgresql(self):
+    def test_unloadable_dialect_raises_and_does_not_substitute_postgresql(self):
+        # Substituting postgresql compiled plausible-looking Postgres SQL against
+        # a Databend or StarRocks warehouse instead of failing (sc-23700).
         rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
-        conn = make_connection(rpc=rpc, project=str(uuid.uuid4()))
-        self.assertEqual(conn.dialect.name, 'postgresql')
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
+            make_connection(rpc=rpc, project=str(uuid.uuid4()))
 
     def test_creates_default_rpc_when_none_provided(self):
         """``Connection()`` with no arguments should construct a default
