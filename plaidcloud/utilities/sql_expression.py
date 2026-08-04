@@ -813,6 +813,38 @@ def _target_dtype(
     return 'text'
 
 
+def resolve_target_dtypes(
+    target_columns: list[dict], source_column_configs: list[list[dict]],
+    tables: list[sqlalchemy.Table] | None = None, table_numbering_start: int = 1,
+    *, tables_by_alias: dict | None = None,
+) -> list[dict]:
+    """`target_columns` with every missing or null `dtype` filled in.
+
+    A transform declares its target table (`get_table_rep`, then
+    `analyze.table.touch`) from the same config the query is built from, and
+    the declaring path reads the raw dtype — so an unresolved null raises
+    `RegexMapKeyError: 'none'` there, before the query compiles (sc-23870).
+    Resolve once; hand the result to both.
+
+    Pass `tables` if you have them. Resolving freezes the answer, so a name
+    several sources carry under different dtypes lands on `text` and a later
+    call holding the tables will not re-derive it. Returns shallow copies —
+    the caller's own configs keep their null.
+    """
+    if target_columns is None:
+        return []
+    return [
+        column if column.get('dtype') else {
+            **column,
+            'dtype': _target_dtype(
+                column, source_column_configs, tables, table_numbering_start,
+                tables_by_alias=tables_by_alias,
+            ),
+        }
+        for column in target_columns
+    ]
+
+
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
@@ -1034,7 +1066,8 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
         *[
             sqlalchemy.Column(
                 sc[column_key],
-                sqlalchemy_from_dtype(sc['dtype']),
+                # Null dtype → text, so the declaration agrees with the CAST (sc-23870); an absent key still raises.
+                sqlalchemy_from_dtype(sc['dtype'] or 'text'),
             )
             for sc in columns
         ],

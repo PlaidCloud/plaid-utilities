@@ -8,7 +8,7 @@ from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
-from plaidcloud.rpc.database import PlaidCurrency, PlaidUnicode
+from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
 from plaidcloud.utilities.analyze_table import compiled as _compiled
 
@@ -139,6 +139,35 @@ class TestGetTableRep(TestSQLExpression):
     def test_no_table_id_errors(self):
         with self.assertRaises(se.SQLExpressionError):
             se.get_table_rep(None, [], None)
+
+    def test_a_null_dtype_does_not_raise(self):
+        # sc-23870: this raised RegexMapKeyError: 'none'.
+        for dtype in (None, ''):
+            with self.subTest(dtype=dtype):
+                table = se.get_table_rep(
+                    'table_12345', [{'source': 'Column1', 'dtype': dtype}], 'anlz_schema',
+                    metadata=sqlalchemy.MetaData(),
+                )
+                self.assertIsInstance(table.c['Column1'].type, PlaidUnicode)
+
+    def test_an_absent_dtype_key_still_raises(self):
+        # An absent key is a malformed config, not the untyped-column shape a step form writes.
+        with self.assertRaises(KeyError):
+            se.get_table_rep(
+                'table_12345', [{'source': 'Column1'}], 'anlz_schema',
+                metadata=sqlalchemy.MetaData(),
+            )
+
+    def test_a_resolved_dtype_makes_the_backstop_inert(self):
+        columns = se.resolve_target_dtypes(
+            [{'source': 'Column2', 'dtype': None}],
+            [[{'source': 'Column2', 'dtype': 'numeric'}]],
+        )
+        table = se.get_table_rep(
+            'table_12345', columns, 'anlz_schema', metadata=sqlalchemy.MetaData(),
+        )
+        # The concrete type: "not text" would pass for any wrong resolution.
+        self.assertIsInstance(table.c['Column2'].type, PlaidNumeric)
 
 
 class TestGetColumnTable(TestSQLExpression):
@@ -1127,6 +1156,116 @@ class TestGetFromClause(TestSQLExpression):
                 'TargetColumn'
             ),
         )
+
+
+class TestResolveTargetDtypes(TestSQLExpression):
+    """The list form the table-declaring callers need (sc-23870)."""
+
+    SOURCES = [[
+        {'source': 'Amount', 'dtype': 'numeric'},
+        {'source': 'Region', 'dtype': 'text'},
+    ]]
+
+    def test_a_null_dtype_is_filled_from_its_source_column(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount', 'dtype': None}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'numeric')
+
+    def test_an_absent_dtype_key_is_filled_too(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount'}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'numeric')
+
+    def test_a_real_dtype_is_left_alone(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount', 'dtype': 'text'}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'text')
+
+    def test_the_input_configs_are_not_mutated(self):
+        columns = [{'source': 'Amount', 'target': 'Amount', 'dtype': None}]
+        se.resolve_target_dtypes(columns, self.SOURCES)
+        self.assertIsNone(columns[0]['dtype'])
+
+    def test_every_other_key_survives(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Total', 'agg': 'sum', 'dtype': None}],
+            self.SOURCES,
+        )
+        self.assertEqual(resolved[0], {
+            'source': 'Amount', 'target': 'Total', 'agg': 'sum', 'dtype': 'numeric',
+        })
+
+    def test_table_numbering_start_reaches_the_resolution(self):
+        # `table1.` names the second source when numbering starts at 0.
+        configs = [
+            [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        column = {'source': 'table1.Amount', 'target': 'Amount', 'dtype': None}
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables, 0)[0]['dtype'], 'numeric',
+        )
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables, 1)[0]['dtype'], 'text',
+        )
+
+    def test_an_empty_or_missing_column_list_is_not_an_error(self):
+        for columns in ([], None):
+            with self.subTest(columns=columns):
+                self.assertEqual(se.resolve_target_dtypes(columns, self.SOURCES), [])
+
+    def _disagreeing_sources(self):
+        configs = [
+            [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        return configs, tables
+
+    def test_tables_narrow_a_name_two_sources_disagree_on(self):
+        # Without `tables` the name is ambiguous and lands on text; with them the owning-table rule applies.
+        configs, tables = self._disagreeing_sources()
+        column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
+        self.assertEqual(se.resolve_target_dtypes([column], configs)[0]['dtype'], 'text')
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables)[0]['dtype'], 'numeric',
+        )
+
+    def test_tables_by_alias_reaches_the_resolution(self):
+        # Pass-through, behind four positional arguments a forwarding slip would hide in.
+        configs, tables = self._disagreeing_sources()
+        column = {'source': 'Amount', 'source_alias': 'b', 'target': 'Amount', 'dtype': None}
+        self.assertEqual(
+            se.resolve_target_dtypes(
+                [column], configs, tables,
+                tables_by_alias={'a': tables[0], 'b': tables[1]},
+            )[0]['dtype'],
+            'numeric',
+        )
+
+    def test_resolving_without_tables_freezes_the_lower_fidelity_answer(self):
+        # The cost of resolving early: every consumer returns a truthy dtype unchanged, so
+        # tables arriving later cannot improve on `text`. Pass them at resolution time.
+        configs, tables = self._disagreeing_sources()
+        column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
+        frozen = se.resolve_target_dtypes(
+            se.resolve_target_dtypes([column], configs), configs, tables,
+        )
+        self.assertEqual(frozen[0]['dtype'], 'text')
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables)[0]['dtype'], 'numeric',
+        )
+
 
 class TestGetCombinedWheres(TestSQLExpression):
     def test_get_combined_wheres(self):
