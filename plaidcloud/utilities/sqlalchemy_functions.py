@@ -184,8 +184,11 @@ def postgres_to_starrocks_date_format(pg_format):
         if char == '"':
             end = pg_format.find('"', i + 1)
             if end == -1:
-                out.append(pg_format[i + 1:].replace('%', '%%'))
-                break
+                # Swallowing the tail as literal text would leave real tokens
+                # untranslated and the format would parse to NULL at run time.
+                raise CompileError(
+                    f"Unterminated quoted literal in date format {pg_format!r}"
+                )
             out.append(pg_format[i + 1:end].replace('%', '%%'))
             i = end + 1
             continue

@@ -2437,3 +2437,9 @@ class TestTitlecaseUnspecializedDialect(unittest.TestCase):
         with self.assertRaises(sqlalchemy.exc.CompileError):
             str(sqlalchemy.func.titlecase('a b').compile(
                 dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+
+class TestStarrocksUnterminatedLiteral(unittest.TestCase):
+    def test_unterminated_quote_raises_rather_than_dropping_the_tail(self):
+        with self.assertRaises(CompileError):
+            sf.postgres_to_starrocks_date_format('YYYY-MM-DD"oops HH24:MI:SS')
