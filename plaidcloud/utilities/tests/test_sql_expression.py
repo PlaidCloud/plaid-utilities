@@ -141,11 +141,7 @@ class TestGetTableRep(TestSQLExpression):
             se.get_table_rep(None, [], None)
 
     def test_a_null_dtype_does_not_raise(self):
-        # Backstop for sc-23870 — this raised RegexMapKeyError: 'none', which
-        # is where an untyped Lookup/Join target column died at run time,
-        # before the query was ever compiled. A caller declaring a *target*
-        # table should still pre-resolve via `resolve_target_dtypes`; this only
-        # guarantees the failure is not a crash.
+        # sc-23870: this raised RegexMapKeyError: 'none'.
         for dtype in (None, ''):
             with self.subTest(dtype=dtype):
                 table = se.get_table_rep(
@@ -155,10 +151,7 @@ class TestGetTableRep(TestSQLExpression):
                 self.assertIsInstance(table.c['Column1'].type, PlaidUnicode)
 
     def test_an_absent_dtype_key_still_raises(self):
-        # Deliberately not covered by the backstop: an absent key is a
-        # malformed config, not the untyped-column shape a step form writes,
-        # and most callers here are building a rep of a *source* table, where
-        # quietly declaring text would mistype a column the query reads.
+        # An absent key is a malformed config, not the untyped-column shape a step form writes.
         with self.assertRaises(KeyError):
             se.get_table_rep(
                 'table_12345', [{'source': 'Column1'}], 'anlz_schema',
@@ -173,8 +166,7 @@ class TestGetTableRep(TestSQLExpression):
         table = se.get_table_rep(
             'table_12345', columns, 'anlz_schema', metadata=sqlalchemy.MetaData(),
         )
-        # The concrete type, not merely "not text": asserting the negative
-        # would pass for any wrong non-text resolution.
+        # The concrete type: "not text" would pass for any wrong resolution.
         self.assertIsInstance(table.c['Column2'].type, PlaidNumeric)
 
 
@@ -1167,14 +1159,7 @@ class TestGetFromClause(TestSQLExpression):
 
 
 class TestResolveTargetDtypes(TestSQLExpression):
-    """The list form the table-declaring callers need (sc-23870).
-
-    `_target_dtype` fixes the emitted SQL and nothing else. A transform also
-    declares its target table — `get_table_rep`, then `analyze.table.touch` —
-    from the same config, and reads the raw dtype there, so an unresolved null
-    raises `RegexMapKeyError: 'none'` before the query is compiled. These pin
-    the contract that lets one resolution serve all three consumers.
-    """
+    """The list form the table-declaring callers need (sc-23870)."""
 
     SOURCES = [[
         {'source': 'Amount', 'dtype': 'numeric'},
@@ -1200,8 +1185,6 @@ class TestResolveTargetDtypes(TestSQLExpression):
         self.assertEqual(resolved[0]['dtype'], 'text')
 
     def test_the_input_configs_are_not_mutated(self):
-        # A transform's config is round-tripped and may be persisted. Typing a
-        # column permanently is the user's decision, via the step form.
         columns = [{'source': 'Amount', 'target': 'Amount', 'dtype': None}]
         se.resolve_target_dtypes(columns, self.SOURCES)
         self.assertIsNone(columns[0]['dtype'])
@@ -1216,9 +1199,7 @@ class TestResolveTargetDtypes(TestSQLExpression):
         })
 
     def test_table_numbering_start_reaches_the_resolution(self):
-        # Pure pass-through, like tables_by_alias — and the positional slot a
-        # forwarding slip would land in. `table1.` names the second source when
-        # numbering starts at 0.
+        # `table1.` names the second source when numbering starts at 0.
         configs = [
             [{'source': 'Amount', 'dtype': 'text'}],
             [{'source': 'Amount', 'dtype': 'numeric'}],
@@ -1252,8 +1233,7 @@ class TestResolveTargetDtypes(TestSQLExpression):
         return configs, tables
 
     def test_tables_narrow_a_name_two_sources_disagree_on(self):
-        # Without `tables` the name is ambiguous and lands on text; with them
-        # the owning-table rule applies, exactly as in `get_from_clause`.
+        # Without `tables` the name is ambiguous and lands on text; with them the owning-table rule applies.
         configs, tables = self._disagreeing_sources()
         column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
         self.assertEqual(se.resolve_target_dtypes([column], configs)[0]['dtype'], 'text')
@@ -1262,8 +1242,7 @@ class TestResolveTargetDtypes(TestSQLExpression):
         )
 
     def test_tables_by_alias_reaches_the_resolution(self):
-        # Pure pass-through, but the four positional arguments in front of it
-        # are exactly where a forwarding slip would land unnoticed.
+        # Pass-through, behind four positional arguments a forwarding slip would hide in.
         configs, tables = self._disagreeing_sources()
         column = {'source': 'Amount', 'source_alias': 'b', 'target': 'Amount', 'dtype': None}
         self.assertEqual(
@@ -1275,10 +1254,8 @@ class TestResolveTargetDtypes(TestSQLExpression):
         )
 
     def test_resolving_without_tables_freezes_the_lower_fidelity_answer(self):
-        # The cost of resolving early, pinned rather than left to be
-        # rediscovered: a resolved dtype is truthy, and every consumer returns
-        # a truthy dtype unchanged — so tables arriving later cannot improve on
-        # `text`. A caller that has tables must pass them at resolution time.
+        # The cost of resolving early: every consumer returns a truthy dtype unchanged, so
+        # tables arriving later cannot improve on `text`. Pass them at resolution time.
         configs, tables = self._disagreeing_sources()
         column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
         frozen = se.resolve_target_dtypes(
