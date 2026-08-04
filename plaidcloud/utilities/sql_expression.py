@@ -825,19 +825,30 @@ def resolve_target_dtypes(
     *declares* the target table (`get_table_rep`, `analyze.table.touch`) reads
     the raw config, so an unresolved null reaches `sqlalchemy_from_dtype` there
     and raises `RegexMapKeyError: 'none'` before the query is ever compiled
-    (sc-23870). Resolving the whole list up front, once, is what keeps those
-    consumers from disagreeing: after this every one of them sees a truthy
-    dtype, and `_target_dtype` passes it straight back.
+    (sc-23870). Resolving the whole list up front is what lets the declaration
+    and the CAST read one value instead of two.
 
-    Copies. A transform's config is round-tripped and may be persisted, and a
-    resolved dtype is a run-time reading of an untyped column, not a decision
-    to type it permanently — that stays the user's, via the step form.
+    **This freezes the answer.** `_target_dtype` returns any truthy dtype
+    unchanged, so a later `get_from_clause` — even one holding real `tables` —
+    will not re-derive what is written here. Pass `tables` if you have them.
+    Without them the owning-table narrowing cannot run, so a column name
+    several sources carry under *different* dtypes is ambiguous and lands on
+    text, where the same call made with `tables` would have found the dtype of
+    the table the query actually reads. That is a semantic narrowing, not
+    merely a wider type: a numeric column declared and cast as text loses
+    arithmetic and ordering. It is chosen over guessing a side, which yields
+    ``CAST(<text column> AS NUMERIC)`` — rejectable by the warehouse where the
+    reverse is not — and over leaving the null in place, which puts the
+    declaration and the CAST back into disagreement.
 
-    `tables` is optional and worth supplying: without it the owning-table
-    narrowing can't run, so a name several sources carry with *different*
-    dtypes is ambiguous and lands on text instead of the dtype of the table the
-    query actually reads. Never wrong, sometimes wider than it needs to be.
+    Shallow copies, so the caller's configs keep their dtype: a config is
+    round-tripped and may be persisted, and a resolved dtype is a run-time
+    reading of an untyped column, not a decision to type it permanently —
+    that stays the user's, via the step form. Nested values are shared with
+    the originals; nothing here mutates them.
     """
+    if target_columns is None:
+        return []
     return [
         column if column.get('dtype') else {
             **column,
@@ -846,7 +857,7 @@ def resolve_target_dtypes(
                 tables_by_alias=tables_by_alias,
             ),
         }
-        for column in target_columns or []
+        for column in target_columns
     ]
 
 
@@ -1075,10 +1086,16 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
                 # table should hand these in pre-resolved via
                 # `resolve_target_dtypes`, which can read a source column's
                 # dtype where this cannot (it is given no source configs). A
-                # falsy dtype that still arrives here would otherwise raise
+                # null dtype that still arrives here would otherwise raise
                 # `RegexMapKeyError: 'none'` — sc-23870. Inert once resolved:
                 # a resolved dtype is truthy.
-                sqlalchemy_from_dtype(sc.get('dtype') or 'text'),
+                #
+                # Subscript, not `.get`: an *absent* dtype key is a malformed
+                # config rather than the untyped-column shape a step form can
+                # write, and most of the ~86 call sites are building a rep of a
+                # *source* table, where quietly declaring text would mistype a
+                # column the query reads. That keeps raising, as it always has.
+                sqlalchemy_from_dtype(sc['dtype'] or 'text'),
             )
             for sc in columns
         ],
