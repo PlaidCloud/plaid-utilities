@@ -813,6 +813,43 @@ def _target_dtype(
     return 'text'
 
 
+def resolve_target_dtypes(
+    target_columns: list[dict], source_column_configs: list[list[dict]],
+    tables: list[sqlalchemy.Table] | None = None, table_numbering_start: int = 1,
+    *, tables_by_alias: dict | None = None,
+) -> list[dict]:
+    """`target_columns` with every missing or null `dtype` filled in.
+
+    `_target_dtype` resolves one column, and `get_from_clause` calls it as the
+    query is built — which fixes the SQL and nothing else. A caller that also
+    *declares* the target table (`get_table_rep`, `analyze.table.touch`) reads
+    the raw config, so an unresolved null reaches `sqlalchemy_from_dtype` there
+    and raises `RegexMapKeyError: 'none'` before the query is ever compiled
+    (sc-23870). Resolving the whole list up front, once, is what keeps those
+    consumers from disagreeing: after this every one of them sees a truthy
+    dtype, and `_target_dtype` passes it straight back.
+
+    Copies. A transform's config is round-tripped and may be persisted, and a
+    resolved dtype is a run-time reading of an untyped column, not a decision
+    to type it permanently — that stays the user's, via the step form.
+
+    `tables` is optional and worth supplying: without it the owning-table
+    narrowing can't run, so a name several sources carry with *different*
+    dtypes is ambiguous and lands on text instead of the dtype of the table the
+    query actually reads. Never wrong, sometimes wider than it needs to be.
+    """
+    return [
+        column if column.get('dtype') else {
+            **column,
+            'dtype': _target_dtype(
+                column, source_column_configs, tables, table_numbering_start,
+                tables_by_alias=tables_by_alias,
+            ),
+        }
+        for column in target_columns or []
+    ]
+
+
 def get_from_clause(
     tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], aggregate: bool = False,
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
@@ -1034,7 +1071,14 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
         *[
             sqlalchemy.Column(
                 sc[column_key],
-                sqlalchemy_from_dtype(sc['dtype']),
+                # Backstop, not the resolution: a caller building a *target*
+                # table should hand these in pre-resolved via
+                # `resolve_target_dtypes`, which can read a source column's
+                # dtype where this cannot (it is given no source configs). A
+                # falsy dtype that still arrives here would otherwise raise
+                # `RegexMapKeyError: 'none'` — sc-23870. Inert once resolved:
+                # a resolved dtype is truthy.
+                sqlalchemy_from_dtype(sc.get('dtype') or 'text'),
             )
             for sc in columns
         ],

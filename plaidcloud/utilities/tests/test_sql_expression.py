@@ -140,6 +140,30 @@ class TestGetTableRep(TestSQLExpression):
         with self.assertRaises(se.SQLExpressionError):
             se.get_table_rep(None, [], None)
 
+    def test_a_falsy_dtype_does_not_raise(self):
+        # Backstop for sc-23870 — this raised RegexMapKeyError: 'none', which
+        # is where an untyped Lookup/Join target column died at run time,
+        # before the query was ever compiled. A caller declaring a *target*
+        # table should still pre-resolve via `resolve_target_dtypes`; this only
+        # guarantees the failure is not a crash.
+        for dtype in (None, ''):
+            with self.subTest(dtype=dtype):
+                table = se.get_table_rep(
+                    'table_12345', [{'source': 'Column1', 'dtype': dtype}], 'anlz_schema',
+                    metadata=sqlalchemy.MetaData(),
+                )
+                self.assertIsInstance(table.c['Column1'].type, PlaidUnicode)
+
+    def test_a_resolved_dtype_makes_the_backstop_inert(self):
+        columns = se.resolve_target_dtypes(
+            [{'source': 'Column2', 'dtype': None}],
+            [[{'source': 'Column2', 'dtype': 'numeric'}]],
+        )
+        table = se.get_table_rep(
+            'table_12345', columns, 'anlz_schema', metadata=sqlalchemy.MetaData(),
+        )
+        self.assertNotIsInstance(table.c['Column2'].type, PlaidUnicode)
+
 
 class TestGetColumnTable(TestSQLExpression):
     def setUp(self):
@@ -1127,6 +1151,88 @@ class TestGetFromClause(TestSQLExpression):
                 'TargetColumn'
             ),
         )
+
+class TestResolveTargetDtypes(TestSQLExpression):
+    """The list form the table-declaring callers need (sc-23870).
+
+    `_target_dtype` fixes the emitted SQL and nothing else. A transform also
+    declares its target table — `get_table_rep`, then `analyze.table.touch` —
+    from the same config, and reads the raw dtype there, so an unresolved null
+    raises `RegexMapKeyError: 'none'` before the query is compiled. These pin
+    the contract that lets one resolution serve all three consumers.
+    """
+
+    SOURCES = [[
+        {'source': 'Amount', 'dtype': 'numeric'},
+        {'source': 'Region', 'dtype': 'text'},
+    ]]
+
+    def test_a_null_dtype_is_filled_from_its_source_column(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount', 'dtype': None}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'numeric')
+
+    def test_an_absent_dtype_key_is_filled_too(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount'}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'numeric')
+
+    def test_a_real_dtype_is_left_alone(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Amount', 'dtype': 'text'}], self.SOURCES,
+        )
+        self.assertEqual(resolved[0]['dtype'], 'text')
+
+    def test_the_input_configs_are_not_mutated(self):
+        # A transform's config is round-tripped and may be persisted. Typing a
+        # column permanently is the user's decision, via the step form.
+        columns = [{'source': 'Amount', 'target': 'Amount', 'dtype': None}]
+        se.resolve_target_dtypes(columns, self.SOURCES)
+        self.assertIsNone(columns[0]['dtype'])
+
+    def test_every_other_key_survives(self):
+        resolved = se.resolve_target_dtypes(
+            [{'source': 'Amount', 'target': 'Total', 'agg': 'sum', 'dtype': None}],
+            self.SOURCES,
+        )
+        self.assertEqual(resolved[0], {
+            'source': 'Amount', 'target': 'Total', 'agg': 'sum', 'dtype': 'numeric',
+        })
+
+    def test_resolving_first_leaves_the_sql_build_unchanged(self):
+        # The point of the whole exercise: the declared column, the CAST and
+        # the local table rep agree because they read one resolved value.
+        column = {'source': 'Amount', 'target': 'Amount', 'dtype': None}
+        resolved = se.resolve_target_dtypes([column], self.SOURCES)[0]
+        self.assertEqual(
+            se._target_dtype(resolved, self.SOURCES),
+            se._target_dtype(column, self.SOURCES),
+        )
+
+    def test_an_empty_or_missing_column_list_is_not_an_error(self):
+        for columns in ([], None):
+            with self.subTest(columns=columns):
+                self.assertEqual(se.resolve_target_dtypes(columns, self.SOURCES), [])
+
+    def test_tables_narrow_a_name_two_sources_disagree_on(self):
+        # Without `tables` the name is ambiguous and lands on text; with them
+        # the owning-table rule applies, exactly as in `get_from_clause`.
+        configs = [
+            [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
+        self.assertEqual(se.resolve_target_dtypes([column], configs)[0]['dtype'], 'text')
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables)[0]['dtype'], 'numeric',
+        )
+
 
 class TestGetCombinedWheres(TestSQLExpression):
     def test_get_combined_wheres(self):
