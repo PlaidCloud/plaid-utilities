@@ -1165,6 +1165,7 @@ class TestGetFromClause(TestSQLExpression):
             ),
         )
 
+
 class TestResolveTargetDtypes(TestSQLExpression):
     """The list form the table-declaring callers need (sc-23870).
 
@@ -1214,14 +1215,24 @@ class TestResolveTargetDtypes(TestSQLExpression):
             'source': 'Amount', 'target': 'Total', 'agg': 'sum', 'dtype': 'numeric',
         })
 
-    def test_resolving_first_leaves_the_sql_build_unchanged(self):
-        # The point of the whole exercise: the declared column, the CAST and
-        # the local table rep agree because they read one resolved value.
-        column = {'source': 'Amount', 'target': 'Amount', 'dtype': None}
-        resolved = se.resolve_target_dtypes([column], self.SOURCES)[0]
+    def test_table_numbering_start_reaches_the_resolution(self):
+        # Pure pass-through, like tables_by_alias — and the positional slot a
+        # forwarding slip would land in. `table1.` names the second source when
+        # numbering starts at 0.
+        configs = [
+            [{'source': 'Amount', 'dtype': 'text'}],
+            [{'source': 'Amount', 'dtype': 'numeric'}],
+        ]
+        tables = [
+            se.get_table_rep('table_1', configs[0], 'anlz_schema'),
+            se.get_table_rep('table_2', configs[1], 'anlz_schema'),
+        ]
+        column = {'source': 'table1.Amount', 'target': 'Amount', 'dtype': None}
         self.assertEqual(
-            se._target_dtype(resolved, self.SOURCES),
-            se._target_dtype(column, self.SOURCES),
+            se.resolve_target_dtypes([column], configs, tables, 0)[0]['dtype'], 'numeric',
+        )
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables, 1)[0]['dtype'], 'text',
         )
 
     def test_an_empty_or_missing_column_list_is_not_an_error(self):
@@ -1265,15 +1276,18 @@ class TestResolveTargetDtypes(TestSQLExpression):
 
     def test_resolving_without_tables_freezes_the_lower_fidelity_answer(self):
         # The cost of resolving early, pinned rather than left to be
-        # rediscovered: `_target_dtype` returns any truthy dtype unchanged, so
-        # a later call holding real `tables` cannot improve on `text`. A caller
-        # that has tables must pass them at resolution time, not rely on the
-        # query build to correct it.
+        # rediscovered: a resolved dtype is truthy, and every consumer returns
+        # a truthy dtype unchanged — so tables arriving later cannot improve on
+        # `text`. A caller that has tables must pass them at resolution time.
         configs, tables = self._disagreeing_sources()
         column = {'source': 'table2.Amount', 'target': 'Amount', 'dtype': None}
-        resolved = se.resolve_target_dtypes([column], configs)[0]
-        self.assertEqual(se._target_dtype(resolved, configs, tables), 'text')
-        self.assertEqual(se._target_dtype(column, configs, tables), 'numeric')
+        frozen = se.resolve_target_dtypes(
+            se.resolve_target_dtypes([column], configs), configs, tables,
+        )
+        self.assertEqual(frozen[0]['dtype'], 'text')
+        self.assertEqual(
+            se.resolve_target_dtypes([column], configs, tables)[0]['dtype'], 'numeric',
+        )
 
 
 class TestGetCombinedWheres(TestSQLExpression):
