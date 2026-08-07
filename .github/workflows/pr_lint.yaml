@@ -28,13 +28,6 @@ jobs:
           uv pip install --system -e .[test]
           uv pip install --system -q ruff
           uv pip install --system -q diff-cover==10.4.1
-      - name: License Checker
-        uses: andersy005/gh-action-py-liccheck@main
-        with:
-          strategy-ini-file: ./liccheck.ini
-          level: cautious
-          requirements-txt-file: ./requirements.txt
-          liccheck-version: ${{ vars.LICCHECK_VERSION }}
       - name: Install ReviewDog
         uses: reviewdog/action-setup@v1
       - name: Perform Lint
@@ -81,3 +74,20 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           fail_below_threshold: false
           minimum_coverage: 57
+  license:
+    name: Check Dependency Licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.0
+        with:
+          # setuptools_scm derives the version from tags. A depth-1 clone has
+          # none, and the install still succeeds — it just fabricates a
+          # `0.1.devN+g<sha>` version. Cheap to fetch the history and report
+          # the real one in the scan.
+          fetch-depth: 0
+      # No extras: the base dependencies are what plaid and workflow-runner
+      # install, and so are what actually ships. [test] is dev-only.
+      - name: Check dependency licenses
+        uses: PlaidCloud/plaidcloud-github-actions/license-check@v1
