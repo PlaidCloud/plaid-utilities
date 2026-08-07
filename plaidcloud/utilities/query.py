@@ -55,12 +55,17 @@ class Connection:
 
     _NOT_LOADED = object()
 
-    def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None):
+    def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None, dialect: str = None):
         """
 
         Args:
             project (str, optional): A Project Identifier
             rpc (Connect, PlaidXLConnect, optional): An RPC Connection object
+            dialect (str, optional): The SQLAlchemy dialect name the project's SQL must be
+                compiled for. A caller that was *told* the dialect — a workflow step, which
+                carries it on the run payload as ``datastore_dialect`` — passes it here, and
+                that value wins. Omitted, it is resolved from the project over RPC
+                (sc-23158 WS-J4).
         """
         if rpc:
             self.rpc = rpc
@@ -87,7 +92,18 @@ class Connection:
         if self._project_id:
             self._project_name = self.rpc.analyze.project.project(project_id=self._project_id, keys=['name'])['name']
 
-        _dialect_kind = self.rpc.analyze.query.dialect()
+        # The caller's value is authoritative. There are two sources for a project's
+        # dialect and they can only disagree once a tenant has more than one lakehouse:
+        # what the run payload was stamped with when the job was launched for *this*
+        # project, and whatever this process asks the server for now. The stamped one is
+        # the project's; deriving a second answer here is how a project's SQL gets
+        # compiled for another project's engine (sc-23158 WS-J4).
+        #
+        # Naming the project on the fallback matters for the same reason — an
+        # unqualified `dialect()` answers for the tenant's own lakehouse, not
+        # necessarily this project's. It requires a plaid that accepts `project_id`;
+        # that release ships first (sc-23158 WS-J4 merge order).
+        _dialect_kind = dialect or self.rpc.analyze.query.dialect(project_id=self._project_id)
 
         # No fallback: a bare `except` here used to substitute 'postgresql',
         # which compiles plausible-looking Postgres SQL against a Databend or
