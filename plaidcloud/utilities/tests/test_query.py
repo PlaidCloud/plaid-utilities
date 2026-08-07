@@ -911,17 +911,12 @@ class TestTable(unittest.TestCase):
             [{'id': 'c', 'dtype': 'numeric'}],
         )
 
-    def test_read_path_still_ensures_table(self):
-        """get_table-style construction (no input columns) still touches once, with
-        the reflected schema, to ensure the physical table exists."""
+    def test_read_path_does_not_touch(self):
+        """get_table-style construction (no input columns) is a pure read and must
+        NOT call analyze.table.touch, which is write-scoped and does DDL. A
+        read-only viewer would otherwise be refused (sc-23402)."""
         Table(self.conn, 'some_table')
-        self.assertEqual(self.rpc.analyze.table.touch.call_count, 1)
-        # No input columns, so the surviving touch is the ensure-exists one built
-        # from the reflected table_meta.
-        self.assertEqual(
-            self.rpc.analyze.table.touch.call_args.kwargs['meta'],
-            [{'id': 'col1', 'dtype': 'numeric'}],
-        )
+        self.rpc.analyze.table.touch.assert_not_called()
 
     def test_fully_qualified_name_uses_dialect(self):
         tbl = Table(self.conn, 'some_table')
