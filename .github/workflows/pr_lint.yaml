@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Checkout code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           # diff-cover needs the merge-base with the base branch; the default
           # depth-1 clone has no history to diff against.
@@ -80,7 +80,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
         with:
           # setuptools_scm derives the version from tags. A depth-1 clone has
           # none, and the install still succeeds — it just fabricates a
