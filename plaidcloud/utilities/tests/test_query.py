@@ -223,6 +223,33 @@ class TestConnectionInit(unittest.TestCase):
         make_connection(rpc=rpc, project=proj_uuid)
         rpc.analyze.query.dialect.assert_called_once_with(project_id=proj_uuid)
 
+    def test_a_projectless_connection_falls_back_to_the_rpc_project(self):
+        """No ``project=`` does not mean no project: the rpc carries its own.
+
+        Every live UDF builds ``Connection(project=...)`` with no dialect, so this
+        fallback is the common path rather than an edge. Pinned because the
+        argument the client sends and the value the server branches on have to
+        agree -- the named path crashed once already because a truthy-but-unusable
+        project_id reached a Redis key builder.
+        """
+        rpc = make_mock_rpc(project_id='rpc-owned-project')
+        make_connection(rpc=rpc, project=None)
+        rpc.analyze.query.dialect.assert_called_once_with(
+            project_id='rpc-owned-project')
+
+    def test_a_connection_with_no_project_anywhere_sends_none(self):
+        """When the rpc has no project either, the client must send None.
+
+        The server normalizes a falsy project_id to None and answers for the
+        tenant's own lakehouse (plaid #7017). This pins the client half so the
+        two cannot drift: we send the keyword with None rather than omitting it
+        or sending an empty string, which is the shape that missed the server's
+        unqualified fast path.
+        """
+        rpc = make_mock_rpc(project_id=None)
+        make_connection(rpc=rpc, project=None)
+        rpc.analyze.query.dialect.assert_called_once_with(project_id=None)
+
     def test_a_passed_dialect_that_cannot_load_still_raises(self):
         rpc = make_mock_rpc(dialect_name='postgresql')
         with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
