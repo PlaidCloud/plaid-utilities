@@ -12,6 +12,7 @@ import uuid as uuid_mod
 import datetime
 
 import sqlalchemy
+from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.exc import CompileError
 # from toolz.functoolz import curry
 # from toolz.functoolz import identity as ident
@@ -2424,6 +2425,43 @@ class TestAlteryxDialectAdditionsDatabend(DatabendTest):
         self.assertEqual("slice(split('a-b', '-'), 2)",
                          self._sql(sqlalchemy.func.array_tail(sqlalchemy.func.split('a-b', '-'), 2)))
 
+
+
+class TestAnyValueDialectContract(unittest.TestCase):
+    """any() (Alteryx Summarize First/Last) must reach every warehouse in a spelling
+    it can run. Databend is the only target with a native any(); everywhere else the
+    aggregate is any_value(). Snowflake has no ANY aggregate and DuckDB -- the
+    isolation harness engine -- raises a parser error on any(), so a missing override
+    is a run-time failure at the customer, not a compile-time one here. This locks the
+    spelling per dialect so a regression fails by name.
+
+    The DuckDB and Databricks drivers are not pip-installed in this image (only
+    databend/snowflake/starrocks are, though Databricks is in REQUIRED_DIALECTS), so
+    their spelling is checked by spoofing DefaultDialect.name, which is exactly the
+    key @compiles(fn, '<dialect>') dispatches on -- a real engine reaches the same
+    string match. DuckDB's real spelling is additionally proven by execution in the
+    plaid isolation harness (sc-24413)."""
+
+    def _spell(self, dialect_name):
+        d = DefaultDialect()
+        d.name = dialect_name
+        expr = sqlalchemy.func.any(sqlalchemy.column('c'))
+        return str(expr.compile(dialect=d, compile_kwargs={"literal_binds": True}))
+
+    def test_databend_keeps_native_any(self):
+        self.assertEqual('any(c)', self._spell('databend'))
+
+    def test_starrocks_is_any_value(self):
+        self.assertEqual('any_value(c)', self._spell('starrocks'))
+
+    def test_snowflake_is_any_value(self):
+        self.assertEqual('any_value(c)', self._spell('snowflake'))
+
+    def test_databricks_is_any_value(self):
+        self.assertEqual('any_value(c)', self._spell('databricks'))
+
+    def test_duckdb_is_any_value(self):
+        self.assertEqual('any_value(c)', self._spell('duckdb'))
 
 
 class TestTitlecaseUnspecializedDialect(unittest.TestCase):

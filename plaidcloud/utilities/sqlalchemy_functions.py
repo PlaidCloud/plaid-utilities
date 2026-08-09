@@ -2066,12 +2066,25 @@ def compile_mode_starrocks(element, compiler, **kw):
 
 
 class any_(GenericFunction):
-    """Databend any() -- pick an arbitrary value from the group."""
+    """Databend any() -- pick an arbitrary value from the group.
+
+    Databend is the only target that spells the "arbitrary value from the group"
+    aggregate `any(...)`; the bare default rendering is correct only there.
+    Snowflake, Databricks and DuckDB all spell it `any_value(...)` and reject
+    `any(...)` (Snowflake has no ANY aggregate at all; DuckDB raises a parser
+    error). StarRocks likewise uses `any_value`. Each non-Databend target gets an
+    explicit override so the default `any(...)` never reaches a warehouse that
+    cannot run it. DuckDB is the isolation harness engine, so without its override
+    Summarize First/Last cannot even be measured.
+    """
     name = 'any'
     inherit_cache = True
 
 @compiles(any_, 'starrocks')
-def compile_any_starrocks(element, compiler, **kw):
+@compiles(any_, 'snowflake')
+@compiles(any_, 'databricks')
+@compiles(any_, 'duckdb')
+def compile_any_any_value(element, compiler, **kw):
     rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
     return f'any_value({rendered})'
 
