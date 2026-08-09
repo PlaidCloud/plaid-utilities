@@ -2435,10 +2435,12 @@ class TestAnyValueDialectContract(unittest.TestCase):
     is a run-time failure at the customer, not a compile-time one here. This locks the
     spelling per dialect so a regression fails by name.
 
-    DuckDB and Databricks drivers are not installed in this image (see
-    REQUIRED_DIALECTS -- only databend/snowflake/starrocks are), so their spelling is
-    checked by spoofing DefaultDialect.name, which is exactly the key
-    @compiles(fn, '<dialect>') dispatches on."""
+    The DuckDB and Databricks drivers are not pip-installed in this image (only
+    databend/snowflake/starrocks are, though Databricks is in REQUIRED_DIALECTS), so
+    their spelling is checked by spoofing DefaultDialect.name, which is exactly the
+    key @compiles(fn, '<dialect>') dispatches on -- a real engine reaches the same
+    string match. DuckDB's real spelling is additionally proven by execution in the
+    plaid isolation harness (sc-24413)."""
 
     def _spell(self, dialect_name):
         d = DefaultDialect()
