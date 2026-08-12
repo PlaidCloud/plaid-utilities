@@ -43,12 +43,37 @@ REQUIRED_DIALECTS = {
 }
 
 
+# Point the `starrocks` name at our subclass, so a dialect built from this registry
+# has the float-cast capability pinned on. The vendored dialect subclasses
+# SQLAlchemy's MySQL one, which gates `CAST(x AS FLOAT)` on a property derived from
+# `server_version_info` — populated only by *connecting*. An unconnected dialect
+# therefore reads False and `visit_cast` removes the cast from the statement,
+# leaving an SAWarning as the only trace. That is a wrong number on a green step.
+#
+# It belongs here rather than in a consumer because `query.Connection` — which this
+# module exists to serve, and which is part of the surface customer UDF code is
+# written against — compiles that way itself. workflow-runner has carried an
+# identical subclass, registered as a side effect of importing its transform
+# handler, so a `Connection` built without that import silently lost the capability.
+# Registration is lazy (SQLAlchemy imports the target only when the dialect is
+# asked for), so an image with no `starrocks` package still imports this module.
+registry.register('starrocks', 'plaidcloud.utilities.starrocks_dialect', 'PlaidStarRocksDialect')
+
+
 def unloadable_dialects():
-    """Yield (dialect, pip package, error) for every required dialect this image cannot load."""
+    """Yield (dialect, pip package, error) for every required dialect this image cannot load.
+
+    `AttributeError` joins the two import failures because of the registration
+    above: a name we register resolves through *our* module, so a bad module path
+    or a renamed class raises from inside `registry.load` rather than as
+    `NoSuchModuleError`. Uncaught, that puts a traceback in a Docker build log —
+    exactly what this module exists to replace with a message. A genuinely absent
+    vendor package still reports the same way, because the subclass imports it.
+    """
     for dialect, package in REQUIRED_DIALECTS.items():
         try:
             registry.load(dialect)
-        except (NoSuchModuleError, ImportError) as exc:
+        except (NoSuchModuleError, ImportError, AttributeError) as exc:
             yield dialect, package, exc
 
 
