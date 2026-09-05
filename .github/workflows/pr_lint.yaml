@@ -40,7 +40,7 @@ jobs:
           pytest
       # Gates coverage of the lines this PR changed. A global threshold is useless
       # here -- the repo sits at ~57% overall, which is historical debt, not this
-      # PR's quality. Deliberately NOT `!cancelled()` like the report steps below:
+      # PR's quality. Deliberately NOT `!cancelled()` like the report step below:
       # a failed pytest leaves coverage.xml stale or absent, so diff-cover would
       # report a meaningless number on top of the real failure. Default `success()`
       # skips it and lets pytest be the reported cause.
@@ -60,20 +60,6 @@ jobs:
           path: pytestresult.xml    # Path to test results
           reporter: java-junit      # Format of test results
           token: ${{ secrets.GITHUB_TOKEN }}
-      # Report-only, and cannot be otherwise: with fail_below_threshold off this
-      # action always reports the `neutral` conclusion, which never fails a PR.
-      # `minimum_coverage` only drives the check/cross icons in the file table, so
-      # it is set to the repo's current global coverage -- a cross then means "worse
-      # than the repo average" rather than implying a gate that does not exist.
-      # The real gate is the Check Patch Coverage step above.
-      - name: Prepare Coverage Report
-        uses: 5monkeys/cobertura-action@master
-        if: success() || failure()    # run this step even if previous step failed
-        with:
-          path: coverage.xml
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          fail_below_threshold: false
-          minimum_coverage: 57
   license:
     name: Check Dependency Licenses
     runs-on: ubuntu-latest
