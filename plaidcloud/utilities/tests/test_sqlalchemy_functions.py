@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import importlib.util
 import os
 import pickle
 import re
@@ -2387,16 +2388,27 @@ class TestStringCastOtherDialects(DatabendTest):
 
 
 class TestAlteryxDialectAdditionsDatabend(DatabendTest):
-    """Default/Databend path -- notably titlecase, which Databend cannot render and
-    must fail loudly rather than emit a literal `titlecase(...)`."""
+    """Default/Databend path -- notably titlecase, which Databend has no builtin for
+    and so renders by marking word starts and casing each one."""
 
     def _sql(self, expr):
         return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
 
-    def test_titlecase_raises_on_databend(self):
-        import sqlalchemy.exc
-        with self.assertRaises(sqlalchemy.exc.CompileError):
-            self._sql(sqlalchemy.func.titlecase('a b'))
+    def test_titlecase_renders_by_words_on_databend(self):
+        # Databend has no initcap under any alias. Verified against a live server:
+        # 'o''brien-smith 3rd' -> "O'Brien-Smith 3rd", matching StarRocks.
+        self.assertEqual(
+            "array_to_string(array_transform(split(regexp_replace('a b', "
+            r"'([\\p{L}\\p{N}]+)', concat(char(1), '$1')), char(1)), "
+            "tc_word -> concat(upper(substr(tc_word, 1, 1)), "
+            "lower(substr(tc_word, 2)))), '')",
+            self._sql(sqlalchemy.func.titlecase('a b')))
+
+    def test_titlecase_rejects_a_second_argument(self):
+        # A stray clause would land inside regexp_replace's argument list and fail
+        # out at the warehouse rather than here.
+        with self.assertRaises(CompileError):
+            self._sql(sqlalchemy.func.titlecase('a b', 'x'))
 
     def test_string_agg_without_separator_databend(self):
         # Default/Databend path is a pure passthrough to the native string_agg.
@@ -2465,9 +2477,9 @@ class TestAnyValueDialectContract(unittest.TestCase):
 
 
 class TestTitlecaseUnspecializedDialect(unittest.TestCase):
-    """StarRocks is the only dialect with a titlecase specialization (initcap); the
-    bare default must fail loud for every other target so a third dialect cannot
-    silently reintroduce the literal titlecase() render."""
+    """Every warehouse PlaidCloud targets has a titlecase render; the bare default
+    must still fail loud everywhere else, so a fifth dialect cannot reach a customer
+    on a rendering that was never checked against it."""
 
     def test_raises_on_a_dialect_without_a_specialization(self):
         import sqlalchemy, sqlalchemy.exc
@@ -2475,6 +2487,90 @@ class TestTitlecaseUnspecializedDialect(unittest.TestCase):
         with self.assertRaises(sqlalchemy.exc.CompileError):
             str(sqlalchemy.func.titlecase('a b').compile(
                 dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+
+def _starrocks_initcap(value):
+    """StarRocks initcap_impl: any non-alphanumeric resets the word flag."""
+    out, word_start = [], True
+    for char in value:
+        out.append((char.upper() if word_start else char.lower()) if char.isalnum() else char)
+        word_start = not char.isalnum()
+    return ''.join(out)
+
+
+class TestTitlecaseDialectContract(unittest.TestCase):
+    """titlecase must reach every warehouse in a spelling it can run *and* agree on.
+
+    StarRocks' initcap is the reference: a word is a run of alphanumerics and every
+    other character delimits, so `o'brien` titles to `O'Brien`. Snowflake's initcap
+    only matches once handed the delimiters explicitly -- its default set omits the
+    apostrophe. Databricks' initcap splits on whitespace alone, which is why it is
+    rendered by hand rather than called: it would disagree silently.
+
+    Spoofing DefaultDialect.name is exactly the key @compiles(fn, '<dialect>')
+    dispatches on, so a real engine reaches the same match. The Databend and DuckDB
+    renders were additionally executed -- Databend against a live 1.2.790 server,
+    DuckDB by test_matches_starrocks_semantics below.
+    """
+
+    def _spell(self, dialect_name):
+        d = DefaultDialect()
+        d.name = dialect_name
+        return str(sqlalchemy.func.titlecase(sqlalchemy.column('c'))
+                   .compile(dialect=d, compile_kwargs={"literal_binds": True}))
+
+    def test_starrocks_is_native_initcap(self):
+        self.assertEqual('initcap(c)', self._spell('starrocks'))
+
+    def test_snowflake_passes_delimiters_explicitly(self):
+        # Without the second argument Snowflake returns O'brien for o'brien. The
+        # backslash is doubled and the apostrophe escaped for a Snowflake literal.
+        rendered = self._spell('snowflake')
+        self.assertTrue(rendered.startswith('initcap(c, '), rendered)
+        for delimiter in ("''", '`', '=', '\\\\', '\\t'):
+            self.assertIn(delimiter, rendered)
+
+    def test_databricks_does_not_call_its_own_initcap(self):
+        # Spark's initcap is whitespace-delimited; calling it would be a silently
+        # wrong answer rather than a loud failure.
+        rendered = self._spell('databricks')
+        self.assertNotIn('initcap', rendered)
+        self.assertTrue(rendered.startswith('array_join(transform(split('), rendered)
+
+    def test_databend_and_databricks_differ_only_in_function_names(self):
+        # One construction, two vocabularies -- so the two cannot drift apart.
+        self.assertEqual(
+            self._spell('databend'),
+            self._spell('databricks')
+            .replace('array_join(', 'array_to_string(', 1)
+            .replace('transform(split(', 'array_transform(split(', 1))
+
+    def test_duckdb_needs_the_global_flag_and_a_backslash_backreference(self):
+        # DuckDB replaces only the first match without 'g', and spells the capture
+        # \1 rather than $1; either slip title-cases the first word alone.
+        rendered = self._spell('duckdb')
+        self.assertIn(", 'g')", rendered)
+        self.assertIn(r"'\1'", rendered)
+
+    @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
+    def test_matches_starrocks_semantics(self):
+        """Execute the DuckDB render and compare against StarRocks' algorithm.
+
+        The only target whose engine is importable here, so the only place the
+        rendered SQL can be run rather than merely matched. The same expected
+        values were confirmed against a live Databend.
+        """
+        import duckdb
+        con = duckdb.connect()
+        for value in ("john van  der berg", "o'brien-smith 3rd", 'café ñino',
+                      'MIXED cAsE', '', '*~~//*~~//male'):
+            d = DefaultDialect()
+            d.name = 'duckdb'
+            sql = str(sqlalchemy.func.titlecase(sqlalchemy.literal(value))
+                      .compile(dialect=d, compile_kwargs={"literal_binds": True}))
+            with self.subTest(value=value):
+                self.assertEqual(_starrocks_initcap(value),
+                                 con.sql(f'select {sql}').fetchone()[0])
 
 
 class TestStarrocksUnterminatedLiteral(unittest.TestCase):

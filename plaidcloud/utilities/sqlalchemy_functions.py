@@ -1964,27 +1964,170 @@ def compile_string_agg_starrocks(element, compiler, **kw):
 
 
 class titlecase(GenericFunction):
-    """Alteryx TitleCase() -- upper-case the first letter of each word."""
+    r"""Alteryx TitleCase() -- upper-case the first letter of each word.
+
+    A word is a run of alphanumerics; every non-alphanumeric character delimits
+    one, so `o'brien-smith` titles to `O'Brien-Smith`. That is StarRocks' native
+    initcap, and the contract the other dialects render to.
+
+    StarRocks and Snowflake have a conforming builtin (Snowflake's only once
+    given an explicit delimiter set). Databricks' initcap splits on whitespace
+    alone and would answer `O'brien`; Databend and DuckDB have none at all. Those
+    three are rendered by hand. Anything else still raises.
+    """
     name = 'titlecase'
     inherit_cache = True
 
+
+def _titlecase_argument(element, compiler, **kw):
+    """The one string argument of a titlecase() call, rendered.
+
+    Guarded because the renders below interpolate it into a larger expression,
+    where a second clause would land inside regexp_replace's argument list and
+    fail out at the warehouse instead of here.
+    """
+    clauses = list(element.clauses)
+    if len(clauses) != 1:
+        raise CompileError(
+            f'titlecase (Alteryx TitleCase) takes exactly one argument, got {len(clauses)}.')
+    return compiler.process(clauses[0], **kw)
+
+
+def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
+                               sentinel, split_fn, transform_fn, join_fn):
+    r"""Render Alteryx TitleCase where the dialect's builtins cannot express it.
+
+    Marks each word start with a sentinel, splits there so every chunk is one
+    word plus its trailing delimiters, cases the chunk, and rejoins. Delimiters
+    are never removed, so they survive verbatim.
+
+    One array element per word: the alternative, one per character looking back
+    at the previous one, is equally exact but allocates an array as long as the
+    string on every row. `value` is interpolated once, so the column expression
+    is evaluated once however deeply it nests.
+
+    The sentinel is U+0001 as a function call rather than a `\x01` escape,
+    because dialects disagree on escape processing inside string literals. A
+    U+0001 already in the data reads as a word break -- cosmetic, on a character
+    no text corpus carries.
+
+    Args:
+        value (str): rendered string expression to title-case.
+        word_pattern (str): regex capturing one word, spelled for this dialect's
+            literal-escaping rules.
+        group_ref (str): how the replacement back-references that capture.
+        replace_tail (str): extra regexp_replace arguments needed to make the
+            replacement global; empty where it already is.
+        sentinel (str): expression yielding the U+0001 marker.
+        split_fn (str): split-string-to-array function name.
+        transform_fn (str): map-over-array function name.
+        join_fn (str): join-array-to-string function name.
+
+    Returns:
+        str: the rendered title-case expression.
+    """
+    marked = (f"regexp_replace({value}, '{word_pattern}', "
+              f"concat({sentinel}, '{group_ref}'){replace_tail})")
+    chunks = f'{split_fn}({marked}, {sentinel})'
+    cased = (f'{transform_fn}({chunks}, tc_word -> '
+             f'concat(upper(substr(tc_word, 1, 1)), lower(substr(tc_word, 2))))')
+    return f"{join_fn}({cased}, '')"
+
+
+#: Unicode-aware because StarRocks classifies with ICU: `ñ` is a word character
+#: there, where ASCII-only `[[:alnum:]]` would title `café ñino` as `Café ÑIno`.
+#: Spelled twice because Databend and Databricks unescape backslashes inside
+#: string literals and DuckDB does not.
+_TITLECASE_WORD_ESCAPED = r'([\\p{L}\\p{N}]+)'
+_TITLECASE_WORD_RAW = r'([\p{L}\p{N}]+)'
+
+#: Snowflake's INITCAP delimiter default omits the apostrophe, backtick and
+#: equals sign, returning `O'brien` where StarRocks gives `O'Brien`; passing the
+#: set explicitly closes that gap across ASCII. Non-ASCII punctuation still fails
+#: to delimit there, and cannot be enumerated. The hand-rolled render is no help
+#: either: Snowflake's SPLIT yields VARIANT elements, so it would need casts
+#: nothing here can check against a live warehouse.
+_SNOWFLAKE_TITLECASE_DELIMITERS = ''' \t\n\r\f!?@"^#$&~_,.:;+-*%/|\\[](){}<>'`='''
+
+
 @compiles(titlecase, 'starrocks')
 def compile_titlecase_starrocks(element, compiler, **kw):
-    rendered = ', '.join(compiler.process(c, **kw) for c in element.clauses)
-    return f'initcap({rendered})'
+    return f'initcap({_titlecase_argument(element, compiler, **kw)})'
+
+
+@compiles(titlecase, 'snowflake')
+def compile_titlecase_snowflake(element, compiler, **kw):
+    # A Snowflake literal processes both backslash escapes and doubled quotes:
+    # the backslash delimiter has to survive as one character, and the apostrophe
+    # must not close the string.
+    delimiters = (_SNOWFLAKE_TITLECASE_DELIMITERS
+                  .replace('\\', '\\\\').replace("'", "''")
+                  .replace('\t', '\\t').replace('\n', '\\n')
+                  .replace('\r', '\\r').replace('\f', '\\f'))
+    return f"initcap({_titlecase_argument(element, compiler, **kw)}, '{delimiters}')"
+
+
+@compiles(titlecase, 'databend')
+def compile_titlecase_databend(element, compiler, **kw):
+    # No initcap under any alias; system.functions carries only
+    # upper/lower/ucase/lcase for case handling.
+    return _render_titlecase_by_words(
+        _titlecase_argument(element, compiler, **kw),
+        word_pattern=_TITLECASE_WORD_ESCAPED,
+        group_ref='$1',
+        replace_tail='',
+        sentinel='char(1)',
+        split_fn='split',
+        transform_fn='array_transform',
+        join_fn='array_to_string',
+    )
+
+
+@compiles(titlecase, 'databricks')
+def compile_titlecase_databricks(element, compiler, **kw):
+    # Rendered by hand precisely *because* Databricks has initcap: Spark's splits
+    # on whitespace alone, so it would return `O'brien` silently rather than
+    # fail, and a wrong answer is worse than Databend's missing function. Spark's
+    # split() takes a regex, but U+0001 carries no regex meaning.
+    return _render_titlecase_by_words(
+        _titlecase_argument(element, compiler, **kw),
+        word_pattern=_TITLECASE_WORD_ESCAPED,
+        group_ref='$1',
+        replace_tail='',
+        sentinel='char(1)',
+        split_fn='split',
+        transform_fn='transform',
+        join_fn='array_join',
+    )
+
+
+@compiles(titlecase, 'duckdb')
+def compile_titlecase_duckdb(element, compiler, **kw):
+    # The Alteryx isolation harness engine, which has no initcap either -- without
+    # a render here TitleCase cannot be measured at all. Its regexp_replace needs
+    # the 'g' flag to replace past the first match, and spells the back-reference
+    # RE2-style as \1 rather than $1.
+    return _render_titlecase_by_words(
+        _titlecase_argument(element, compiler, **kw),
+        word_pattern=_TITLECASE_WORD_RAW,
+        group_ref='\\1',
+        replace_tail=", 'g'",
+        sentinel='chr(1)',
+        split_fn='str_split',
+        transform_fn='list_transform',
+        join_fn='array_to_string',
+    )
+
 
 @compiles(titlecase)
 def compile_titlecase_default(element, compiler, **kw):
-    # StarRocks has native initcap (specialized above). No other dialect the
-    # converter targets does -- Databend has only upper/lower, no per-word title
-    # case -- so the bare default fails loudly for every non-StarRocks dialect
-    # rather than emitting a literal `titlecase(...)` (an unknown-function error at
-    # run time) or a silently-wrong first-letter-only approximation. Raising here,
-    # not only on 'databend', means a third target (greenplum/snowflake/...) can't
-    # silently reintroduce the literal.
+    # Every warehouse PlaidCloud targets is specialized above; the bare default
+    # still fails loudly so a fifth cannot reach a customer by inheriting a
+    # rendering that was never checked against it.
     raise CompileError(
-        f'titlecase (Alteryx TitleCase) has no {compiler.dialect.name} equivalent; '
-        'run this workflow on a StarRocks workspace, or replace the TitleCase call.')
+        f'titlecase (Alteryx TitleCase) has no {compiler.dialect.name} rendering; '
+        'run this workflow on a supported warehouse (Databend, StarRocks, Snowflake '
+        'or Databricks), or replace the TitleCase call.')
 
 
 class median(GenericFunction):
