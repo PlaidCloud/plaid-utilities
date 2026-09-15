@@ -158,19 +158,18 @@ class Dimensions:
         """
         return self.dims.is_dimension(project_id=self.project_id, name=name)
 
-    def rename_dimension(self, old, new):
-        """rename_dimension(old, new)
+    def rename_dimension(self, duid, name):
+        """rename_dimension(duid, name)
         Renames a dimension
 
         Args:
-            old (str): Current dimension unique ID
-            new (str): New dimension unique ID
+            duid (str): The dimension's unique ID
+            name (str): Its new name
 
         Returns:
             None
         """
-        # TODO: @Dave - Needs calling update function
-        self.dims.rename_dimension(project_id=self.project_id, old=old, new=new)
+        self.dims.rename_dimension(project_id=self.project_id, duid=duid, name=name)
         
     def get_dimension_names(self):
         """get_dimension_names(name)
@@ -282,27 +281,17 @@ class Dimension:
             self.clear()
 
     def __getattr__(self, item):
-        """Hopefully a catch-all for RPCs that may be added to the RPC methods in plaid, but not yet implemented here
-            Just calls directly through
-        """
+        """A dimension RPC this class has no wrapper for, called through with the project and name filled in."""
+        if item.startswith('_'):
+            raise AttributeError(item)
+
         def rpc_wrapper(**kwargs):
-            getattr(self.dim, item)(project_id=self.project_id, name=self.name, **kwargs)
+            return getattr(self.dim, item)(project_id=self.project_id, name=self.name, **kwargs)
         return rpc_wrapper
 
     # --------------------------------------------------------------------------------------------------
     # ==== DIMENSION METHODS ===========================================================================
     # --------------------------------------------------------------------------------------------------
-    def reload(self):
-        """reload()
-        Load nodes and hierarchies
-
-        Args:
-
-        Returns:
-            None
-        """
-        self.dim.reload(project_id=self.project_id, name=self.name)
-
     def clear(self):
         """clear()
         Clears the main and alternate hierarchies
@@ -612,7 +601,7 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_node_right(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_right(project_id=self.project_id, name=self.name, parent=parent, children=[child], hierarchy=hierarchy)[0]
 
     def shift_node_left(self, parent, child, hierarchy=MAIN):
         """shift_node_left(parent, child, hierarchy=MAIN)
@@ -624,7 +613,7 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_node_left(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_left(project_id=self.project_id, name=self.name, parent=parent, children=[child], hierarchy=hierarchy)[0]
 
     def shift_node_up(self, parent, child, hierarchy=MAIN):
         """shift_node_up(parent, child, hierarchy=MAIN)
@@ -637,7 +626,7 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_node_up(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_up(project_id=self.project_id, name=self.name, parent=parent, children=[child], hierarchy=hierarchy)[0]
 
     def shift_node_down(self, parent, child, hierarchy=MAIN):
         """shift_node_down(parent, child, hierarchy=MAIN)
@@ -650,7 +639,7 @@ class Dimension:
         Returns:
             new parent (str): New parent node or None if cannot be moved
         """
-        return self.dim.shift_node_down(project_id=self.project_id, name=self.name, parent=parent, child=child, hierarchy=hierarchy)
+        return self.dim.shift_node_down(project_id=self.project_id, name=self.name, parent=parent, children=[child], hierarchy=hierarchy)[0]
 
     # --------------------------------------------------------------------------------------------------
     # ==== NAVIGATION METHODS ==========================================================================
