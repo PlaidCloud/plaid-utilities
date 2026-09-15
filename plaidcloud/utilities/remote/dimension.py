@@ -197,62 +197,6 @@ class Dimensions:
         return [dims[i][1] for i in dims]
 
     # --------------------------------------------------------------------------------------------------
-    # ==== MAPPING METHODS =============================================================================
-    # --------------------------------------------------------------------------------------------------
-    def add_mapping(self, name, table, column):
-        """add_mapping(name, table, column)
-        Adds a new table column mapping
-
-        Args:
-            name (str): Dimension unique ID
-            table (str): Table name
-            column (str): Column name
-
-        Returns:
-            None
-        """
-        self.dims.add_mapping(project_id=self.project_id, name=name, table=table, column=column)
-
-    def delete_mapping(self, table, column):
-        """delete_mapping(table, column)
-        Deletes a table column mapping
-
-        Args:
-            table (str): Table name
-            column (str): Column name
-
-        Returns:
-            None
-        """
-        self.dims.delete_mapping(project_id=self.project_id, table=table, column=column)
-
-    def get_dimension_tables(self, name):
-        """get_dimension_tables(name)
-        Return tables using the dimension in a column mapping
-
-        Args:
-            name (str): Dimension unique ID
-
-        Returns:
-            dict: Dict of tables & columns
-        """
-        return self.dims.get_dimension_tables(project_id=self.project_id, name=name)
-
-    def get_table_dimensions(self, table):
-        """get_table_dimensions(table)
-        Return dimensions ussed by a table in column mappings
-
-        Args:
-            table (str): Table name
-
-        Returns:
-            dict: Dict of columns to dimensions
-        """
-        return self.dims.get_table_dimensions(project_id=self.project_id, table=table)
-
-    # --------------------------------------------------------------------------------------------------
-    # ==== IMPORT/EXPORT METHODS =======================================================================
-    # --------------------------------------------------------------------------------------------------
     def backup(self, name):
         """backup(name)
         Backup all nodes and hierarchies in dimension
