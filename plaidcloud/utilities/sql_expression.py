@@ -1905,15 +1905,23 @@ def _latest_set_by_iteration(values: list[sqlalchemy.ColumnElement]) -> sqlalche
 
     The pandas engine only writes a rule's target value when it is not blank (one of
     `BLANK_RULE_VALUES`, or null), so a later iteration overrides an earlier one
-    only where it has a value to give. Where no matched rule sets the column, the
-    earliest matched rule's own value stands, as it would with a single iteration.
+    only where it has a value to give. A text column that every matched rule leaves
+    blank reads `''`, the value pandas starts each row with, not whichever blank
+    marker a rule happened to hold; a row no rule matched stays NULL.
     """
-    def value_if_set(value: sqlalchemy.ColumnElement) -> sqlalchemy.ColumnElement:
-        if isinstance(value.type, sqlalchemy.String):
-            return sqlalchemy.case((value.in_(BLANK_RULE_VALUES), sqlalchemy.null()), else_=value)
-        return value
+    latest_first = list(reversed(values))
+    if not isinstance(values[0].type, sqlalchemy.String):
+        return sqlalchemy.func.coalesce(*latest_first)
 
-    return sqlalchemy.func.coalesce(*[value_if_set(value) for value in reversed(values)], *values)
+    set_values = [
+        sqlalchemy.case((value.in_(BLANK_RULE_VALUES), sqlalchemy.null()), else_=value)
+        for value in latest_first
+    ]
+    blank_values = [
+        sqlalchemy.case((value.in_(BLANK_RULE_VALUES), sqlalchemy.literal('', sqlalchemy.Text)))
+        for value in latest_first
+    ]
+    return sqlalchemy.func.coalesce(*set_values, *blank_values)
 
 
 def _apply_rules_by_iteration(cte_source: sqlalchemy.CTE, cte_rules: sqlalchemy.CTE,

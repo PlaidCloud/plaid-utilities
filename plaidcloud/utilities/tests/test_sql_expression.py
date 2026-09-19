@@ -2713,7 +2713,11 @@ class TestApplyRulesIterations(TestSQLExpression):
         return query
 
     def sql_rows(self, df_rules):
-        """Run the SQL engine's query on DuckDB, one `(acct, rule_number, rule_id, tag)` per row."""
+        """Run the SQL engine's query on DuckDB, one `(acct, rule_number, rule_id, tag)` per row.
+
+        A row no rule matched is NULL throughout on SQL and `''` on pandas, a long-standing
+        difference that a single iteration has too, so only those rows read NULL as `''`.
+        """
         import duckdb
         from sqlalchemy.dialects import postgresql
 
@@ -2722,7 +2726,10 @@ class TestApplyRulesIterations(TestSQLExpression):
         connection.execute('CREATE TABLE source_rows (acct TEXT)')
         connection.executemany('INSERT INTO source_rows VALUES (?)', [[account] for account in self.ACCOUNTS])
         rows = connection.sql(f'SELECT acct, rule_number, rule_id, tag FROM ({sql})').fetchall()
-        return sorted(tuple('' if value is None else value for value in row) for row in rows)
+        return sorted(
+            (acct, '', '', '') if rule_id is None else (acct, rule_number, rule_id, tag)
+            for acct, rule_number, rule_id, tag in rows
+        )
 
     def pandas_rows(self, df_rules):
         """The pandas engine's answer for the same rules, in the same shape."""
@@ -2779,6 +2786,7 @@ class TestApplyRulesIterations(TestSQLExpression):
             'first match wins within an iteration': [('A', 1, 'first'), ('A', 1, 'second'), ('B', 2, 'b')],
             'three iterations with gaps': [('A', 1, 'a1'), ('B', 2, 'b2'), ('A', 3, 'a3'), ('D', 3, 'd3')],
             'blank everywhere keeps the rule': [('A', 1, ''), ('A', 2, 'None'), ('B', 2, 'b')],
+            'a blank marker is not written as a value': [('A', 1, 'None'), ('A', 2, ''), ('C', 1, 'nan')],
         }
         for name, rules in scenarios.items():
             df_rules = self.rules(*rules)
