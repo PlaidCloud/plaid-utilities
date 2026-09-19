@@ -8,18 +8,21 @@ import logging
 import re
 import uuid
 from copy import deepcopy
-
-from toolz.functoolz import juxt, compose, curry
-from toolz.functoolz import identity as ident
-from toolz.dicttoolz import merge, valfilter, assoc
+from typing import TYPE_CHECKING
 
 import sqlalchemy
 import sqlalchemy.orm
-
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+from toolz.dicttoolz import assoc, merge, valfilter
+from toolz.functoolz import compose, curry, juxt
+from toolz.functoolz import identity as ident
+
+from plaidcloud.utilities import sqlalchemy_functions as sf  # noqa: F401 - importing it creates the SQL functions
 from plaidcloud.utilities.stringtransforms import apply_variables
-from plaidcloud.utilities import sqlalchemy_functions as sf  # Not unused import, it creates the SQLalchemy functions used
+
+if TYPE_CHECKING:
+    import pandas
 
 
 __author__ = 'Adams Tower'
@@ -449,7 +452,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
 
     try:
         expression_with_variables = apply_variables(expression, variables)
-    except:
+    except Exception:
         if disable_variables:
             expression_with_variables = expression
         else:
@@ -630,7 +633,7 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
 
     def label_fn(expr: sqlalchemy.ColumnElement):
         return expr.label(name)
-    
+
     if trim_type:
         def trim_fn(expr: sqlalchemy.ColumnElement):
             return sqlalchemy.func.rtrim(sqlalchemy.func.rtrim(expr, '0'), '.')
@@ -1298,7 +1301,7 @@ def get_select_query(
             if (
                 tc.get('agg') in ('group', 'group_null')
                 and not tc.get('constant')
-                and (use_row_number_for_serial or not tc.get('dtype') in ('serial', 'bigserial'))
+                and (use_row_number_for_serial or tc.get('dtype') not in ('serial', 'bigserial'))
             )
         ]
         # ROLLUP()/CUBE()/GROUPING SETS() with an empty argument list is a SQL syntax
@@ -1849,7 +1852,7 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
 
     try:
         expression_with_variables = apply_variables(rule, variables)
-    except:
+    except Exception:
         if disable_variables:
             expression_with_variables = rule
         else:
@@ -1866,13 +1869,116 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
         )
 
 
-def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, include_once=True, show_rules=False,
-                verbose=True, unmatched_rule='UNMATCHED', condition_column='condition', iteration_column='iteration',
-                logger=None):
+BLANK_RULE_VALUES = ('', 'None', 'nan')
+ITERATION_SEPARATOR = ', '
+
+
+def _joined_by_iteration(values: list[sqlalchemy.ColumnElement]) -> sqlalchemy.ColumnElement:
+    """The values of the iterations a row matched, in order, joined with `', '`; NULL if it matched none.
+
+    This is how the pandas engine records a row's rule numbers and ids across
+    iterations (`'1, 2'`). Each value is prefixed with the separator and the first
+    separator is cut off afterwards, which keeps the expression linear in the number
+    of iterations. An unmatched iteration's value is NULL, and so is its prefixed
+    form on every supported warehouse (`||`, or `concat()` on the MySQL family,
+    yields NULL for a NULL operand), so `coalesce` drops it.
+    """
+    prefixed = [
+        sqlalchemy.func.coalesce(
+            sqlalchemy.literal(ITERATION_SEPARATOR, sqlalchemy.Text) + sqlalchemy.cast(value, sqlalchemy.Text),
+            sqlalchemy.literal('', sqlalchemy.Text),
+        )
+        for value in values
+    ]
+    joined = prefixed[0]
+    for value in prefixed[1:]:
+        joined = joined + value
+    return sqlalchemy.func.nullif(
+        sqlalchemy.func.substring(joined, len(ITERATION_SEPARATOR) + 1, type_=sqlalchemy.Text),
+        sqlalchemy.literal('', sqlalchemy.Text),
+        type_=sqlalchemy.Text,
+    )
+
+
+def _latest_set_by_iteration(values: list[sqlalchemy.ColumnElement]) -> sqlalchemy.ColumnElement:
+    """A target column's value from the latest iteration whose matched rule sets it.
+
+    The pandas engine only writes a rule's target value when it is not blank (one of
+    `BLANK_RULE_VALUES`, or null), so a later iteration overrides an earlier one
+    only where it has a value to give. Where no matched rule sets the column, the
+    earliest matched rule's own value stands, as it would with a single iteration.
+    """
+    def value_if_set(value: sqlalchemy.ColumnElement) -> sqlalchemy.ColumnElement:
+        if isinstance(value.type, sqlalchemy.String):
+            return sqlalchemy.case((value.in_(BLANK_RULE_VALUES), sqlalchemy.null()), else_=value)
+        return value
+
+    return sqlalchemy.func.coalesce(*[value_if_set(value) for value in reversed(values)], *values)
+
+
+def _apply_rules_by_iteration(cte_source: sqlalchemy.CTE, cte_rules: sqlalchemy.CTE,
+                              iteration_whens: list[list[tuple]], rule_id_column: str,
+                              target_columns: list[str]) -> sqlalchemy.Select:
+    """Apply rules in several iterations under include_once, one row out per source row.
+
+    Every iteration is evaluated against every source row, and its `CASE` picks the
+    first of its rules that matches, as a single iteration does. Each iteration's
+    matched rule is joined to the rules separately, and the row's rule number, rule
+    id and target values are then combined across iterations, later ones overriding
+    earlier ones, as the pandas engine does.
+
+    Args:
+        cte_source: The source rows
+        cte_rules: The rules, as `apply_rules` builds them
+        iteration_whens: For each iteration in order, its `(predicate, rule id)` pairs in priority order
+        rule_id_column: Column name containing the rule id
+        target_columns: The target columns to apply rules on
+    """
+    iteration_whens = [whens for whens in iteration_whens if whens]
+    if not iteration_whens:
+        raise SQLExpressionError('There are no rules to apply in any iteration')
+
+    rule_id_labels = [f'_iteration_{position}_rule_id' for position in range(len(iteration_whens))]
+    cte_applied_rules = sqlalchemy.select(
+        *cte_source.columns,
+        *[
+            sqlalchemy.case(*whens, else_=None).label(label)
+            for whens, label in zip(iteration_whens, rule_id_labels)
+        ],
+    ).cte('applied_rules')
+
+    matched_rules = [cte_rules.alias(f'rules_{position}') for position in range(len(iteration_whens))]
+    joined = cte_applied_rules
+    for label, rules in zip(rule_id_labels, matched_rules):
+        joined = joined.outerjoin(rules, cte_applied_rules.columns[label] == rules.columns[rule_id_column])
+
+    return sqlalchemy.select(
+        *[col for col in cte_applied_rules.columns if col.name not in rule_id_labels],
+        sqlalchemy.cast(sqlalchemy.null(), sqlalchemy.TEXT).label('log'),
+        _joined_by_iteration([rules.columns['rule_number'] for rules in matched_rules]).label('rule_number'),
+        sqlalchemy.cast(sqlalchemy.null(), sqlalchemy.TEXT).label('rule'),
+        _joined_by_iteration([cte_applied_rules.columns[label] for label in rule_id_labels]).label('rule_id'),
+        *[
+            _latest_set_by_iteration([rules.columns[target] for rules in matched_rules]).label(target)
+            for target in target_columns
+        ],
+    ).select_from(joined)
+
+
+def apply_rules(source_query: sqlalchemy.Select, df_rules: 'pandas.DataFrame', rule_id_column: str,
+                target_columns: list[str] | None = None, include_once: bool = True, show_rules: bool = False,
+                verbose: bool = True, unmatched_rule: str = 'UNMATCHED', condition_column: str = 'condition',
+                iteration_column: str = 'iteration',
+                logger: logging.Logger | None = None) -> tuple[sqlalchemy.CTE, sqlalchemy.Select]:
     """
     If include_once is True, then condition n+1 only applied to records left after condition n.
     Adding target column(s), plural, because we'd want to only run this operation once, even
     if we needed to set multiple columns.
+
+    With include_once and more than one iteration, each source row comes out once:
+    later iterations override the target values earlier ones set, and the row's
+    rule numbers and ids are joined across iterations as text (`'1, 2'`), as the
+    pandas engine writes them. A single iteration keeps `rule_number` an integer.
 
     Args:
         source_query (sqlalchemy.Select): The Query to apply rules on
@@ -1915,7 +2021,7 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
     iterations.sort()
     iteration_selects = []
 
-    def rule_predicate(rule):
+    def rule_predicate(rule: 'pandas.Series') -> sqlalchemy.ColumnElement:
         """Compile a rule's condition, rejecting one that renders to no SQL at all.
 
         The filter on `valid_rules` only checks the condition *text*. A condition
@@ -1945,8 +2051,20 @@ def apply_rules(source_query, df_rules, rule_id_column, target_columns=None, inc
             )
         return predicate
 
+    def valid_rules_in(iteration: int) -> 'pandas.DataFrame':
+        return df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'].eq(True)) & (df_rules[condition_column].notnull()) & (df_rules[condition_column] != '')]
+
+    if include_once and len(iterations) > 1:
+        iteration_whens = [
+            [(rule_predicate(rule), rule[rule_id_column]) for index, rule in valid_rules_in(iteration).iterrows()]
+            for iteration in iterations
+        ]
+        return cte_rules, _apply_rules_by_iteration(
+            cte_source, cte_rules, iteration_whens, rule_id_column, target_columns,
+        )
+
     for iteration in iterations:
-        valid_rules = df_rules[(df_rules[iteration_column] == iteration) & (df_rules['include'] == True) & (df_rules[condition_column].notnull()) & (df_rules[condition_column] != '')]
+        valid_rules = valid_rules_in(iteration)
         if include_once:
             iteration_selects.append(
                 sqlalchemy.select(
