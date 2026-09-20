@@ -52,6 +52,7 @@ test = [
     "databricks-sqlalchemy",
     "databricks-sql-connector",
     "snowflake-sqlalchemy",
+    "duckdb",
 ]
 full = [
     "plaidcloud-rpc[full]>=1.11.0",

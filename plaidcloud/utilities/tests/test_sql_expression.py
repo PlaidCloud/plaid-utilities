@@ -1,14 +1,15 @@
 # coding=utf-8
 import functools
+import importlib.util
 import unittest
 
 import pandas
 import sqlalchemy
+from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
 from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
-from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
 from plaidcloud.utilities import sql_expression as se
 from plaidcloud.utilities.analyze_table import compiled as _compiled
 
@@ -2675,6 +2676,138 @@ class TestApplyRules(TestSQLExpression):
         sql, _ = compiled(query)
         self.assertIn('WHEN true THEN', sql)
         self.assertNotIn('WHEN  THEN', sql)
+
+
+class TestApplyRulesIterations(TestSQLExpression):
+    """Rules in several iterations give one row per source row, later iterations overriding earlier ones.
+
+    The SQL engine used to evaluate each iteration as its own pass and `UNION ALL`
+    them, so every source row came out once per iteration (sc-29921). The pandas
+    engine, `frame_manager.apply_rules`, is the reference.
+    """
+
+    ACCOUNTS = ['A', 'B', 'C', 'D']
+    WAREHOUSES = ['starrocks', 'databend', 'snowflake', 'databricks']
+
+    def setUp(self):
+        self.table = sqlalchemy.table('source_rows', sqlalchemy.column('acct', sqlalchemy.Text))
+
+    def rules(self, *rules):
+        """One rule per `(account, iteration, tag)`, in priority order, with ids R1, R2, ..."""
+        return pandas.DataFrame([
+            {
+                'rule_id': f'R{index + 1}',
+                'account': account,
+                'condition': f"get_column(table, 'acct')=='{account}'",
+                'include': True,
+                'iteration': iteration,
+                'tag': tag,
+            }
+            for index, (account, iteration, tag) in enumerate(rules)
+        ])
+
+    def apply(self, df_rules):
+        _, query = se.apply_rules(
+            sqlalchemy.select(self.table.c.acct), df_rules, rule_id_column='rule_id', target_columns=['tag'],
+        )
+        return query
+
+    def sql_rows(self, df_rules):
+        """Run the SQL engine's query on DuckDB, one `(acct, rule_number, rule_id, tag)` per row.
+
+        A row no rule matched is NULL throughout on SQL and `''` on pandas, a long-standing
+        difference that a single iteration has too, so only those rows read NULL as `''`.
+        """
+        import duckdb
+        from sqlalchemy.dialects import postgresql
+
+        sql = str(self.apply(df_rules).compile(dialect=postgresql.dialect(), compile_kwargs={'literal_binds': True}))
+        connection = duckdb.connect()
+        connection.execute('CREATE TABLE source_rows (acct TEXT)')
+        connection.executemany('INSERT INTO source_rows VALUES (?)', [[account] for account in self.ACCOUNTS])
+        rows = connection.sql(f'SELECT acct, rule_number, rule_id, tag FROM ({sql})').fetchall()
+        return sorted(
+            (acct, '', '', '') if rule_id is None else (acct, rule_number, rule_id, tag)
+            for acct, rule_number, rule_id, tag in rows
+        )
+
+    def pandas_rows(self, df_rules):
+        """The pandas engine's answer for the same rules, in the same shape."""
+        from plaidcloud.utilities import frame_manager
+
+        df_pandas_rules = df_rules.assign(condition=[f'acct == "{account}"' for account in df_rules['account']])
+        df_mapped, _ = frame_manager.apply_rules(
+            pandas.DataFrame({'acct': self.ACCOUNTS}), df_pandas_rules, target_columns=['tag'], show_rules=True,
+            verbose=False, rule_id_column='rule_id', raise_exceptions=True,
+        )
+        return sorted(df_mapped[['acct', 'rule_number', 'rule_id', 'tag']].itertuples(index=False, name=None))
+
+    def test_single_iteration_is_unchanged(self):
+        query = self.apply(self.rules(('A', 1, 'a'), ('B', 1, 'b')))
+        sql, _ = compiled(query)
+        self.assertNotIn('_iteration_', sql)
+        self.assertIsInstance(query.selected_columns['rule_number'].type, sqlalchemy.Integer)
+
+    def test_iterations_are_one_pass_with_text_rule_numbers(self):
+        query = self.apply(self.rules(('A', 1, 'a'), ('B', 1, 'b'), ('B', 2, 'b2')))
+        sql, _ = compiled(query)
+        self.assertNotIn('UNION ALL', sql)
+        self.assertIsInstance(query.selected_columns['rule_number'].type, sqlalchemy.Text)
+
+    def test_iterations_compile_on_every_warehouse(self):
+        query = self.apply(self.rules(('A', 1, 'a'), ('B', 2, 'b')))
+        for warehouse in self.WAREHOUSES:
+            with self.subTest(warehouse=warehouse):
+                try:
+                    sql, _ = _compiled(query, dialect=warehouse)
+                except sqlalchemy.exc.NoSuchModuleError:
+                    self.skipTest(f'{warehouse} dialect not installed')
+                self.assertNotIn('UNION ALL', sql)
+
+    def test_an_iteration_with_no_rules_is_skipped(self):
+        """A `CASE` with no branches renders `CASE END`, which no warehouse accepts."""
+        df_rules = self.rules(('A', 1, 'a'), ('B', 2, 'b'))
+        df_rules.loc[1, 'include'] = False
+        sql, _ = compiled(self.apply(df_rules))
+        self.assertNotIn('CASE END', sql)
+
+    def test_no_rules_in_any_iteration_raises(self):
+        df_rules = self.rules(('A', 1, 'a'), ('B', 2, 'b'))
+        df_rules['include'] = False
+        with self.assertRaises(se.SQLExpressionError):
+            self.apply(df_rules)
+
+    @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
+    def test_matches_the_pandas_engine(self):
+        scenarios = {
+            'a later iteration overrides': [('A', 1, 'a'), ('B', 1, 'b'), ('B', 2, 'b2')],
+            'a blank later value does not override': [('B', 1, 'b'), ('B', 2, '')],
+            'matched only in a later iteration': [('A', 1, 'a'), ('C', 2, 'c2')],
+            'first match wins within an iteration': [('A', 1, 'first'), ('A', 1, 'second'), ('B', 2, 'b')],
+            'three iterations with gaps': [('A', 1, 'a1'), ('B', 2, 'b2'), ('A', 3, 'a3'), ('D', 3, 'd3')],
+            'blank everywhere keeps the rule': [('A', 1, ''), ('A', 2, 'None'), ('B', 2, 'b')],
+            'a blank marker is not written as a value': [('A', 1, 'None'), ('A', 2, ''), ('C', 1, 'nan')],
+        }
+        for name, rules in scenarios.items():
+            df_rules = self.rules(*rules)
+            with self.subTest(scenario=name):
+                self.assertEqual(self.pandas_rows(df_rules), self.sql_rows(df_rules))
+
+    @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
+    def test_a_rule_holding_null_leaves_the_column_null(self):
+        """The one place several iterations do not match pandas, pinned rather than fixed.
+
+        A rule whose target value is null sets nothing on either engine, but pandas
+        leaves the `''` it starts each row with and SQL leaves NULL. A single iteration
+        has always read NULL there, so this keeps the two SQL paths saying the same
+        thing; changing it would change what every single-iteration step writes.
+        """
+        df_rules = self.rules(('A', 1, None), ('B', 2, 'b'))
+
+        unmatched = [('C', '', '', ''), ('D', '', '', '')]
+
+        self.assertEqual([('A', '0', 'R1', None), ('B', '1', 'R2', 'b')] + unmatched, self.sql_rows(df_rules))
+        self.assertEqual([('A', '0', 'R1', ''), ('B', '1', 'R2', 'b')] + unmatched, self.pandas_rows(df_rules))
 
 
 if __name__ == '__main__':
