@@ -2884,3 +2884,116 @@ class TestStarrocksDefaultOkSweepMembership(unittest.TestCase):
                 specs = disp.specs if disp else {}
                 self.assertNotIn('starrocks', specs, f'{cls.__name__} has a starrocks variant; drop it from _STARROCKS_DEFAULT_OK')
                 cls(*args).compile(dialect=dialect)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# sc-30364: the vector_distance contract, Tier 1 (compile conformance)
+# ---------------------------------------------------------------------------
+# What this tier is and is not: a regression net over the string the author
+# wrote, not a correctness proof. It cannot falsify a formula that was wrong
+# when written -- only Tier 2 (test_vector_distance_conformance.py, executed
+# against a real StarRocks warehouse) can. So there are deliberately NO
+# entries here for dialects that are not shipping: a permanently green badge
+# over unverified formulas is worse than no badge.
+
+class TestVectorDistanceStarrocks(StarrocksTest):
+    def _sql(self, metric):
+        expr = sqlalchemy.func.vector_distance(metric, sqlalchemy.column('a'), sqlalchemy.column('b'))
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_cosine_is_one_minus_similarity(self):
+        self.assertEqual('(1 - cosine_similarity(a, b))', self._sql('cosine'))
+
+    def test_the_cosine_group_survives_enclosing_arithmetic(self):
+        # The grouping is the whole point: SQLAlchemy sees the outer element as a
+        # Function (maximum precedence) and, un-grouped, declines to parenthesize, so
+        # the subtraction mis-associates inside any enclosing expression. Measured live
+        # on StarRocks 4.1.3 with the un-grouped rendering: `vd * 2` returned -0.94926
+        # where 0.050736 is correct, and the `1 - vd` similarity round trip returned
+        # -0.97463 -- the sign flipped. That is this story's own defect class (thresholds
+        # and displayed scores wrong while ranking survives), so pin the composition
+        # rather than only the bare string.
+        vd = sqlalchemy.func.vector_distance('cosine', sqlalchemy.column('a'), sqlalchemy.column('b'))
+        inner = '(1 - cosine_similarity(a, b))'
+        for label, expr, expected in (
+            ('scaled', vd * 2, f'{inner} * 2'),
+            ('similarity round trip', 1 - vd, f'1 - {inner}'),
+            ('negated', -vd, f'-{inner}'),
+            ('halved', vd / 2, f'{inner} / 2'),
+            ('squared', vd * vd, f'{inner} * {inner}'),
+        ):
+            with self.subTest(composition=label):
+                self.assertEqual(expected, str(expr.compile(
+                    dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+    def test_l2_needs_no_group_being_a_bare_call(self):
+        vd = sqlalchemy.func.vector_distance('l2', sqlalchemy.column('a'), sqlalchemy.column('b'))
+        self.assertEqual('sqrt(l2_distance(a, b)) * 2', str((vd * 2).compile(
+            dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+    def test_l2_wraps_starrocks_squared_distance_in_sqrt(self):
+        # StarRocks' l2_distance returns SQUARED L2 under a name that says
+        # distance -- measured live on 4.1.3 (sc-30350): l2_distance([1,2,3],
+        # [4,5,6]) = 27, not 5.196152, while Databend's same-named function
+        # returns the true distance. Dropping the sqrt() would keep every
+        # ranking test passing and silently break every threshold. This is ONE pin --
+        # a string assertion on today's output. The semantic pin is Tier 2's
+        # test_squared_l2_is_caught plus the live diff, which is the only thing that
+        # can tell a distance from its square.
+        self.assertEqual('sqrt(l2_distance(a, b))', self._sql('l2'))
+
+    def test_neither_metric_masks_a_null_distance(self):
+        # Large-magnitude vectors overflow StarRocks' float32 accumulator and
+        # both metrics return NULL silently (sc-30350, measured). Masking that
+        # here would turn a visible NULL into an invisible wrong answer; the
+        # ORDER BY guard belongs to the search step (sc-30370). This fails if
+        # someone later "fixes" the NULL at the wrong layer.
+        for metric in sf.VECTOR_DISTANCE_METRICS:
+            with self.subTest(metric=metric):
+                sql = self._sql(metric).upper()
+                for masker in ('COALESCE', 'IFNULL', 'ISNULL(', 'NVL', 'NULLIF',
+                               'IS NULL', 'IF(', 'CASE WHEN'):
+                    self.assertNotIn(masker, sql)
+
+    def test_an_unknown_metric_is_refused_by_name(self):
+        with self.assertRaises(CompileError) as ctx:
+            self._sql('inner_product')
+        self.assertIn('inner_product', str(ctx.exception))
+
+    def test_metrics_are_cosine_and_l2_only(self):
+        self.assertEqual(('cosine', 'l2'), sf.VECTOR_DISTANCE_METRICS)
+
+
+class TestVectorDistanceRefusesOtherDialects(unittest.TestCase):
+    """Only StarRocks is wired (epic 30343 D3). Every other dialect must refuse
+    by name rather than emit an unverified formula -- including 'default', which
+    is what a bare str(query) compiles against.
+
+    CompileError, not the UnsupportedDtype that PlaidVector.load_dialect_impl
+    raises for the column type: this is a compile failure of an expression, the
+    established shape for "this dialect cannot do this" in this module
+    (compile_import_cast_snowflake's interval branch), and callers already
+    handle CompileError from a dozen sites here.
+
+    (An earlier version of this docstring claimed NotImplementedError would have
+    been coverage-excluded. It would not: this repo's [tool.coverage.report] has
+    no exclude_lines at all. PlaidGeometry's refusal went unpinned because of a
+    class-level `# pragma: no cover - requires databend` in plaid-rpc, which is a
+    different mechanism in a different repo. The choice above stands on
+    module-idiom grounds alone.)"""
+
+    def _refusal(self, dialect_name):
+        d = DefaultDialect()
+        d.name = dialect_name
+        expr = sqlalchemy.func.vector_distance('cosine', sqlalchemy.column('a'), sqlalchemy.column('b'))
+        with self.assertRaises(CompileError) as ctx:
+            str(expr.compile(dialect=d))
+        return str(ctx.exception)
+
+    def test_every_other_dialect_names_itself_in_the_refusal(self):
+        for dialect_name in ('databend', 'snowflake', 'databricks', 'duckdb', 'greenplum', 'default'):
+            with self.subTest(dialect=dialect_name):
+                self.assertIn(repr(dialect_name), self._refusal(dialect_name))
+
+    def test_the_refusal_says_why(self):
+        self.assertIn('StarRocks-only', self._refusal('databend'))
