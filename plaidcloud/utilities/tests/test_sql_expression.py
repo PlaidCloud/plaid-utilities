@@ -2,16 +2,17 @@
 import functools
 import importlib.util
 import unittest
-
 import pandas
 import sqlalchemy
 from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
+from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype
 from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
 from plaidcloud.utilities import sql_expression as se
 from plaidcloud.utilities.analyze_table import compiled as _compiled
+from plaidcloud.utilities.frame_join_multi_validator import TYPE_AGNOSTIC_AGGS
 
 __author__ = "Adams Tower"
 __copyright__ = "© Copyright 2009-2023, Tartan Solutions, Inc"
@@ -1157,6 +1158,58 @@ class TestGetFromClause(TestSQLExpression):
                 'TargetColumn'
             ),
         )
+
+
+class TestAggregationRefusal(TestSQLExpression):
+    """get_agg_fn dispatches through getattr(sqlalchemy.func, ...) and asks nothing about the
+    column, so a dtype the registry refuses to aggregate otherwise reaches the warehouse as
+    SUM(<array>) and fails there, in another repo, naming neither the column nor the dtype."""
+
+    def _clause(self, dtype, agg, aggregate=True):
+        source_column_configs = [[{'source': 'Column1', 'dtype': dtype}]]
+        table = se.get_table_rep('table_12345', source_column_configs[0], 'anlz_schema')
+        return se.get_from_clause(
+            [table],
+            {'source': 'Column1', 'target': 'Target', 'dtype': dtype, 'agg': agg},
+            source_column_configs,
+            aggregate=aggregate,
+        )
+
+    def test_an_aggregation_needing_type_semantics_is_refused(self):
+        self.assertIsNone(DTYPES['vector'].default_agg)
+        for agg in ('sum', 'min', 'max', 'avg', 'sum_null', 'min_null'):
+            with self.subTest(agg=agg):
+                with self.assertRaises(UnsupportedDtype) as ctx:
+                    self._clause('vector', agg)
+                self.assertIn('vector', str(ctx.exception))
+                self.assertIn('Target', str(ctx.exception))
+
+    def test_counting_is_allowed_for_any_dtype(self):
+        """COUNT tallies rows and COUNT(DISTINCT) compares for equality; neither reads value
+        semantics, so refusing them would be over-refusal."""
+        for agg in sorted(TYPE_AGNOSTIC_AGGS):
+            with self.subTest(agg=agg):
+                self._clause('vector', agg)
+
+    def test_a_grouping_token_is_allowed(self):
+        for agg in (None, 'group', 'group_null', 'dont_group'):
+            with self.subTest(agg=agg):
+                self._clause('vector', agg)
+
+    def test_a_non_aggregating_query_is_unaffected(self):
+        self._clause('vector', 'sum', aggregate=False)
+
+    def test_min_and_max_still_work_on_a_dtype_that_is_not_aggregatable(self):
+        """Gating on `aggregatable` instead of `default_agg` would refuse every one of these.
+        frame_lookup aggregates every non-key column of its dedupe subquery with `min`."""
+        for dtype in ('text', 'boolean', 'date', 'timestamp', 'json', 'largebinary', 'uuid'):
+            self.assertFalse(DTYPES[dtype].aggregatable)
+            for agg in ('min', 'max', 'sum'):
+                with self.subTest(dtype=dtype, agg=agg):
+                    self._clause(dtype, agg)
+
+    def test_an_aggregatable_dtype_is_unaffected(self):
+        self._clause('numeric', 'sum')
 
 
 class TestResolveTargetDtypes(TestSQLExpression):

@@ -18,7 +18,7 @@ import numpy as np
 import orjson as json
 
 from plaidcloud.rpc import utc
-from plaidcloud.rpc.type_conversion import analyze_type
+from plaidcloud.rpc.type_conversion import UnsupportedDtype, analyze_type, require_dtype_capability
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
 from plaidcloud.rpc.rpc_connect import Connect
 from plaidcloud.utilities.query import Connection, Table
@@ -75,6 +75,9 @@ def sql_from_dtype(dtype):
         'text'
         >>> sql_from_dtype('bytea')
         'largebinary'
+
+    Raises:
+        UnsupportedDtype: if `dtype` has no analyze equivalent here
     """
     mapping = {
         'bool': 'boolean',
@@ -134,7 +137,10 @@ def sql_from_dtype(dtype):
     elif 'char' in dtype:
         dtype = 'text'
 
-    return mapping[dtype]
+    try:
+        return mapping[dtype]
+    except KeyError:
+        raise UnsupportedDtype(dtype, 'sql_from_dtype') from None
 
 
 def save_typed_psv(df, outfile, sep='|', **kwargs):
@@ -488,22 +494,12 @@ def dtype_from_sql(sql):
 
     Returns:
         str: the pandas dtype equivalent of `sql`
-    """
-    mapping = {
-        'boolean': 'bool',
-        'text': 'object',
-        'smallint': 'int16',
-        'integer': 'int32',
-        'bigint': 'int64',
-        'numeric': 'float64',
-        'currency': 'float64',
-        'timestamp': 'datetime64[s]',
-        'interval': 'timedelta64[s]',
-        'date': 'datetime64[s]',
-        'time': 'datetime64[s]',
-    }
 
-    return mapping.get(str(sql).lower(), None)
+    Raises:
+        UnsupportedDtype: if `sql` is undeclared, or has no pandas representation
+            (uuid, bitmap, geometry, geography)
+    """
+    return require_dtype_capability(sql, 'pandas', 'dtype_from_sql').pandas
 
 
 def sturdy_cast_as_float(input_val):
@@ -530,6 +526,44 @@ def sturdy_cast_as_float(input_val):
             return None
 
 
+def _no_pandas_conversion(sql, pandas_dtype):
+    """The analyze registry declares a pandas spelling this module has no conversion for.
+
+    Unreachable while `dtype_from_sql`'s range is the eight spellings below; reachable the moment
+    a new dtype declares a ninth. Named and raised rather than left to fall through, because the
+    alternatives measured worse: `set_column_types` silently no-ops (the column keeps its old
+    dtype and nothing is reported) and `converter_from_sql` raises a bare `KeyError`, which is
+    the swallowable class this story exists to remove. `NotImplementedError` because it is
+    neither a `KeyError` nor a `ValueError`, so no wrapper here or upstream absorbs it.
+    """
+    return NotImplementedError(
+        f'no pandas conversion here for dtype {sql!r} (pandas {pandas_dtype!r}); the analyze '
+        f'registry declares a spelling plaidcloud.utilities.frame_manager does not handle'
+    )
+
+
+#: One converter per pandas dtype the registry can name, so this cannot drift from
+#: dtype_from_sql -- load_typed_psv consumes the two together, and the hand-kept dtype->callable
+#: map this replaces held 11 analyze dtypes against dtype_from_sql's 20, so a typed psv naming
+#: serial, double or json refused here while resolving there. `test_every_declared_dtype_has_a_
+#: converter` enumerates the registry, so a newly declared pandas spelling reds a test rather
+#: than raising KeyError in a workflow.
+_CONVERTER_FROM_PANDAS_DTYPE = {
+    'object': str,
+    'bool': bool,
+    'Int8': int,
+    'Int16': int,
+    'Int64': int,
+    'float64': sturdy_cast_as_float,
+    # pd.datetime, which the date family read until pandas 2.0 removed it, raised
+    # AttributeError on every call -- so this function, and load_typed_psv with it, answered
+    # nothing at all. interval reads to_timedelta: dtype_from_sql calls it timedelta64[s], and
+    # a converter that parsed it as a datetime would disagree with the dtype beside it.
+    'datetime64[s]': pd.to_datetime,
+    'timedelta64[s]': pd.to_timedelta,
+}
+
+
 def converter_from_sql(sql):
     """Gets a pandas converter from a SQL data type
 
@@ -537,25 +571,18 @@ def converter_from_sql(sql):
         sql (str): The SQL data type
 
     Returns:
-        str: the pandas converter
-    """
-    mapping = {
-        'boolean': bool,
-        'text': str,
-        'smallint': int,
-        'integer': int,
-        'bigint': int,
-        #'numeric': float, #dh.cast_as_float,
-        #'numeric': dh.cast_as_float,
-        'numeric': sturdy_cast_as_float,
-        'currency': sturdy_cast_as_float,
-        'timestamp': pd.datetime,
-        'interval': pd.datetime,
-        'date': pd.datetime,
-        'time': pd.datetime,
-    }
+        callable: the pandas converter
 
-    return mapping.get(str(sql).lower(), str(sql).lower())
+    Raises:
+        UnsupportedDtype: if `sql` is undeclared, or has no pandas representation
+    """
+    # The fallback this replaces returned the dtype STRING, which pandas then called:
+    # `TypeError: 'str' object is not callable`, naming neither the column nor the dtype.
+    pandas_dtype = dtype_from_sql(sql)
+    try:
+        return _CONVERTER_FROM_PANDAS_DTYPE[pandas_dtype]
+    except KeyError:
+        raise _no_pandas_conversion(sql, pandas_dtype) from None
 
 
 def load_typed_psv(infile, sep='|', **kwargs):
@@ -586,30 +613,19 @@ def load_typed_psv(infile, sep='|', **kwargs):
         header = next(csv.reader(headerIO, delimiter=sep))  # Just parse that first line as a csv row
         names_and_types = [h.split(CSV_TYPE_DELIMITER) for h in header]
         column_names = [n[0] for n in names_and_types]
-        try:
+        if all(len(nt) == 2 for nt in names_and_types):
             dtypes = {
                 name: dtype_from_sql(sqltype)
                 for name, sqltype in names_and_types
             }
-        except ValueError:
-            # Missing sqltype - looks like this is a regular, untyped csv.
-            # Let's hope that first line was its header.
-            dtypes = None
-
-        converters={}
-        #for name, sqltype in names_and_types:
-            #converter = converter_from_sql(sqltype)
-            #if converter:
-                #converters[name] = converter
-
-        try:
             converters = {
                 name: converter_from_sql(sqltype)
                 for name, sqltype in names_and_types
             }
-        except ValueError:
-            # Missing sqltype - looks like this is a regular, untyped csv.
+        else:
+            # A column with no sqltype - looks like this is a regular, untyped csv.
             # Let's hope that first line was its header.
+            dtypes = None
             converters = None
 
         # This will start on the second line, since we already read the first line.
@@ -640,15 +656,26 @@ def load_typed_psv(infile, sep='|', **kwargs):
             'null'
         ]
         parse_dates = []
+        parse_timedeltas = []
 
         if dtypes is not None:
-            for k, v in dtypes.items():
-                dtypes[k] = v.lower()
+            for k in list(dtypes):
+                dtypes[k] = dtypes[k].lower()
                 #Handle inbound dates
                 #https://stackoverflow.com/questions/21269399/datetime-dtypes-in-pandas-read-csv
                 if 'datetime' in dtypes[k]:
-                    dtypes[k] = 'object'
+                    # Leave the column out of `dtype` entirely rather than declaring it object:
+                    # an explicit dtype DEFEATS parse_dates -- pandas honours the dtype and skips
+                    # parsing -- so a date/time/timestamp column came back as the text of one.
+                    del dtypes[k]
                     parse_dates.append(k)
+                elif 'timedelta' in dtypes[k]:
+                    # read_csv refuses a timedelta dtype= ("not supported for parsing") and has
+                    # no parse_dates equivalent for one, so it is read as text and converted
+                    # after the read. Converters cannot do it: they reach only the ValueError
+                    # retry, and pandas ignores `dtype` for any column a converter covers.
+                    dtypes[k] = 'object'
+                    parse_timedeltas.append(k)
 
         try:
             df = pd.read_csv(buf, header=None, names=column_names, dtype=dtypes, sep=sep, na_values=na_values, keep_default_na=False, parse_dates=parse_dates, encoding='utf-8')
@@ -673,6 +700,10 @@ def load_typed_psv(infile, sep='|', **kwargs):
             #    Mercy.  This has been a pain.
             #    I guess if it was easy, Pandas wouldn't support the ability to send in your own converters.
             pass
+
+        for k in parse_timedeltas:
+            df[k] = pd.to_timedelta(df[k])
+
         return df
 
 
@@ -1716,6 +1747,7 @@ def set_column_types(df, type_dict):
     #that we'll just send through to get the default Pandas.to_numeric() treatment for now.
     numeric_non_float_column_types = (
         'int8', 'int16', 'int32', 'int64',
+        'Int8', 'Int16', 'Int32', 'Int64',
         'uint8', 'uint16', 'uint32', 'uint64',
         'complex64', 'complex128',
         'bigint', 'smallint',
@@ -1733,7 +1765,7 @@ def set_column_types(df, type_dict):
         'timedelta64[as]', 'timedelta64[fs]', 'timedelta64[ps]', 'timedelta64[ns]',
         'timedelta64[us]', 'timedelta64[ms]', 'timedelta64[s]', 'timedelta64[m]',
         'timedelta64[h]', 'timedelta64[D]', 'timedelta64[W]',
-        'timedelta64[M]', 'timedelta64[Y]'
+        'timedelta64[M]', 'timedelta64[Y]',
         'interval',
     )
 
@@ -1755,15 +1787,6 @@ def set_column_types(df, type_dict):
         'text': 256,
     }
 
-    no_convert_types = [
-        'uuid',
-        'json',
-    ]
-
-    category_column_types = (
-        'category',
-    )
-
     for td in type_dict.keys():
         dtype = dtype_from_sql(type_dict[td])
         try:
@@ -1779,25 +1802,21 @@ def set_column_types(df, type_dict):
             elif dtype in timedelta_column_types:
                 df[td] = pd.to_timedelta(df[td])
 
-            elif dtype in no_convert_types:
-                # Do not convert.  Keep as is.
-                pass
-
             elif dtype in list(string_column_types.keys()):
                 # Keep whatever text is there
                 pass
 
             elif dtype in bool_column_types:
                 df[td] = df[td].astype('bool')
-            elif dtype in category_column_types:
-                df[td] = df[td].astype('category')
             else:
-                raise Exception('Unknown dtype specified')
-        except:
+                raise _no_pandas_conversion(type_dict[td], dtype)
+        except NotImplementedError:
+            raise
+        except Exception as e:
             logger.exception('EXCEPTION')
             err_msg = 'dtype conversion of {0} to {1} FAILED'.format(td, dtype)
 
-            raise Exception(err_msg)
+            raise RuntimeError(err_msg) from e
 
     return df
 

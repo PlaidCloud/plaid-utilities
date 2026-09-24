@@ -2,9 +2,15 @@
 # coding=utf-8
 
 import unittest
+from io import StringIO
+from types import MappingProxyType
+from unittest import mock
+
 import pytest
 import numpy as np
 import pandas as pd
+from plaidcloud.rpc import type_conversion
+from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype
 from plaidcloud.utilities import frame_manager
 from plaidcloud.utilities.frame_manager import coalesce
 
@@ -223,7 +229,6 @@ class TestFrameManager(unittest.TestCase):
 #    def test_column_info(self):
 #        pass
 
-    @pytest.mark.skip('Dtypes seem to be wrong, should be passing sql types?')
     def test_set_column_types(self):
         """Tests to verify data type conversion for columns"""
         type_dict = {'Name': 's32', 'Points': 'float16', 'Age': 'int8'}
@@ -240,6 +245,190 @@ class TestFrameManager(unittest.TestCase):
 
     def test_dtype_from_sql_currency(self):
         self.assertEqual('float64', frame_manager.dtype_from_sql('currency'))
+
+    def test_dtype_from_sql_resolves_dtypes_the_local_map_missed(self):
+        """The map this replaced held 11 keys and answered None for the rest — a None that
+        reached set_column_types' error message and load_typed_psv's `.lower()`."""
+        for dtype, pandas_dtype in (
+            ('serial', 'Int64'), ('bigserial', 'Int64'), ('tinyint', 'Int8'),
+            ('double', 'float64'), ('json', 'object'), ('largebinary', 'object'),
+        ):
+            with self.subTest(dtype=dtype):
+                self.assertEqual(pandas_dtype, frame_manager.dtype_from_sql(dtype))
+
+    def test_dtype_from_sql_refuses_an_undeclared_dtype(self):
+        with self.assertRaises(UnsupportedDtype) as ctx:
+            frame_manager.dtype_from_sql('bogus')
+        self.assertIn('bogus', str(ctx.exception))
+
+    def test_dtype_from_sql_refuses_a_dtype_with_no_pandas_representation(self):
+        for dtype in ('uuid', 'geometry', 'geography', 'bitmap'):
+            with self.subTest(dtype=dtype):
+                with self.assertRaises(UnsupportedDtype):
+                    frame_manager.dtype_from_sql(dtype)
+
+    def test_sql_from_dtype_refuses_by_name_not_by_key_error(self):
+        """A KeyError is swallowed by every `except KeyError` upstream and names nothing."""
+        with self.assertRaises(UnsupportedDtype) as ctx:
+            frame_manager.sql_from_dtype('bogus')
+        self.assertNotIsInstance(ctx.exception, KeyError)
+        self.assertIn('bogus', str(ctx.exception))
+
+    def test_set_column_types_lets_the_refusal_reach_the_caller(self):
+        """The bare `except:` caught the exception the function itself raised and re-raised a
+        different one reading `to None`, because dtype_from_sql had answered None two frames up.
+        """
+        df = pd.DataFrame({'a': ['x']})
+        with self.assertRaises(UnsupportedDtype) as ctx:
+            frame_manager.set_column_types(df, {'a': 'geometry'})
+        self.assertIn('geometry', str(ctx.exception))
+        self.assertNotIn('FAILED', str(ctx.exception))
+
+    def test_set_column_types_still_reports_a_failed_conversion(self):
+        df = pd.DataFrame({'a': ['not a number']})
+        with self.assertRaises(RuntimeError) as ctx:
+            frame_manager.set_column_types(df, {'a': 'numeric'})
+        self.assertIn('FAILED', str(ctx.exception))
+
+    def test_set_column_types_converts_dtypes_the_local_map_missed(self):
+        df = pd.DataFrame({'n': ['1'], 'j': ['{}'], 'd': ['1.5'], 'b': ['True']})
+        out = frame_manager.set_column_types(
+            df, {'n': 'serial', 'j': 'json', 'd': 'double', 'b': 'boolean'}
+        )
+        self.assertEqual('int64', str(out['n'].dtype))
+        self.assertEqual('object', str(out['j'].dtype))
+        self.assertEqual('float32', str(out['d'].dtype))  # downcast='float', as for numeric
+        self.assertEqual('bool', str(out['b'].dtype))
+
+    def test_converter_from_sql_returns_a_callable_for_a_date(self):
+        """pd.datetime went away in pandas 2.0, so every call raised AttributeError."""
+        self.assertEqual(
+            pd.Timestamp('2020-01-02'), frame_manager.converter_from_sql('date')('2020-01-02')
+        )
+
+    def test_converter_from_sql_reads_an_interval_as_a_timedelta(self):
+        """dtype_from_sql calls interval timedelta64[s]; a converter parsing it as a datetime
+        would disagree with the dtype declared beside it."""
+        self.assertEqual(
+            pd.Timedelta('1 days'), frame_manager.converter_from_sql('interval')('1 days')
+        )
+
+    def test_every_declared_dtype_has_a_converter(self):
+        """converter_from_sql and dtype_from_sql are consumed together in load_typed_psv, so
+        they must agree across the whole vocabulary -- the hand-kept map this replaced held 11
+        analyze dtypes against dtype_from_sql's 20."""
+        for dtype, declared in sorted(DTYPES.items()):
+            with self.subTest(dtype=dtype):
+                if declared.pandas is None:
+                    with self.assertRaises(UnsupportedDtype):
+                        frame_manager.converter_from_sql(dtype)
+                else:
+                    self.assertTrue(callable(frame_manager.converter_from_sql(dtype)))
+
+    def test_converter_from_sql_refuses_an_undeclared_dtype(self):
+        with self.assertRaises(UnsupportedDtype):
+            frame_manager.converter_from_sql('bogus')
+
+    def test_typed_psv_round_trips(self):
+        df = pd.DataFrame({'Name': ['a', 'b'], 'Points': [1.5, 2.5], 'Age': [30, 40]})
+        buf = StringIO()
+        frame_manager.save_typed_psv(df, buf)
+        buf.seek(0)
+        out = frame_manager.load_typed_psv(buf)
+        self.assertEqual(['Name', 'Points', 'Age'], list(out.columns))
+        self.assertEqual(['a', 'b'], list(out['Name']))
+        self.assertEqual([1.5, 2.5], list(out['Points']))
+
+    #: dtype -> (value to write, dtype load_typed_psv must return, dtype set_column_types must
+    #: return). The row count alone is not enough: an interval loaded as the *string* '1 days'
+    #: passes a length assertion, which is how that went unnoticed. The two paths differ where
+    #: they legitimately differ -- read_csv honours the declared integer width, while
+    #: set_column_types runs pd.to_numeric (int64) with downcast='float' on the float branch.
+    DTYPE_SAMPLES = {
+        'text': ('a', 'object', 'object'),
+        'varchar': ('a', 'object', 'object'),
+        'boolean': ('True', 'bool', 'bool'),
+        'tinyint': ('1', 'int8', 'int64'),
+        'smallint': ('2', 'int16', 'int64'),
+        'integer': ('3', 'int64', 'int64'),
+        'bigint': ('4', 'int64', 'int64'),
+        'serial': ('5', 'int64', 'int64'),
+        'bigserial': ('6', 'int64', 'int64'),
+        'numeric': ('1.5', 'float64', 'float32'),
+        'decimal': ('2.5', 'float64', 'float32'),
+        'float': ('3.5', 'float64', 'float32'),
+        'double': ('4.5', 'float64', 'float32'),
+        'currency': ('5.5', 'float64', 'float32'),
+        'date': ('2020-01-02', 'datetime64[ns]', 'datetime64[ns]'),
+        'time': ('2020-01-02', 'datetime64[ns]', 'datetime64[ns]'),
+        'timestamp': ('2020-01-02 03:04:05', 'datetime64[ns]', 'datetime64[ns]'),
+        'interval': ('1 days', 'timedelta64[ns]', 'timedelta64[ns]'),
+        'json': ('{}', 'object', 'object'),
+        'largebinary': ('abc', 'object', 'object'),
+        'vector': ('[0.1, 0.2]', 'object', 'object'),
+    }
+
+    def test_a_typed_psv_loads_every_dtype_that_has_a_pandas_representation(self):
+        """The hand-kept converter map loaded 10 of the declared dtypes and refused the rest,
+        including every one this change widened dtype_from_sql to answer for."""
+        for dtype, (value, psv_dtype, _) in sorted(self.DTYPE_SAMPLES.items()):
+            with self.subTest(dtype=dtype):
+                out = frame_manager.load_typed_psv(StringIO(f'Col::{dtype}\n{value}\n'))
+                self.assertEqual(1, len(out))
+                self.assertEqual(psv_dtype, str(out['Col'].dtype))
+
+    def test_a_typed_psv_returns_real_temporal_values_not_the_text_of_them(self):
+        """An interval reached read_csv as `dtype='object'` and was never parsed, because
+        converters reach only the ValueError retry path. A date/time/timestamp had the same
+        outcome for a different reason: an explicit dtype DEFEATS parse_dates."""
+        out = frame_manager.load_typed_psv(
+            StringIO('D::interval|T::timestamp\n1 days|2020-01-02 03:04:05\n')
+        )
+        self.assertEqual(pd.Timedelta('1 days'), out['D'][0])
+        self.assertEqual(pd.Timestamp('2020-01-02 03:04:05'), out['T'][0])
+
+    def test_every_declared_dtype_is_covered_by_the_psv_samples_or_has_no_pandas_form(self):
+        """So a newly declared dtype cannot slip past the loader test above."""
+        no_pandas = {k for k, v in DTYPES.items() if v.pandas is None}
+        self.assertEqual(set(DTYPES), set(self.DTYPE_SAMPLES) | no_pandas)
+
+    def test_set_column_types_converts_every_declared_dtype(self):
+        """The enumeration this was missing. Deleting the unreachable `else` had left
+        set_column_types silently no-opping instead of reporting, and asserting only that the
+        call returned would not have caught it -- so assert the resulting dtype."""
+        for dtype, (value, _, expected) in sorted(self.DTYPE_SAMPLES.items()):
+            with self.subTest(dtype=dtype):
+                out = frame_manager.set_column_types(pd.DataFrame({'c': [value]}), {'c': dtype})
+                self.assertEqual(expected, str(out['c'].dtype))
+
+    def test_a_declared_dtype_this_module_cannot_convert_fails_by_name(self):
+        """Reachable the moment a new analyze dtype declares a pandas spelling outside the eight
+        dtype_from_sql can emit. It must not silently no-op, and must not raise a bare KeyError."""
+        patched = MappingProxyType(
+            {**DTYPES, 'futuredtype': DTYPES['text']._replace(pandas='float128')}
+        )
+        with mock.patch.object(type_conversion, 'DTYPES', patched):
+            with self.assertRaises(NotImplementedError) as ctx:
+                frame_manager.set_column_types(pd.DataFrame({'c': ['x']}), {'c': 'futuredtype'})
+            self.assertIn('futuredtype', str(ctx.exception))
+            self.assertIn('float128', str(ctx.exception))
+            with self.assertRaises(NotImplementedError):
+                frame_manager.converter_from_sql('futuredtype')
+
+    def test_a_missing_file_returns_false(self):
+        """Documented by exercise rather than by reading: this returns False, it does not raise."""
+        self.assertIs(False, frame_manager.load_typed_psv('/nonexistent/path/does-not-exist.psv'))
+
+    def test_an_untyped_csv_still_loads(self):
+        out = frame_manager.load_typed_psv(StringIO('Name|Age\na|30\n'))
+        self.assertEqual(['Name', 'Age'], list(out.columns))
+
+    def test_a_typed_psv_refusal_is_not_read_as_an_untyped_csv(self):
+        """`except ValueError` guarded the tuple unpack of an untyped header, and
+        UnsupportedDtype is a ValueError -- so a refused dtype silently loaded untyped."""
+        with self.assertRaises(UnsupportedDtype) as ctx:
+            frame_manager.load_typed_psv(StringIO('Name::text|Shape::geometry\na|x\n'))
+        self.assertIn('geometry', str(ctx.exception))
 
     def test_table_result_to_df_currency(self):
         result = {'meta': [{'id': 'amount', 'dtype': 'currency'}], 'data': [(1.5,), (2.25,)]}

@@ -10,10 +10,16 @@ declares whether it's valid or its expected `_expected_reason` token. This file:
 
 import copy
 import importlib.resources
+import inspect
 import json
+import re
 import unittest
+from unittest import mock
 
+from plaidcloud.rpc.type_conversion import DTYPES
+from plaidcloud.utilities import frame_join_multi_validator as fjmv
 from plaidcloud.utilities.frame_join_multi_validator import (
+    _REASONS,
     JoinMultiValidationError,
     JOIN_TYPES,
     MAX_CONFIG_BYTES,
@@ -635,6 +641,183 @@ class TestRound12HavingAndSourceWhereGaps(unittest.TestCase):
         cfg = self._base()
         cfg['sources'][0]['source_where'] = '   '
         validate_frame_join_multi_config(cfg)  # no raise — treated as absent
+
+
+#: Whether each declared dtype may be a join key. Written out rather than read off the registry,
+#: which would make the assertion tautological, and rather than derived from
+#: `sqlalchemy_from_dtype`, which is the accidental old contract that would demand `vector` be
+#: joinable. This is the pin the BLOCKER asked for: the effective contract before this change was
+#: `_DTYPE_ENUM` **union everything sqlalchemy_from_dtype resolves**, and the registry mirrored
+#: only the first half -- so `varchar`, `geometry` and `geography` silently flipped from accepted
+#: to refused, and a workflow saved before the deploy would fail its Layer-2 check at execute
+#: time. They are True here because sc-30345's own rule is that a declaration reproduces today's
+#: behaviour, warts included; whether a geometry column *should* be a legal key is a separate,
+#: deliberate decision. `vector` and `bitmap` are the only False entries: neither can appear in
+#: a config saved before this epic.
+JOIN_KEY_VOCABULARY = {
+    'text': True, 'varchar': True, 'boolean': True, 'tinyint': True, 'smallint': True,
+    'integer': True, 'bigint': True, 'serial': True, 'bigserial': True, 'numeric': True,
+    'decimal': True, 'float': True, 'double': True, 'currency': True, 'date': True,
+    'time': True, 'timestamp': True, 'interval': True, 'json': True, 'uuid': True,
+    'largebinary': True, 'geometry': True, 'geography': True,
+    'bitmap': False, 'vector': False,
+}
+
+
+class TestJoinKeyVocabulary(unittest.TestCase):
+    """Pins join-key admission across the whole declared vocabulary, so a narrowing cannot pass
+    unnoticed the way this one did."""
+
+    def _base(self):
+        return copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+
+    def test_every_declared_dtype_is_classified(self):
+        """A newly declared dtype must be given a join-key answer here, not silently inherit one."""
+        self.assertEqual(set(DTYPES), set(JOIN_KEY_VOCABULARY))
+
+    def test_join_key_admission_matches_the_vocabulary(self):
+        for dtype, joinable in sorted(JOIN_KEY_VOCABULARY.items()):
+            cfg = self._base()
+            # sales.customer_id = cust.id is the fixture's only join condition.
+            cfg['sources'][0]['source_columns'][1]['dtype'] = dtype
+            cfg['sources'][1]['source_columns'][0]['dtype'] = dtype
+            with self.subTest(dtype=dtype, joinable=joinable):
+                if joinable:
+                    # A failure here means a dtype LOST join-key acceptance, which is a
+                    # regression in the registry declaration, not in this test. varchar,
+                    # geometry and geography are the three that had silently lost it; plaid-rpc
+                    # 1.16.0 declares them joinable_as_key=True, which is why this package needs
+                    # that release.
+                    validate_frame_join_multi_config(cfg)
+                else:
+                    with self.assertRaises(JoinMultiValidationError) as ctx:
+                        validate_frame_join_multi_config(cfg)
+                    self.assertEqual('left_expr_dtype_not_joinable', ctx.exception.reason)
+
+
+class TestReasonVocabulary(unittest.TestCase):
+
+    def test_reason_vocabulary_matches_the_source(self):
+        """`_REASONS` is the vocabulary a client maps to translated messages, and the module
+        docstring has always pointed at it. Keep it exhaustive in both directions."""
+        source = inspect.getsource(fjmv)
+        raised = set(re.findall(r"_err\(\s*'([a-z0-9_]+)'", source))
+        raised |= set(re.findall(r"_require_joinable\(\s*alias_to_dtypes,[^)]*?'([a-z0-9_]+)'", source))
+        self.assertEqual(raised, set(_REASONS))
+
+
+class TestDtypeRoles(unittest.TestCase):
+    """The dtype check is per role. `_dtype_ok`'s fallback used to accept anything
+    sqlalchemy_from_dtype resolved, so a dtype became a legal join key and aggregation target
+    the moment it gained a SQLAlchemy type."""
+
+    def _base(self):
+        return copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+
+    def _reason(self, cfg):
+        with self.assertRaises(JoinMultiValidationError) as ctx:
+            validate_frame_join_multi_config(cfg)
+        return ctx.exception.reason
+
+    def test_a_non_joinable_dtype_is_refused_on_the_left_of_a_join_condition(self):
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][1]['dtype'] = 'vector'  # sales.customer_id
+        self.assertEqual('left_expr_dtype_not_joinable', self._reason(cfg))
+
+    def test_a_non_joinable_dtype_is_refused_on_the_right_of_a_join_condition(self):
+        cfg = self._base()
+        cfg['sources'][1]['source_columns'][0]['dtype'] = 'vector'  # cust.id
+        self.assertEqual('right_expr_dtype_not_joinable', self._reason(cfg))
+
+    def test_a_non_joinable_dtype_is_refused_as_a_between_bound(self):
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][2]['dtype'] = 'vector'  # sales.total
+        cfg['edges'][0]['conditions'] = [{
+            'left_expr': 'sales.customer_id', 'operator': 'BETWEEN',
+            'between_low': 'sales.total', 'right_expr': 'cust.id',
+        }]
+        self.assertEqual('between_bound_dtype_not_joinable', self._reason(cfg))
+
+    def test_a_between_over_two_literals_is_a_filter_not_a_join_key(self):
+        """item 8: nothing is compared to the left column but constants, so its dtype is not
+        being used as a key."""
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][2]['dtype'] = 'vector'
+        cfg['edges'][0]['conditions'] = [
+            {'left_expr': 'sales.total', 'operator': 'BETWEEN',
+             'between_low': 'a', 'right_expr': 'z'},
+            {'left_expr': 'sales.customer_id', 'operator': '=', 'right_expr': 'cust.id'},
+        ]
+        validate_frame_join_multi_config(cfg)
+
+    def test_a_non_joinable_dtype_passes_through_as_an_ordinary_column(self):
+        """The objective the blanket deny would contradict: a table carrying such a column
+        still joins, and the column still reaches the output."""
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][2]['dtype'] = 'vector'
+        cfg['target_columns'].append({
+            'source_alias': 'sales', 'source': 'sales.total', 'target': 'embedding', 'dtype': 'vector',
+        })
+        validate_frame_join_multi_config(cfg)
+
+    def test_a_non_joinable_dtype_may_still_be_filtered_for_null(self):
+        """IS NULL compares a column to nothing, so it is a filter rather than a join key."""
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][2]['dtype'] = 'vector'
+        cfg['edges'][0]['conditions'] = [
+            {'left_expr': 'sales.total', 'operator': 'IS NOT NULL'},
+            {'left_expr': 'sales.customer_id', 'operator': '=', 'right_expr': 'cust.id'},
+        ]
+        validate_frame_join_multi_config(cfg)
+
+    def test_a_dtype_that_refuses_aggregation_is_refused_as_an_agg_target(self):
+        for agg in ('sum', 'min', 'max', 'avg', 'sum_null', 'min_null'):
+            cfg = self._base()
+            cfg['target_columns'][0]['dtype'] = 'vector'
+            cfg['target_columns'][0]['agg'] = agg
+            with self.subTest(agg=agg):
+                self.assertEqual('target_column_dtype_not_aggregatable', self._reason(cfg))
+
+    def test_the_same_dtype_is_accepted_as_a_group_target(self):
+        for agg in ('group', 'group_null', 'dont_group', None):
+            cfg = self._base()
+            cfg['target_columns'][0]['dtype'] = 'vector'
+            cfg['target_columns'][0]['agg'] = agg
+            with self.subTest(agg=agg):
+                validate_frame_join_multi_config(cfg)
+
+    def test_the_same_dtype_may_still_be_counted(self):
+        """item 3: COUNT reads no value semantics, so it is valid for any storable type."""
+        for agg in ('count', 'count_null', 'count_distinct', 'count_distinct_null'):
+            cfg = self._base()
+            cfg['target_columns'][0]['dtype'] = 'vector'
+            cfg['target_columns'][0]['agg'] = agg
+            with self.subTest(agg=agg):
+                validate_frame_join_multi_config(cfg)
+
+    def test_a_dtype_that_is_not_aggregatable_but_is_orderable_still_aggregates(self):
+        """item 3: gating on `aggregatable` instead would refuse MIN(<text>) and
+        MAX(<timestamp>), which frame_lookup emits for every non-key column."""
+        for dtype in ('text', 'boolean', 'date', 'timestamp', 'json', 'largebinary'):
+            self.assertFalse(DTYPES[dtype].aggregatable)
+            for agg in ('min', 'max', 'sum'):
+                cfg = self._base()
+                cfg['target_columns'][0]['dtype'] = dtype
+                cfg['target_columns'][0]['agg'] = agg
+                with self.subTest(dtype=dtype, agg=agg):
+                    validate_frame_join_multi_config(cfg)
+
+    def test_an_aggregatable_dtype_is_still_accepted_as_an_agg_target(self):
+        cfg = self._base()
+        cfg['target_columns'][0]['agg'] = 'sum'
+        validate_frame_join_multi_config(cfg)
+
+    def test_only_an_unsupported_dtype_reads_as_a_bad_dtype(self):
+        """`except Exception` made an ImportError indistinguishable from an unresolvable dtype,
+        so a broken install reported the user's config as invalid."""
+        with mock.patch.object(fjmv, 'admit_dtype', side_effect=ImportError('no rpc')):
+            with self.assertRaises(ImportError):
+                validate_frame_join_multi_config(self._base())
 
 
 if __name__ == '__main__':

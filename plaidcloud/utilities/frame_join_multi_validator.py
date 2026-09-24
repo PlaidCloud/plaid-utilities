@@ -16,11 +16,17 @@ the token to a translated message. Reason tokens are listed in `_REASONS` below.
 """
 
 import json
+import logging
 import re
 import string
 
+from plaidcloud.rpc.type_conversion import UnsupportedDtype, admit_dtype, require_dtype_capability
+
+logger = logging.getLogger(__name__)
+
 __all__ = [
     'validate_frame_join_multi_config',
+    'TYPE_AGNOSTIC_AGGS',
     'JoinMultiValidationError',
     'OPERATORS',
     'JOIN_TYPES',
@@ -111,6 +117,10 @@ _COLUMN_ID_FORBIDDEN = re.compile(r'[\x00-\x1f"`\\]')
 _MAX_COLUMN_ID_LEN = 255
 
 
+def _is_column_ref(value) -> bool:
+    return isinstance(value, str) and _COLUMN_REF_RE.fullmatch(value) is not None
+
+
 def _column_id_ok(value) -> bool:
     return (
         isinstance(value, str)
@@ -119,30 +129,41 @@ def _column_id_ok(value) -> bool:
     )
 
 
-# Canonical lowercase dtype tokens — a fast path that avoids the rpc import for the common case.
-_DTYPE_ENUM = frozenset({
-    'text', 'integer', 'bigint', 'smallint', 'tinyint', 'numeric', 'decimal',
-    'float', 'double', 'boolean', 'currency', 'date', 'timestamp', 'time', 'interval',
-    'json', 'uuid', 'serial', 'bigserial', 'largebinary',
-})
+_DTYPE_CONTEXT = 'a frame_join_multi config'
 
 
-def _dtype_ok(dtype) -> bool:
-    if not isinstance(dtype, str):
-        return False
-    if dtype.lower().split('(')[0] in _DTYPE_ENUM:
-        return True
-    # The enum above is only a fast path. The executor builds each column's type via
-    # sqlalchemy_from_dtype (regex-based), which also resolves the PlaidCloud/pandas aliases
-    # real emitters produce (String, Int32, Float64, datetime64, geometry, …). Accept exactly
-    # what the executor can resolve so the validator never rejects a dtype the executor handles.
-    # sqlalchemy_from_dtype raises RegexMapKeyError on an unresolvable dtype.
+def _dtype_ok(dtype, capability: str | None = None) -> bool:
+    """Whether the admission boundary declares `dtype`, and can do `capability` if one is named.
+
+    This replaces a hand-kept enum of 20 dtype tokens over a fallback that accepted anything
+    `sqlalchemy_from_dtype` resolved — so a dtype became a legal join key and aggregation
+    target the moment it gained a SQLAlchemy type, which is not a decision this validator
+    should be making by accident. The registry states it per role instead.
+
+    Only `UnsupportedDtype` means no. The `except Exception` this replaces read an ImportError
+    as an unresolvable dtype, so a broken install passed for a bad config.
+
+    The refusal names both the dtype and the capability, and a reason token carries neither, so
+    it is logged before being dropped: this module's contract is that an error never echoes user
+    input back (see the module docstring), and the `field` locator is what lets a client point
+    the user at the offending column.
+    """
     try:
-        from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
-        sqlalchemy_from_dtype(dtype)
-        return True
-    except Exception:
+        if capability is None:
+            admit_dtype(dtype, _DTYPE_CONTEXT)
+        else:
+            require_dtype_capability(dtype, capability, _DTYPE_CONTEXT)
+    except UnsupportedDtype as e:
+        logger.debug('frame_join_multi config rejected: %s', e)
         return False
+    return True
+
+
+def _require_joinable(alias_to_dtypes, alias, col, reason, field):
+    """A column compared against another column is a join key, so its dtype must be one."""
+    if not _dtype_ok(alias_to_dtypes[alias][col], 'joinable_as_key'):
+        _err(reason, field)
+
 
 # Allowed aggregation tokens. Anything not in this set would still be accepted by
 # get_agg_fn() via getattr(sqlalchemy.func, ...) and emit a bogus SQL function call.
@@ -153,6 +174,16 @@ _AGG_ENUM = frozenset({
     'min', 'min_null', 'max', 'max_null',
     'avg', 'avg_null',
 })
+
+#: Aggregations that read no value semantics from the column: COUNT tallies rows and
+#: COUNT(DISTINCT) compares for equality, which every storable type supports. Every other
+#: aggregation asks something of the type -- SUM/AVG arithmetic, MIN/MAX an ordering -- so a
+#: dtype the registry refuses to aggregate may still be counted. Defined here, beside the token
+#: allowlist it is carved out of, and imported by sql_expression's emitter gate so the two
+#: cannot disagree about what a token means.
+TYPE_AGNOSTIC_AGGS = frozenset({'count', 'count_null', 'count_distinct', 'count_distinct_null'})
+
+_AGGREGATING_TOKENS = _AGG_ENUM - {'group', 'group_null', 'dont_group'} - TYPE_AGNOSTIC_AGGS
 
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_SOURCES = 32
@@ -177,6 +208,43 @@ class JoinMultiValidationError(Exception):
         self.reason = reason
         self.field = field
         super().__init__(f'{self.code}: {reason} at {field}' if field else f'{self.code}: {reason}')
+
+
+# Every reason token this module can raise -- the list the module docstring refers to, and the
+# vocabulary a client maps to translated messages. `test_reason_vocabulary_matches_the_source`
+# keeps it exhaustive, so a new token cannot ship without being registered here.
+_REASONS = frozenset({
+    'alias_duplicate', 'alias_invalid', 'alias_reserved', 'between_bound_alias_unknown',
+    'between_bound_column_unknown', 'between_bound_dtype_not_joinable',
+    'between_bound_invalid', 'between_bound_string_too_long', 'condition_not_dict',
+    'conditions_count_out_of_range', 'conditions_not_list', 'config_not_dict',
+    'config_not_json_serializable', 'config_too_large', 'cross_join_has_conditions',
+    'cross_source_where_ref', 'datastore_dialect_not_user_settable',
+    'edge_conditions_do_not_bind_aliases', 'edge_not_dict', 'edges_count_mismatch',
+    'edges_not_list', 'from_alias_invalid', 'from_alias_unknown',
+    'full_outer_unsupported_on_dialect', 'having_empty_or_whitespace', 'having_not_string',
+    'having_references_unknown_target', 'having_too_long', 'in_value_not_primitive',
+    'in_value_not_serializable', 'in_value_too_large', 'in_values_count_out_of_range',
+    'in_values_not_list', 'in_values_total_too_large', 'join_type_invalid',
+    'left_expr_alias_unknown', 'left_expr_column_unknown', 'left_expr_dtype_not_joinable',
+    'left_expr_invalid', 'operator_invalid', 'output_row_limit_not_int',
+    'output_row_limit_out_of_range', 'pattern_not_string', 'pattern_too_long',
+    'right_expr_alias_unknown', 'right_expr_column_unknown', 'right_expr_dtype_not_joinable',
+    'right_expr_invalid', 'root_used_as_to_alias', 'same_alias_self_compare',
+    'source_alias_required', 'source_alias_unknown', 'source_column_dtype_invalid',
+    'source_column_duplicate_id', 'source_column_invalid', 'source_columns_empty',
+    'source_columns_not_list', 'source_not_dict', 'source_not_table_id',
+    'source_where_alias_qualified_ref', 'source_where_not_string',
+    'sources_count_out_of_range', 'sources_not_list', 'target_column_agg_invalid',
+    'target_column_dtype_invalid', 'target_column_dtype_not_aggregatable',
+    'target_column_expression_empty', 'target_column_expression_not_string',
+    'target_column_expression_too_long', 'target_column_mode_required',
+    'target_column_not_dict', 'target_column_source_alias_prefix_mismatch',
+    'target_column_source_not_in_alias', 'target_columns_not_list', 'target_frame_invalid',
+    'target_name_duplicate', 'target_name_invalid', 'to_alias_duplicate', 'to_alias_invalid',
+    'to_alias_unknown', 'too_many_target_columns', 'too_many_total_conditions',
+    'tree_not_connected_from_root',
+})
 
 
 def _err(reason: str, field: str = ''):
@@ -232,7 +300,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
 
     # Sources: alias + source field checks
     aliases_lower_to_alias: dict[str, str] = {}
-    alias_to_columnset: dict[str, set[str]] = {}
+    alias_to_dtypes: dict[str, dict[str, str]] = {}
     for i, s in enumerate(sources):
         sfield = f'sources[{i}]'
         if not isinstance(s, dict):
@@ -260,7 +328,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         if len(source_columns) == 0:
             # A source with zero columns produces invalid SQL (SELECT FROM <table>) — reject.
             _err('source_columns_empty', f'{sfield}.source_columns')
-        col_names: set[str] = set()
+        col_dtypes: dict[str, str] = {}
         for j, c in enumerate(source_columns):
             if not isinstance(c, dict) or 'id' not in c:
                 _err('source_column_invalid', f'{sfield}.source_columns[{j}]')
@@ -268,17 +336,20 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
             # strings and quote/control characters are still rejected before SQL emit time.
             if not _column_id_ok(c['id']):
                 _err('source_column_invalid', f'{sfield}.source_columns[{j}].id')
-            if c['id'] in col_names:
+            if c['id'] in col_dtypes:
                 # Duplicate ids silently dedupe in a set but cause sqlalchemy Table-build
                 # failure at SQL emit time. Reject at save (round-7).
                 _err('source_column_duplicate_id', f'{sfield}.source_columns[{j}].id')
-            # dtype: required + resolvable by the executor's dtype mapper (see _dtype_ok).
+            # dtype: required + declared by the admission boundary (see _dtype_ok). Admission
+            # only, by role: this list is every column the source contributes, most of which
+            # merely pass through, so what a dtype may be *used* for is checked where it is
+            # used — as a join key in the edge conditions, as an aggregation target below.
             # An unvalidated string can mask the actual column type (e.g. defaulting INTEGER
             # to text produces lexicographic comparison bugs).
             if not _dtype_ok(c.get('dtype')):
                 _err('source_column_dtype_invalid', f'{sfield}.source_columns[{j}].dtype')
-            col_names.add(c['id'])
-        alias_to_columnset[alias] = col_names
+            col_dtypes[c['id']] = c['dtype']
+        alias_to_dtypes[alias] = col_dtypes
 
     aliases = [s['alias'] for s in sources]
     aliases_set = set(aliases)
@@ -365,7 +436,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
             left_alias, left_col = left_expr.split('.', 1)
             if left_alias not in aliases_set:
                 _err('left_expr_alias_unknown', f'{cfield}.left_expr')
-            if left_col not in alias_to_columnset[left_alias]:
+            if left_col not in alias_to_dtypes[left_alias]:
                 _err('left_expr_column_unknown', f'{cfield}.left_expr')
             aliases_seen_in_edge.add(left_alias)
 
@@ -377,11 +448,16 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
             elif op in ('LIKE', 'NOT LIKE'):
                 _validate_pattern(c.get('pattern'), f'{cfield}.pattern')
             elif op == 'BETWEEN':
+                # item 8: BETWEEN over two literals is a filter, not a join key -- only a
+                # column-ref bound makes the left side one.
+                if any(_is_column_ref(b) for b in (c.get('between_low'), c.get('right_expr'))):
+                    _require_joinable(alias_to_dtypes, left_alias, left_col,
+                                      'left_expr_dtype_not_joinable', f'{cfield}.left_expr')
                 _validate_between_bound(c.get('between_low'), aliases_set,
-                                        alias_to_columnset, f'{cfield}.between_low',
+                                        alias_to_dtypes, f'{cfield}.between_low',
                                         aliases_seen_in_edge)
                 _validate_between_bound(c.get('right_expr'), aliases_set,
-                                        alias_to_columnset, f'{cfield}.right_expr',
+                                        alias_to_dtypes, f'{cfield}.right_expr',
                                         aliases_seen_in_edge)
             else:
                 # Binary column-to-column operators
@@ -391,10 +467,14 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
                 right_alias, right_col = right_expr.split('.', 1)
                 if right_alias not in aliases_set:
                     _err('right_expr_alias_unknown', f'{cfield}.right_expr')
-                if right_col not in alias_to_columnset[right_alias]:
+                if right_col not in alias_to_dtypes[right_alias]:
                     _err('right_expr_column_unknown', f'{cfield}.right_expr')
                 if right_alias == left_alias:
                     _err('same_alias_self_compare', cfield)
+                _require_joinable(alias_to_dtypes, left_alias, left_col,
+                                  'left_expr_dtype_not_joinable', f'{cfield}.left_expr')
+                _require_joinable(alias_to_dtypes, right_alias, right_col,
+                                  'right_expr_dtype_not_joinable', f'{cfield}.right_expr')
                 aliases_seen_in_edge.add(right_alias)
 
         # At least one condition must reference both from_alias and to_alias (binds the edge)
@@ -432,6 +512,10 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
         agg = tc.get('agg')
         if agg is not None and (not isinstance(agg, str) or agg not in _AGG_ENUM):
             _err('target_column_agg_invalid', f'{tfield}.agg')
+        # `default_agg: None` in the registry means the dtype refuses aggregation outright,
+        # which is the per-role half of the dtype check the source_columns loop defers.
+        if agg in _AGGREGATING_TOKENS and not _dtype_ok(dtype, 'default_agg'):
+            _err('target_column_dtype_not_aggregatable', f'{tfield}.dtype')
 
         # Mode key: exactly one of (`source` for a column-ref, `expression`, `constant`) must be
         # set — unless dtype is a 'serial'/'bigserial' magic-column type. `expression` columns
@@ -483,7 +567,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
                     _err('target_column_source_alias_prefix_mismatch', f'{tfield}.source')
             else:
                 col_part = src_field
-            if col_part not in alias_to_columnset[source_alias]:
+            if col_part not in alias_to_dtypes[source_alias]:
                 _err('target_column_source_not_in_alias', f'{tfield}.source')
 
     # Per-source source_where validation:
@@ -590,15 +674,16 @@ def _validate_pattern(pattern, field):
         _err('pattern_too_long', field)
 
 
-def _validate_between_bound(bound, aliases_set, alias_to_columnset, field, aliases_seen_in_edge):
+def _validate_between_bound(bound, aliases_set, alias_to_dtypes, field, aliases_seen_in_edge):
     """A BETWEEN bound is either a column ref (alias.col) or a primitive literal."""
     if isinstance(bound, str):
         if _COLUMN_REF_RE.fullmatch(bound):
             alias, col = bound.split('.', 1)
             if alias not in aliases_set:
                 _err('between_bound_alias_unknown', field)
-            if col not in alias_to_columnset[alias]:
+            if col not in alias_to_dtypes[alias]:
                 _err('between_bound_column_unknown', field)
+            _require_joinable(alias_to_dtypes, alias, col, 'between_bound_dtype_not_joinable', field)
             aliases_seen_in_edge.add(alias)
             return
         # else treat as a string literal — allowed
