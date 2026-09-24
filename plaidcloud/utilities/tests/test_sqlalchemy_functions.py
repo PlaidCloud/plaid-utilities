@@ -2577,3 +2577,310 @@ class TestStarrocksUnterminatedLiteral(unittest.TestCase):
     def test_unterminated_quote_raises_rather_than_dropping_the_tail(self):
         with self.assertRaises(CompileError):
             sf.postgres_to_starrocks_date_format('YYYY-MM-DD"oops HH24:MI:SS')
+
+
+# ---------------------------------------------------------------------------
+# sc-30376: close the StarRocks @compiles gap
+# ---------------------------------------------------------------------------
+# Each class below either had NO 'starrocks' @compiles variant at all (fell
+# through to a default that reaches a nonexistent function or a wrong value,
+# e.g. sql_strpos, safe_unix_to_timestamp, safe_extract's dow/week/doy, the
+# trim family's multi-char chars form) or is explicitly refused because a
+# candidate mapping was found to disagree with Databend on real values (e.g.
+# quantile_disc's even-count tie-break). Expected strings were confirmed
+# against a live StarRocks warehouse (paul-dev), not read off documentation.
+
+
+class TestStrposStarrocks(StarrocksTest):
+    def test_strpos_becomes_locate(self):
+        expr = sqlalchemy.func.strpos('haystack', 'lo')
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual('locate(%(strpos_1)s, %(strpos_2)s)', str(compiled))
+        self.assertEqual('lo', compiled.params['strpos_1'])
+        self.assertEqual('haystack', compiled.params['strpos_2'])
+
+
+class TestSafeUnixToTimestampStarrocks(StarrocksTest):
+    def test_becomes_from_unixtime_pinned_to_utc(self):
+        # Bare FROM_UNIXTIME resolves in the SESSION time zone, not UTC, so a
+        # non-UTC session silently shifts the result -- verified live (paul-dev
+        # StarRocks, SET_VAR(time_zone='America/New_York')):
+        # FROM_UNIXTIME(1767620730) = '2026-01-05 08:45:30' there, vs
+        # '2026-01-05 13:45:30' under the default UTC session -- a 5-hour
+        # drift with no change to the input. CONVERT_TZ(..., @@session.
+        # time_zone, 'UTC') pins the result to UTC under both sessions
+        # (re-verified live under the New York session: stays '13:45:30'),
+        # matching Databend's to_timestamp(int), which is always UTC.
+        expr = sqlalchemy.func.unix_to_timestamp(1767620730)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertEqual(
+            "convert_tz(from_unixtime(CAST(%(unix_to_timestamp_1)s AS SIGNED INTEGER)), @@session.time_zone, 'UTC')",
+            str(compiled))
+        self.assertEqual(1767620730, compiled.params['unix_to_timestamp_1'])
+
+
+class TestSafeExtractStarrocks(StarrocksTest):
+    def _sql(self, field):
+        ts = sqlalchemy.column('ts', sqlalchemy.DateTime)
+        expr = sqlalchemy.func.extract(field, ts)
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        return str(compiled), compiled.params
+
+    def test_common_fields_stay_plain_extract(self):
+        # year/quarter/month/day/hour/minute/second are plain EXTRACT() on
+        # both StarRocks and Databend -- no dialect-specific rendering needed.
+        sql, params = self._sql('year')
+        self.assertEqual('EXTRACT(year FROM ts)', sql)
+        self.assertEqual({}, params)
+
+    def test_week_uses_iso_mode(self):
+        # WEEK's default mode (0, Sunday-first) is one off from Databend's
+        # ISO week -- mode 3 is required to match.
+        sql, params = self._sql('week')
+        self.assertEqual('week(ts, %(week_1)s)', sql)
+        self.assertEqual(3, params['week_1'])
+
+    def test_dow_matches_databends_sunday_zero_convention(self):
+        # DAYOFWEEK() is documented 1(Sun)-7(Sat); Databend's EXTRACT(dow) is
+        # documented 0(Sun)-6(Sat) -- DAYOFWEEK()-1 converts one convention to
+        # the other by the two functions' own documented contracts.
+        sql, params = self._sql('dow')
+        self.assertEqual('dayofweek(ts) - %(dayofweek_1)s', sql)
+        self.assertEqual(1, params['dayofweek_1'])
+
+    def test_dow_formula_matches_databend_across_a_full_week_including_sunday(self):
+        # A compile-only test can't execute SQL, so this pins the FORMULA
+        # against the actual live-measured truth table (paul-dev StarRocks 3
+        # vs a Databend tenant, both queried for 2026-01-04 (Sun) ..
+        # 2026-01-10 (Sat)) rather than trusting the documented contracts
+        # alone -- the whole point of this story is not trusting docs. Sunday
+        # is the one day a Mon=1..Sun=7 convention (StarRocks also has
+        # to_day_of_week, NOT used here) would disagree with DAYOFWEEK()-1 on,
+        # and it's covered explicitly.
+        databend_dow_live = {
+            '2026-01-04': 0,  # Sunday
+            '2026-01-05': 1,  # Monday
+            '2026-01-06': 2,  # Tuesday
+            '2026-01-07': 3,  # Wednesday
+            '2026-01-08': 4,  # Thursday
+            '2026-01-09': 5,  # Friday
+            '2026-01-10': 6,  # Saturday
+        }
+        starrocks_dayofweek_live = {
+            '2026-01-04': 1,
+            '2026-01-05': 2,
+            '2026-01-06': 3,
+            '2026-01-07': 4,
+            '2026-01-08': 5,
+            '2026-01-09': 6,
+            '2026-01-10': 7,
+        }
+        for date_str, expected in databend_dow_live.items():
+            with self.subTest(date=date_str):
+                self.assertEqual(expected, starrocks_dayofweek_live[date_str] - 1)
+        # Cross-check both tables against Python's own calendar, independent
+        # of either live measurement: datetime.weekday() is Mon=0..Sun=6.
+        for date_str in databend_dow_live:
+            with self.subTest(date=date_str):
+                py_weekday = datetime.datetime.strptime(date_str, '%Y-%m-%d').weekday()
+                self.assertEqual(databend_dow_live[date_str], (py_weekday + 1) % 7)
+
+    def test_doy_becomes_dayofyear(self):
+        sql, params = self._sql('doy')
+        self.assertEqual('dayofyear(ts)', sql)
+
+    def test_epoch_has_no_verified_equivalent(self):
+        # StarRocks has no epoch(<datetime>) function (verified live) and the
+        # generic EXTRACT(epoch FROM ...) MySQLCompiler renders reaches it
+        # directly -- fail loud instead of emitting SQL StarRocks will reject.
+        with self.assertRaises(CompileError):
+            self._sql('epoch')
+
+    def test_epoch_second_has_no_verified_equivalent(self):
+        with self.assertRaises(CompileError):
+            self._sql('epoch_second')
+
+    def test_unsupported_fields_are_enumerated_for_static_discovery(self):
+        # Not just an `else: raise` -- a static scan (the epic's Tier-3
+        # compatibility derivation, plan §6) needs these importable.
+        self.assertEqual(
+            {'epoch', 'epoch_second'},
+            set(sf.SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS))
+
+
+class TestTrimFamilyCharsStarrocks(StarrocksTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_ltrim_no_chars_stays_bare(self):
+        # StarRocks' bare LTRIM(str) is whitespace-only, matching the default.
+        self.assertEqual('ltrim(CAST(c AS STRING))', self._sql(sqlalchemy.func.ltrim(sqlalchemy.column('c'))))
+
+    def test_ltrim_chars_strips_the_literal_prefix_not_a_character_set(self):
+        # StarRocks' 2-arg LTRIM(str, chars) strips a CHARACTER SET (verified
+        # live: LTRIM('454312', '54') -> '312', stripping any leading '5' or
+        # '4'), but Databend's TRIM(LEADING chars FROM str) strips the
+        # literal repeated substring, unchanged here since '454312' doesn't
+        # start with "54". An anchored REGEXP_REPLACE reproduces that.
+        self.assertEqual(
+            "regexp_replace(CAST(c AS STRING), '^(54)+', '')",
+            self._sql(sqlalchemy.func.ltrim(sqlalchemy.column('c'), '54')))
+
+    def test_rtrim_chars_anchors_at_the_end(self):
+        self.assertEqual(
+            "regexp_replace(CAST(c AS STRING), '(0)+$', '')",
+            self._sql(sqlalchemy.func.rtrim(sqlalchemy.column('c'), '0')))
+
+    def test_trim_chars_strips_both_ends_in_two_passes(self):
+        # A single alternated pattern only strips whichever anchor matches
+        # first scanning left-to-right (verified live: '^(0)+|(0)+$' against
+        # '0012300' stripped only the leading zeros) -- two passes instead.
+        self.assertEqual(
+            "regexp_replace(regexp_replace(CAST(c AS STRING), '^(0)+', ''), '(0)+$', '')",
+            self._sql(sqlalchemy.func.trim(sqlalchemy.column('c'), '0')))
+
+    def test_chars_are_regex_escaped(self):
+        # A regex metacharacter in the chars argument must be escaped, or it
+        # changes what gets stripped instead of raising or misbehaving.
+        self.assertEqual(
+            "regexp_replace(CAST(c AS STRING), '^(\\\\.)+', '')",
+            self._sql(sqlalchemy.func.ltrim(sqlalchemy.column('c'), '.')))
+
+    def test_more_than_one_extra_argument_is_refused(self):
+        with self.assertRaises(CompileError):
+            self._sql(sqlalchemy.func.ltrim(sqlalchemy.column('c'), '0', 'extra'))
+
+
+class TestMetricMultiplyStarrocks(StarrocksTest):
+    def test_has_no_verified_variant(self):
+        # Bare CAST(x AS DECIMAL) rounds to scale 0 on StarRocks regardless
+        # of precision (verified live: CAST(1.5 AS DECIMAL) = 2, CAST(2.5 AS
+        # DECIMAL) = 3), so the default rendering would round '1.5K' to 2
+        # before the multiplier applies (-> 2000, not 1500) -- confirmed end
+        # to end live: CAST(CAST('1.5' AS DECIMAL) * 1000 AS CHAR) = '2000'.
+        # Same defect the Snowflake variant already refuses.
+        with self.assertRaises(CompileError):
+            sf.sql_metric_multiply(sqlalchemy.column('c')).compile(dialect=self.eng.dialect)
+
+
+class TestQuantileStarrocks(StarrocksTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_quantile_cont_becomes_percentile_cont(self):
+        # Verified live against a matching Databend fixture, including the
+        # even-count interpolated-midpoint case (StarRocks and Databend agree).
+        self.assertEqual('percentile_cont(c, 0.5)', self._sql(sf.quantile_cont(0.5, sqlalchemy.column('c'))))
+
+    def test_quantile_disc_has_no_verified_variant(self):
+        # PERCENTILE_DISC disagrees with Databend's QUANTILE_DISC on an
+        # even-count exact-half tie: quantile_disc(0.5) over [1,2,3,4] on
+        # Databend = 2 (lower middle); percentile_disc(x, 0.5) over the same
+        # rows on StarRocks = 3 (upper middle) -- verified live. Odd-count
+        # fixtures have no tie and matched on both, which is what makes this
+        # easy to miss without checking an even-sized group.
+        with self.assertRaises(CompileError):
+            self._sql(sf.quantile_disc(0.5, sqlalchemy.column('c')))
+
+    def test_quantile_tdigest_has_no_verified_variant(self):
+        # PERCENTILE_APPROX is an approximate quantile like QUANTILE_TDIGEST,
+        # but StarRocks' docs don't say which sketch algorithm backs it
+        # (unlike Snowflake's APPROX_PERCENTILE, documented as t-digest-based)
+        # -- two different approximate algorithms are not guaranteed to agree.
+        with self.assertRaises(CompileError):
+            self._sql(sf.quantile_tdigest(0.5, sqlalchemy.column('c')))
+
+    def test_quantile_tdigest_weighted_has_no_verified_variant(self):
+        with self.assertRaises(CompileError):
+            self._sql(sf.quantile_tdigest_weighted(0.5, sqlalchemy.column('c'), sqlalchemy.column('w')))
+
+
+class TestStarrocksUnsupportedRegistry(unittest.TestCase):
+    """_STARROCKS_UNSUPPORTED is the importable, machine-readable interface
+    the epic's Tier-3 compatibility derivation reads (plan §6) -- keep it
+    honest: every member's 'starrocks' @compiles variant must actually raise
+    CompileError with the recorded message, and this story's four whole-class
+    refusals must all be present (the geom starrocks_unsupported=... members
+    are covered by TestGeomFunctionsStarrocks elsewhere in this file)."""
+
+    def test_this_storys_refusals_are_registered(self):
+        for cls in (sf.sql_metric_multiply, sf.quantile_disc, sf.quantile_tdigest, sf.quantile_tdigest_weighted):
+            with self.subTest(cls=cls.__name__):
+                self.assertIn(cls, sf._STARROCKS_UNSUPPORTED)
+
+    def test_every_member_actually_raises_the_recorded_message(self):
+        dialect = sqlalchemy.dialects.registry.load('starrocks')()
+        args_by_class = {
+            sf.sql_metric_multiply: (sqlalchemy.column('c'),),
+            sf.quantile_disc: (0.5, sqlalchemy.column('c')),
+            sf.quantile_tdigest: (0.5, sqlalchemy.column('c')),
+            sf.quantile_tdigest_weighted: (0.5, sqlalchemy.column('c'), sqlalchemy.column('w')),
+        }
+        for cls, args in args_by_class.items():
+            with self.subTest(cls=cls.__name__):
+                msg = sf._STARROCKS_UNSUPPORTED[cls]
+                with self.assertRaises(CompileError) as ctx:
+                    cls(*args).compile(dialect=dialect)
+                self.assertIn(msg, str(ctx.exception))
+
+
+class TestSqlIntegerizeRoundStarrocksBoundary(StarrocksTest):
+    """Pins the two engines' overflow ceilings for sql_integerize_round,
+    which shares _squash_to_numeric's bare-CAST-to-scale-0 rendering with
+    sql_metric_multiply (unsupported above) but is safe here -- see the
+    _STARROCKS_DEFAULT_OK docstring. Compile-only (this file executes no SQL
+    live), so this pins the RENDERED SHAPE; the boundary numbers themselves
+    are cited from a live probe (paul-dev StarRocks, a Databend tenant) in
+    the sqlalchemy_functions.py docstring next to sql_integerize_round's
+    _STARROCKS_DEFAULT_OK entry -- verified there:
+      StarRocks bare CAST(x AS DECIMAL): 19-digit values succeed, 20-digit
+        values return NULL (CAST('1234567890123456789' AS DECIMAL) succeeds;
+        CAST('12345678901234567890' AS DECIMAL) is NULL).
+      Databend's OWN CAST(..., Integer) step maps to Int32 and hard-errors
+        above ~10 digits (CAST(CAST('123456789012345.4' AS NUMERIC) AS
+        INTEGER) raises "decimal cast to int overflow ... to_int32(...)").
+      So Databend's ceiling is always the lower one hit first: nothing that
+      succeeds on Databend (< ~2.1e9) can overflow on StarRocks (< ~1e19).
+    """
+
+    def test_compiles_to_the_bare_cast_chain_with_no_starrocks_override(self):
+        # No 'starrocks' @compiles variant is registered for this class at
+        # all -- the default IS what runs, on every dialect including
+        # StarRocks, which is the entire premise the boundary comment above
+        # depends on.
+        cls = sf.sql_integerize_round
+        disp = cls.__dict__.get('_compiler_dispatcher')
+        specs = disp.specs if disp else {}
+        self.assertNotIn('starrocks', specs)
+        expr = cls(sqlalchemy.column('c'))
+        compiled = str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+        self.assertIn('CAST(', compiled)
+        self.assertIn('AS SIGNED', compiled)
+
+
+class TestStarrocksDefaultOkSweepMembership(unittest.TestCase):
+    """Every class in _STARROCKS_DEFAULT_OK must actually compile clean on
+    StarRocks with no explicit 'starrocks' @compiles variant -- membership
+    documents "verified", not "untested"."""
+
+    def test_every_member_compiles_without_a_starrocks_variant(self):
+        dialect = sqlalchemy.dialects.registry.load('starrocks')()
+        args_by_class = {
+            sf.avg: (sqlalchemy.column('n'),),
+            sf.variance: (sqlalchemy.column('n'),),
+            sf.import_col: (sqlalchemy.column('s'), 'numeric', '', False),
+            sf.safe_round: (sqlalchemy.column('n'), 2),
+            sf.safe_upper: (sqlalchemy.column('s'),),
+            sf.safe_lower: (sqlalchemy.column('s'),),
+            sf.sql_set_null: (sqlalchemy.column('s'), 'x', 'y'),
+            sf.sql_slice_string: (sqlalchemy.column('s'), 0, 3),
+            sf.sql_zfill: (sqlalchemy.column('s'), 5),
+            sf.sql_integerize_round: (sqlalchemy.column('s'),),
+        }
+        self.assertEqual(set(args_by_class), sf._STARROCKS_DEFAULT_OK)
+        for cls, args in args_by_class.items():
+            with self.subTest(cls=cls.__name__):
+                disp = cls.__dict__.get('_compiler_dispatcher')
+                specs = disp.specs if disp else {}
+                self.assertNotIn('starrocks', specs, f'{cls.__name__} has a starrocks variant; drop it from _STARROCKS_DEFAULT_OK')
+                cls(*args).compile(dialect=dialect)  # must not raise
