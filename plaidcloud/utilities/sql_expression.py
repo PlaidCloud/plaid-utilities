@@ -13,12 +13,13 @@ from typing import TYPE_CHECKING
 import sqlalchemy
 import sqlalchemy.orm
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
-from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype
+from plaidcloud.rpc.type_conversion import require_dtype_capability, sqlalchemy_from_dtype
 from toolz.dicttoolz import assoc, merge, valfilter
 from toolz.functoolz import compose, curry, juxt
 from toolz.functoolz import identity as ident
 
 from plaidcloud.utilities import sqlalchemy_functions as sf  # noqa: F401 - importing it creates the SQL functions
+from plaidcloud.utilities.frame_join_multi_validator import TYPE_AGNOSTIC_AGGS
 from plaidcloud.utilities.stringtransforms import apply_variables
 
 if TYPE_CHECKING:
@@ -869,6 +870,13 @@ def get_from_clause(
 
     if aggregate:
         agg_type = target_column_config.get('agg')
+        # The only per-dtype aggregation decision in the emitter. get_agg_fn dispatches through
+        # getattr(sqlalchemy.func, ...) and asks nothing about the column, so a dtype the
+        # registry refuses to aggregate otherwise reaches the warehouse as MIN(<array>) or
+        # SUM(<array>) and fails there, in a different repo, naming neither the column nor the
+        # dtype. See TYPE_AGNOSTIC_AGGS for which tokens are exempt and why.
+        if _requires_dtype_semantics(agg_type):
+            require_dtype_capability(dtype, 'default_agg', f'aggregating target column {name!r}')
     else:
         agg_type = None
 
@@ -898,6 +906,19 @@ def get_from_clause(
     raise SQLExpressionError('Target Column {} needs either a Constant, an Expression or a Source Column!'.format(
         target_column_config.get('target')
     ))
+
+
+def _requires_dtype_semantics(agg_str) -> bool:
+    """Whether this aggregation asks something of the column's type.
+
+    `group` and `dont_group` resolve to identity, and GROUP BY is valid for every type;
+    TYPE_AGNOSTIC_AGGS carries the rest of the exemptions and the reasoning. The dtype axis this
+    feeds is `default_agg` (None meaning "refuses aggregation"), not `aggregatable`, which means
+    only "is this a numeric you can SUM" -- gating MIN/MAX on that would refuse MIN(<text>) and
+    MAX(<timestamp>), which are valid SQL and which frame_lookup emits for every non-key column
+    of its dedupe subquery.
+    """
+    return get_agg_fn(agg_str) is not ident and agg_str not in TYPE_AGNOSTIC_AGGS
 
 
 def get_agg_fn(agg_str):
