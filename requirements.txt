@@ -1,7 +1,7 @@
 chardet
 numpy
 pandas<3.0.0
-plaidcloud-rpc>=1.11.0
+plaidcloud-rpc>=1.16.0
 PyYAML
 requests
 orjson
