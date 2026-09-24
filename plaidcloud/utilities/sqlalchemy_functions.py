@@ -1,6 +1,7 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
+import re
 import warnings
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -220,6 +221,34 @@ def _starrocks_date_format(datetime_format):
     if '%' in datetime_format:
         datetime_format = python_to_postgres_date_format(datetime_format)
     return postgres_to_starrocks_date_format(datetime_format)
+
+
+#: Classes with NO verified StarRocks rendering at all -- an explicit,
+#: importable counterpart to _STARROCKS_DEFAULT_OK below, populated by
+#: _mark_starrocks_unsupported (for an already-defined class) and by
+#: _register_geom_fn's starrocks_unsupported= kwarg (for a class it creates).
+#: This is the machine-readable interface the epic's Tier-3 compatibility
+#: derivation (plan §6, "Tier 3, blocked") reads instead of re-deriving the
+#: same set by grepping @compiles bodies for a raised CompileError, which
+#: would also catch functions that raise for reasons OTHER than "no StarRocks
+#: equivalent" (e.g. a malformed call).
+_STARROCKS_UNSUPPORTED = {}
+
+
+def _mark_starrocks_unsupported(func_cls, *, starrocks_unsupported):
+    """Register an explicit StarRocks refusal on an already-defined
+    GenericFunction/ReturnTypeFromArgs class.
+
+    Named starrocks_unsupported= to match _register_geom_fn's kwarg below --
+    that helper also creates its class, so it can't be reused here directly,
+    but every call site is still discoverable by the same keyword, and both
+    paths land in the one _STARROCKS_UNSUPPORTED mapping.
+    """
+    @compiles(func_cls, 'starrocks')
+    def _compile_starrocks(element, compiler, _msg=starrocks_unsupported, **kw):
+        raise CompileError(_msg)
+    _STARROCKS_UNSUPPORTED[func_cls] = starrocks_unsupported
+    return func_cls
 
 
 class elapsed_seconds(FunctionElement):
@@ -778,6 +807,81 @@ def compile_safe_extract(element, compiler, **kw):
     return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args))
 
 
+# The generic EXTRACT(<field> FROM <expr>) the default renders is not safe on
+# StarRocks: MySQLCompiler.extract_map passes 'dow'/'epoch'/'doy' straight
+# through, and StarRocks then treats EXTRACT(unit FROM expr) as a call to a
+# builtin function literally named `unit` — which doesn't exist for those
+# three (verified live, paul-dev StarRocks 3: "No matching function with
+# signature: dow(datetime)" / "epoch(datetime)" / "doy(datetime)"). And
+# EXTRACT(week FROM expr) parses but silently uses WEEK's default mode 0
+# (Sunday-first), one off from Databend's ISO week (verified live:
+# 2026-01-05 → Databend week=2, StarRocks default week=1, WEEK(ts, 3)=2) —
+# exactly the MySQL-family-vs-Databend week-start trap this closes.
+# year/quarter/month/day/hour/minute/second are plain EXTRACT() on both
+# (verified live) so they keep the generic rendering.
+_STARROCKS_EXTRACT_PASSTHROUGH = frozenset({
+    'year', 'quarter', 'month', 'day', 'hour', 'minute', 'second',
+})
+
+#: safe_extract fields with NO verified StarRocks rendering. Kept as an
+#: explicit, importable mapping — not just an `else: raise` — so the epic's
+#: Tier-3 compatibility derivation (plan §6, "Tier 3, blocked") can enumerate
+#: safe_extract's unsupported fields the same way it reads
+#: starrocks_unsupported= off _register_geom_fn/_STARROCKS_UNSUPPORTED below:
+#: a single class can't use that whole-function mechanism here because most
+#: fields DO work. 'epoch'/'epoch_second' are the only fields actually
+#: reachable through the expression-catalogue vocabulary (year, quarter,
+#: month, week, day, hour, minute, second, dow, doy —
+#: plaid/app/ai/expression_catalogue.json:1839) that aren't handled above;
+#: anything outside that whole vocabulary still hits the `else` fail-closed.
+SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS = {
+    'epoch': "EXTRACT(epoch FROM ...) reaches a StarRocks function literally named epoch(), which doesn't exist "
+             '(verified live, paul-dev StarRocks 3: "No matching function with signature: epoch(datetime)")',
+    'epoch_second': 'same as epoch — StarRocks has no epoch()/epoch_second() function',
+}
+
+
+@compiles(safe_extract, 'starrocks')
+def compile_safe_extract_starrocks(element, compiler, **kw):
+    field, timestamp, *args = list(element.clauses)
+
+    field = field.effective_value
+    if not isinstance(timestamp.type, (sqlalchemy.TIMESTAMP, sqlalchemy.DateTime, sqlalchemy.Date, sqlalchemy.Interval, PlaidDate, PlaidTimestamp)):
+        timestamp = func.to_timestamp(timestamp)
+
+    if field in _STARROCKS_EXTRACT_PASSTHROUGH:
+        return compiler.process(sqlalchemy.sql.expression.extract(field, timestamp, *args), **kw)
+    elif field == 'week':
+        # WEEK(expr, 3): MySQL/StarRocks mode 3 is Monday-first, and (per the
+        # MySQL WEEK() mode table) "Week 1 is the first week with 4 or more
+        # days in this year" — the ISO 8601 definition — matching Databend's
+        # default week numbering (verified live, both for 2026-01-05: Databend
+        # EXTRACT(week)=2, StarRocks WEEK(ts,3)=2; StarRocks WEEK(ts,0)
+        # (Sunday-first, non-ISO, the EXTRACT default)=1, confirming the two
+        # modes actually diverge and mode 3 is the one that agrees).
+        return compiler.process(func.week(timestamp, 3), **kw)
+    elif field == 'dow':
+        # DAYOFWEEK() is documented as 1(Sun)-7(Sat); Databend's EXTRACT(dow)
+        # is documented as 0(Sun)-6(Sat) — DAYOFWEEK()-1 converts one
+        # convention to the other by definition. Also verified live across a
+        # full Sun-Sat week (2026-01-04 Sun .. 2026-01-10 Sat), Databend
+        # EXTRACT(dow) vs StarRocks DAYOFWEEK()-1, values by date:
+        #   01-04 Sun: 0/0   01-05 Mon: 1/1   01-06 Tue: 2/2  01-07 Wed: 3/3
+        #   01-08 Thu: 4/4   01-09 Fri: 5/5   01-10 Sat: 6/6
+        # — identical on every day including Sunday, the one day a
+        # Mon=1..Sun=7 convention (StarRocks' to_day_of_week, NOT used here)
+        # would have disagreed on.
+        return compiler.process(func.dayofweek(timestamp) - 1, **kw)
+    elif field == 'doy':
+        # Verified live: 2026-01-05 -> Databend EXTRACT(doy)=5, StarRocks
+        # DAYOFYEAR()=5.
+        return compiler.process(func.dayofyear(timestamp), **kw)
+    elif field in SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS:
+        raise CompileError(SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS[field])
+    else:
+        raise CompileError(f"safe_extract({field!r}, ...) has no verified StarRocks equivalent")
+
+
 def _squash_to_numeric(text):
     return func.cast(
         func.nullif(
@@ -839,6 +943,20 @@ def compile_sql_metric_multiply_snowflake(element, compiler, **kw):
     # multiplier applies (→ 2000, silently wrong). Fail loud until a
     # scale-preserving variant ships.
     raise CompileError('metric_multiply has no Snowflake variant yet; the default rendering rounds decimals away (bare-NUMERIC squash is NUMBER(38, 0))')
+
+
+_mark_starrocks_unsupported(
+    sql_metric_multiply,
+    # Same defect class as the Snowflake variant above, confirmed live
+    # (paul-dev StarRocks 3): bare `CAST(x AS DECIMAL)` rounds to scale 0
+    # regardless of precision (CAST(1.5 AS DECIMAL) = 2, CAST(2.5 AS DECIMAL)
+    # = 3), so _squash_to_numeric rounds away the fraction BEFORE the
+    # multiplier applies — CAST('1.5' AS DECIMAL) = 2, so '1.5K' would
+    # multiply to 2000 instead of 1500 (confirmed end to end live:
+    # CAST(CAST('1.5' AS DECIMAL) * 1000 AS CHAR) = '2000'). Fail loud until
+    # a scale-preserving variant ships.
+    starrocks_unsupported="metric_multiply has no StarRocks variant yet; the default rendering rounds decimals "
+                          "away (bare CAST ... AS DECIMAL rounds to scale 0)")
 
 
 class sql_numericize(GenericFunction):
@@ -1196,6 +1314,37 @@ def compile_safe_unix_to_timestamp(element, compiler, **kw):
     return f"to_timestamp({compiler.process(timestamp)})"
 
 
+@compiles(safe_unix_to_timestamp, 'starrocks')
+def compile_safe_unix_to_timestamp_starrocks(element, compiler, **kw):
+    # StarRocks has no to_timestamp(); FROM_UNIXTIME(seconds) is the
+    # equivalent, but bare FROM_UNIXTIME resolves in the SESSION time zone,
+    # not UTC -- Databend's to_timestamp(int) is UTC. Verified live at
+    # session time_zone='Etc/UTC' (the query default): FROM_UNIXTIME(x) =
+    # '2026-01-05 13:45:30', matching Databend's to_timestamp(x). Under
+    # time_zone='America/New_York' (StarRocks SET_VAR hint), the SAME bare
+    # FROM_UNIXTIME(x) shifted to '08:45:30' -- 5 hours off -- while
+    # CONVERT_TZ(FROM_UNIXTIME(x), @@session.time_zone, 'UTC') stayed at
+    # '13:45:30' under both sessions. CONVERT_TZ pins the result to UTC
+    # regardless of the connection's session time zone, matching Databend
+    # unconditionally rather than only when the session happens to be UTC.
+    #
+    # Known, narrower gap than the pre-fix state (still an improvement, not
+    # a regression -- the prior default reached a StarRocks function that
+    # doesn't exist at all): negative epochs and values > 253402300799
+    # (year 9999) return NULL on StarRocks where Databend returns a real
+    # date (verified live: FROM_UNIXTIME(-86400) = NULL on StarRocks,
+    # to_timestamp(-86400) = '1969-12-31' on Databend). Out of scope here --
+    # unix_to_timestamp's realistic domain is post-1970 business-data
+    # timestamps.
+    timestamp, *args = list(element.clauses)
+    timestamp = func.cast(timestamp, sqlalchemy.Integer)
+
+    return (
+        "convert_tz(from_unixtime(%s), @@session.time_zone, 'UTC')"
+        % compiler.process(timestamp)
+    )
+
+
 class safe_to_date(GenericFunction):
     # This exists to make to_date behave as Silvio expects in the case of empty date strings.
     # See ALYZ-2428
@@ -1314,6 +1463,54 @@ def compile_safe_ltrim_databend(element, compiler, **kw):
     return f"TRIM(LEADING ' ' FROM {compiler.process(text)})"
 
 
+#: StarRocks' 2-arg LTRIM/RTRIM/TRIM(str, chars) strips a CHARACTER SET —
+#: repeatedly removing any of the individual characters in `chars` — not the
+#: literal repeated substring Databend's TRIM(LEADING/TRAILING chars FROM str)
+#: strips. Confirmed live (paul-dev StarRocks 3 vs a Databend tenant, same
+#: input): LTRIM('454312', '54') -> '312' on StarRocks (strips leading chars
+#: that are '5' or '4') but Databend's TRIM(LEADING '54' FROM '454312') is
+#: unchanged (the string doesn't literally start with "54"). An anchored
+#: REGEXP_REPLACE of the escaped literal, repeated, reproduces Databend's
+#: contract instead (verified live: matches on '454312'/'54', '12345'/'54',
+#: 'ababcd'/'ab', '00123'/'0', '12300'/'0').
+def _starrocks_trim_pattern(chars, *, leading, trailing):
+    escaped = re.escape(chars)
+    parts = []
+    if leading:
+        parts.append(f"^({escaped})+")
+    if trailing:
+        parts.append(f"({escaped})+$")
+    return '|'.join(parts)
+
+
+def _starrocks_strip_chars(element, compiler, *, leading, trailing, bare_name, **kw):
+    text, *args = list(element.clauses)
+    text = func.cast(text, sqlalchemy.Text)
+
+    if args:
+        if len(args) > 1:
+            raise CompileError(f'{bare_name} with more than one extra argument has no verified StarRocks rendering')
+        chars = args[0].value
+        if chars != '':
+            if leading and trailing:
+                # A single alternated pattern only strips the first match it
+                # finds scanning left-to-right (verified live: '^(0)+|(0)+$'
+                # against '0012300' stripped only the leading zeros) — apply
+                # the two anchors as two passes instead.
+                stripped = func.regexp_replace(text, _starrocks_trim_pattern(chars, leading=True, trailing=False), '')
+                stripped = func.regexp_replace(stripped, _starrocks_trim_pattern(chars, leading=False, trailing=True), '')
+            else:
+                stripped = func.regexp_replace(text, _starrocks_trim_pattern(chars, leading=leading, trailing=trailing), '')
+            return compiler.process(stripped, **kw)
+
+    return f"{bare_name}({compiler.process(text, **kw)})"
+
+
+@compiles(safe_ltrim, 'starrocks')
+def compile_safe_ltrim_starrocks(element, compiler, **kw):
+    return _starrocks_strip_chars(element, compiler, leading=True, trailing=False, bare_name='ltrim', **kw)
+
+
 class safe_rtrim(GenericFunction):
     name = 'rtrim'
 
@@ -1341,6 +1538,11 @@ def compile_safe_rtrim(element, compiler, **kw):
     return f"TRIM(TRAILING ' ' FROM {compiler.process(text)})"
 
 
+@compiles(safe_rtrim, 'starrocks')
+def compile_safe_rtrim_starrocks(element, compiler, **kw):
+    return _starrocks_strip_chars(element, compiler, leading=False, trailing=True, bare_name='rtrim', **kw)
+
+
 class safe_trim(GenericFunction):
     name = 'trim'
 
@@ -1366,6 +1568,11 @@ def compile_safe_trim(element, compiler, **kw):
         return f"TRIM(BOTH {compiled_args} FROM {compiler.process(text)})"
 
     return f"TRIM({compiler.process(text)})"
+
+
+@compiles(safe_trim, 'starrocks')
+def compile_safe_trim_starrocks(element, compiler, **kw):
+    return _starrocks_strip_chars(element, compiler, leading=True, trailing=True, bare_name='trim', **kw)
 
 
 class sql_only_ascii(GenericFunction):
@@ -1743,8 +1950,12 @@ def compile_transaction_timestamp_snowflake(element, compiler, **kw):
 class sql_strpos(GenericFunction):
     name = 'strpos'
 
-@compiles(sql_strpos, 'databend')
+@compiles(sql_strpos, 'databend', 'starrocks')
 def compile_strpos(element, compiler, **kw):
+    # Bare strpos() is valid on Databend but reaches a MySQL-protocol engine
+    # with no such function on StarRocks; LOCATE(needle, haystack) matches
+    # strpos's contract (1-based position, 0 when absent) on both — verified
+    # live on StarRocks (paul-dev StarRocks 3).
     string, substring = list(element.clauses)
     return compiler.process(
         func.locate(substring, string)
@@ -1797,6 +2008,16 @@ def snowflake_quantile_tdigest(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"APPROX_PERCENTILE({compiler.process(expr, **kw)}, {compiler.process(level, **kw)})"
 
+_mark_starrocks_unsupported(
+    quantile_tdigest,
+    # StarRocks' PERCENTILE_APPROX is an approximate-quantile aggregate like
+    # QUANTILE_TDIGEST, but StarRocks' docs do not say which sketch algorithm
+    # backs it (unlike Snowflake's APPROX_PERCENTILE, documented as
+    # t-digest-based). Two different approximate algorithms are not
+    # guaranteed to agree on a value — fail loud rather than assume equivalence.
+    starrocks_unsupported='QUANTILE_TDIGEST has no verified StarRocks equivalent: PERCENTILE_APPROX exists but '
+                          'its underlying algorithm is not documented as t-digest, so value equivalence is unconfirmed')
+
 class quantile_cont(GenericFunction):
     type = Double()
     name = "QUANTILE_CONT"
@@ -1812,6 +2033,15 @@ def default_quantile_cont(element, compiler, **kw):
 def snowflake_quantile_cont(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"PERCENTILE_CONT({compiler.process(level, **kw)}) WITHIN GROUP (ORDER BY {compiler.process(expr, **kw)})"
+
+@compiles(quantile_cont, 'starrocks')
+def starrocks_quantile_cont(element, compiler, **kw):
+    # StarRocks PERCENTILE_CONT(expr, percentile) is the same linear-
+    # interpolation definition as Databend's QUANTILE_CONT — verified live,
+    # matching values on both odd-count (unambiguous rank) and even-count
+    # (interpolated midpoint) fixtures.
+    level, expr = list(element.clauses)
+    return f"percentile_cont({compiler.process(expr, **kw)}, {compiler.process(level, **kw)})"
 
 class quantile_disc(GenericFunction):
     type = Double()
@@ -1829,6 +2059,19 @@ def snowflake_quantile_disc(element, compiler, **kw):
     level, expr = list(element.clauses)
     return f"PERCENTILE_DISC({compiler.process(level, **kw)}) WITHIN GROUP (ORDER BY {compiler.process(expr, **kw)})"
 
+_mark_starrocks_unsupported(
+    quantile_disc,
+    # NOT a transparent rename: StarRocks' PERCENTILE_DISC disagrees with
+    # Databend's QUANTILE_DISC on tie-breaking at an even-count exact-half
+    # percentile — verified live, same 4-row fixture: quantile_disc(0.5) over
+    # [1,2,3,4] on Databend = 2 (lower middle), percentile_disc(x, 0.5) over
+    # the same rows on StarRocks = 3 (upper middle). Odd-count fixtures (no
+    # tie) matched on both, which is what made this easy to miss without a
+    # live check. Fail loud rather than emit a value that silently drifts on
+    # even-sized groups.
+    starrocks_unsupported='QUANTILE_DISC has no verified StarRocks equivalent: PERCENTILE_DISC breaks even-count '
+                          'ties toward the upper value where Databend breaks toward the lower one')
+
 class quantile_tdigest_weighted(GenericFunction):
     type = Double()
     name = "QUANTILE_TDIGEST_WEIGHTED"
@@ -1845,6 +2088,16 @@ def snowflake_quantile_tdigest_weighted(element, compiler, **kw):
     # Snowflake has no weighted percentile aggregate — fail loud rather than
     # emit an unweighted approximation that silently changes the statistic.
     raise CompileError('QUANTILE_TDIGEST_WEIGHTED has no Snowflake equivalent (no weighted percentile aggregate)')
+
+_mark_starrocks_unsupported(
+    quantile_tdigest_weighted,
+    # StarRocks' PERCENTILE_APPROX_WEIGHT exists and takes a weight per the
+    # same contract, but it inherits PERCENTILE_APPROX's undocumented
+    # algorithm (see quantile_tdigest above) — fail loud rather than assume
+    # equivalence with QUANTILE_TDIGEST_WEIGHTED's t-digest sketch.
+    starrocks_unsupported='QUANTILE_TDIGEST_WEIGHTED has no verified StarRocks equivalent: '
+                          'PERCENTILE_APPROX_WEIGHT exists but its underlying algorithm is not documented as '
+                          't-digest, so value equivalence is unconfirmed')
 
 
 # ---------------------------------------------------------------------------
@@ -2388,6 +2641,7 @@ def _register_geom_fn(neutral_name, databend_name, starrocks_name=None,
         @compiles(func_cls, 'starrocks')
         def _compile_starrocks(element, compiler, _msg=starrocks_unsupported, **kw):
             raise CompileError(_msg)
+        _STARROCKS_UNSUPPORTED[func_cls] = starrocks_unsupported
     else:
         @compiles(func_cls, 'starrocks')
         def _compile_starrocks(element, compiler, _name=starrocks_name,
@@ -2499,6 +2753,80 @@ _SNOWFLAKE_DEFAULT_OK = frozenset({
     regexp_substr,
     globals()['regexp_instr'],  # generated by the rename registry above
     import_col,
+})
+
+
+# ---------------------------------------------------------------------------
+# StarRocks: defaults confirmed valid (sc-30376 — the compile-surface sweep)
+# ---------------------------------------------------------------------------
+#: Function classes whose DEFAULT @compiles rendering is already valid
+#: StarRocks SQL — each confirmed live against a real StarRocks warehouse
+#: (paul-dev), not read off documentation alone — so no 'starrocks' variant is
+#: registered. The generated parity sweep
+#: (plaid/tests/parity/test_expression_compile.py) keys its known-gap skips on
+#: variant *absence*; membership here is the explicit per-function
+#: confirmation, matching the _SNOWFLAKE_DEFAULT_OK convention above.
+#:
+#:   avg                    bare avg(...) — plain mean, a native StarRocks
+#:                         aggregate with no dialect quirk to verify.
+#:   variance               bare variance(...) — StarRocks' own alias for
+#:                         VAR_POP (verified live: variance(x) = var_pop(x) =
+#:                         1.25 for [1,2,3,4], the correct population
+#:                         variance). Databend has NO bare `variance`
+#:                         function at all — verified live, Databend raises
+#:                         "no function matches the given name: 'variance',
+#:                         do you mean 'variance_pop', 'variance_samp'?" — so
+#:                         there is no cross-engine value to disagree with:
+#:                         this class is already a hard error on Databend
+#:                         today, pre-existing and out of this story's scope
+#:                         (not "different value", a query that never runs).
+#:   import_col              delegates to import_cast (which has a variant);
+#:                         its own whitespace probe (2-arg regexp_replace) is
+#:                         valid StarRocks
+#:   safe_round              CAST(x, Numeric(38, 10)) then round(number[,
+#:                         digits]) — the explicit (38, 10) precision/scale
+#:                         sidesteps the bare-CAST-rounds-to-scale-0 trap
+#:                         sql_metric_multiply and sql_integerize_round hit
+#:                         below, so ROUND(number, digits) sees the real
+#:                         fractional value. Verified live: ROUND(CAST(
+#:                         '1.567' AS DECIMAL(38, 10)), 2) = 1.57.
+#:   safe_upper/safe_lower  bare upper(x)/lower(x) — standard, 1-arg only in
+#:                         practice (no caller passes the optional extra args)
+#:   sql_set_null           plain CASE/WHEN, no dialect-specific SQL at all
+#:   sql_slice_string       SUBSTRING/LEFT/RIGHT — all present and standard
+#:   sql_zfill              GREATEST/LENGTH/LPAD — all present and standard
+#:   sql_integerize_round    the same bare-Numeric-cast-rounds-to-scale-0
+#:                         pattern sql_metric_multiply is unsupported for,
+#:                         but safe here because nothing MULTIPLIES between
+#:                         the two casts — scale-0 rounding on the way to an
+#:                         Integer cast IS the intended "round to nearest
+#:                         integer" behavior. The two engines' PRECISION
+#:                         ceilings differ (bare CAST(x AS DECIMAL) verified
+#:                         live: ~19 digits on StarRocks before returning
+#:                         NULL; Databend's bare CAST(x AS NUMERIC) is
+#:                         DECIMAL(18, 3), and its OWN CAST(..., Integer) step
+#:                         maps to Int32 and hard-errors above ~10 digits —
+#:                         verified live, "decimal cast to int overflow...
+#:                         to_int32(...)"), but Databend's ceiling is always
+#:                         the lower/first one hit: every value that succeeds
+#:                         on Databend (< ~2.1e9) is well inside StarRocks'
+#:                         ~19-digit headroom too. Rounding mode matches
+#:                         (verified live, both engines: 1.5->2, 2.5->3,
+#:                         -1.5->-2, round-half-away-from-zero). Pre-existing
+#:                         Databend Int32 ceiling, not a StarRocks regression
+#:                         — out of this story's scope, same as the sibling
+#:                         sql_integerize_truncate gap filed separately.
+_STARROCKS_DEFAULT_OK = frozenset({
+    avg,
+    variance,
+    import_col,
+    safe_round,
+    safe_upper,
+    safe_lower,
+    sql_set_null,
+    sql_slice_string,
+    sql_zfill,
+    sql_integerize_round,
 })
 
 
