@@ -2725,6 +2725,102 @@ st_makepolygon = _register_geom_fn(
 
 
 # ---------------------------------------------------------------------------
+# Vector distance (sc-30364)
+# ---------------------------------------------------------------------------
+# ONE neutral expression that always returns a DISTANCE — lower is nearer,
+# ORDER BY ASC, true (non-squared) magnitudes — so a caller can threshold and
+# display the number, not just rank by it.
+#
+# Cosine and L2 only. Inner product is excluded by the epic: -inner_product(a, b)
+# is not a distance on unnormalized vectors (self-distance is -||a||^2), so
+# thresholds and displayed scores break even though ranking survives; for
+# normalized embeddings cosine ranking is identical to inner product anyway.
+#
+# StarRocks is the only engine wired (epic 30343 D3, and `vector` compiles to
+# ARRAY<FLOAT> on StarRocks alone), so the DEFAULT rendering refuses rather than
+# emitting an unverified formula: a dispatch table of guessed spellings would be
+# permanently green in Tier 1 and wrong on first contact with the warehouse.
+#
+# 🚨 l2 wraps l2_distance in sqrt(). StarRocks' l2_distance returns SQUARED
+# Euclidean distance under a name that says distance — verified live on
+# StarRocks 4.1.3 (sc-30350): l2_distance([1,2,3], [4,5,6]) = 27, not 5.196152 —
+# while Databend's same-named function returns the true distance. Ranking is
+# unaffected either way (squaring is monotonic on non-negatives), but every
+# THRESHOLD and every displayed number is wrong by a square, which is precisely
+# the defect the epic used to exclude inner product. sqrt() costs one scalar op
+# per row after the O(dimensions) inner loop that already dominates (sc-30350
+# measured l2_distance itself at ~21x cosine's compute: 1,781 ms vs 83 ms at
+# 1M rows x 768 dims), so the correction is not where the money goes; the
+# un-vectorized l2_distance is, and that is sc-30475's.
+#
+# 🚨 NULL is deliberately NOT masked. Large-magnitude vectors overflow
+# StarRocks' float32 accumulator and both metrics then return NULL silently
+# (sc-30350, measured) — there is no way to prevent that from outside the vendor
+# function, and COALESCE-ing it to a sentinel distance would convert a visible
+# NULL into an invisible wrong answer. The mis-ranking materializes in the
+# ORDER BY (MySQL/StarRocks sorts NULL FIRST, so an overflowed row would top a
+# nearest-neighbour result), so the guard belongs to the search step that owns
+# the ORDER BY (sc-30370), which must exclude or explicitly rank NULL distances
+# and is where normalization at write time is enforced.
+VECTOR_DISTANCE_METRICS = ('cosine', 'l2')
+
+
+class vector_distance(GenericFunction):
+    """vector_distance(metric, a, b) -> distance, lower is nearer.
+
+    `metric` is a literal from VECTOR_DISTANCE_METRICS and leads the arguments,
+    matching safe_extract(field, ...) elsewhere in this module.
+
+    🚨 The cosine range is about [-1.2e-7, 2], NOT [0, 2], and an exact match's
+    distance is NEGATIVE (measured live on StarRocks 4.1.3: cosine_similarity(v, v)
+    = 1.0000001 for a 768-dim v). Never filter on `distance >= 0` or
+    `BETWEEN 0 AND 2` -- that drops exact matches, which are the top hit. NULL also
+    propagates by design on float32 overflow; see compile_vector_distance_starrocks.
+    """
+    type = Double()
+    name = 'vector_distance'
+    inherit_cache = True
+
+
+@compiles(vector_distance)
+def compile_vector_distance(element, compiler, **kw):
+    raise CompileError(
+        f'vector_distance has no verified {compiler.dialect.name!r} rendering; the vector '
+        'dtype is StarRocks-only (epic 30343 D3), and PlaidVector refuses every other dialect'
+    )
+
+
+@compiles(vector_distance, 'starrocks')
+def compile_vector_distance_starrocks(element, compiler, **kw):
+    metric, left, right = list(element.clauses)
+    metric = metric.effective_value
+    if metric == 'cosine':
+        # 🚨 self_group() is load-bearing, not tidiness. Without it SQLAlchemy sees the
+        # outer element as a Function (maximum precedence) and declines to parenthesize,
+        # so `1 - cosine_similarity(a, b)` mis-associates inside ANY enclosing
+        # arithmetic -- measured live on 4.1.3: `vd * 2` renders
+        # `1 - cosine_similarity(a, b) * 2` = -0.94926 where 0.050736 is correct, and the
+        # `1 - vd` similarity round trip comes back -0.97463, sign flipped. The l2 branch
+        # is immune, being a bare function call. sc-30370 owns the ORDER BY, blended and
+        # weighted distances and the similarity display, so it is the first caller to
+        # compose this into arithmetic.
+        #
+        # 🚨 Range: NOT [0, 2], and self-distance is NOT 0. StarRocks' cosine_similarity
+        # accumulates in float32 and overshoots 1 on identical vectors -- measured live on
+        # 4.1.3: cosine_similarity(v, v) = 1.0000001 for a 768-dim v (and 1 - 5.96e-8 for
+        # [1,2,3]), so this distance is about -1.1920929e-7 for an exact match. The real
+        # range is roughly [-1.2e-7, 2]. Do NOT add a `distance >= 0` or
+        # `BETWEEN 0 AND 2` sanity filter downstream: it would silently drop exact
+        # matches, which are the top hit.
+        return compiler.process((1 - func.cosine_similarity(left, right)).self_group(), **kw)
+    if metric == 'l2':
+        return compiler.process(func.sqrt(func.l2_distance(left, right)), **kw)
+    raise CompileError(
+        f'vector_distance metric {metric!r} is not one of {VECTOR_DISTANCE_METRICS}; '
+        'inner product is excluded because it is not a distance on unnormalized vectors'
+    )
+
+# ---------------------------------------------------------------------------
 # Snowflake: defaults confirmed valid (sc-23158 WS-B2)
 # ---------------------------------------------------------------------------
 #: Function classes whose DEFAULT @compiles rendering is already valid
