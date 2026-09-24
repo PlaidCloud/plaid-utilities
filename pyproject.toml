@@ -55,7 +55,7 @@ test = [
     "duckdb",
 ]
 full = [
-    "plaidcloud-rpc[full]>=1.11.0",
+    "plaidcloud-rpc[full]>=1.16.0",
     "fastavro",
 ]
 xray = [
