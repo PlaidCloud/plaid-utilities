@@ -396,20 +396,36 @@ IMPORT_COL_SNAPSHOTS = {
         '%(import_col_1)s',
         {'import_col_1': 'Column1'},
     ),
+    # sc-30414: the StarRocks numeric/boolean entries below were re-baselined.
+    # The pre-switch SQL they used to pin was DEFECTIVE, not merely different:
+    # the whitespace squash was computed for the emptiness probe and then
+    # thrown away, so '1 234' reached the CAST as raw text and imported as
+    # NULL where Databend imported 1234; and a bare CAST('t' AS BOOLEAN) is
+    # NULL on StarRocks, so the 't'/'f'/'1'/'0' spellings Databend accepts
+    # imported as NULL too. Only the 'starrocks' rows move — greenplum,
+    # databend and snowflake stay byte-identical to their original capture,
+    # which is what keeps this snapshot a drift detector rather than a
+    # rubber stamp.
     ('starrocks', 'numeric'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s) AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
     ),
     ('starrocks', 'currency'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(18, 4)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '', 'param_1': 0.0},
+         '%(regexp_replace_3)s) THEN %(param_1)s ELSE CAST(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s) AS DECIMAL(18, 4)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'param_1': 0.0, 'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
     ),
     ('starrocks', 'integer'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s) AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
     ),
     # StarRocks string casts render STRING, not CHAR (sc-23267) — re-baselined
     # from the pre-switch CHAR form for the three string→date dtypes below.
@@ -427,8 +443,14 @@ IMPORT_COL_SNAPSHOTS = {
     ),
     ('starrocks', 'boolean'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS BOOLEAN) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(CASE WHEN (CAST(%(import_col_1)s AS STRING) = '
+         '%(param_1)s) THEN %(param_2)s WHEN (CAST(%(import_col_1)s AS STRING) = %(param_3)s) THEN '
+         '%(param_4)s WHEN (CAST(%(import_col_1)s AS STRING) = %(param_5)s) THEN %(param_6)s WHEN '
+         '(CAST(%(import_col_1)s AS STRING) = %(param_7)s) THEN %(param_8)s ELSE %(import_col_1)s END AS '
+         'BOOLEAN) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'param_1': 't', 'param_2': 'TRUE', 'param_3': '1', 'param_4': 'TRUE',
+         'param_5': 'f', 'param_6': 'FALSE', 'param_7': '0', 'param_8': 'FALSE'},
     ),
     ('starrocks', 'interval'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
@@ -445,13 +467,17 @@ IMPORT_COL_SNAPSHOTS = {
     ),
     ('starrocks', 'bigint'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s) AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
     ),
     ('starrocks', 'smallint'): (
         ('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = '
-         '%(regexp_replace_3)s) THEN NULL ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'),
-        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': ''},
+         '%(regexp_replace_3)s) THEN NULL ELSE CAST(regexp_replace(%(import_col_1)s, '
+         '%(regexp_replace_4)s, %(regexp_replace_5)s) AS DECIMAL(38, 10)) END'),
+        {'import_col_1': 'Column1', 'regexp_replace_1': '\\s*', 'regexp_replace_2': '', 'regexp_replace_3': '',
+         'regexp_replace_4': '\\s*', 'regexp_replace_5': ''},
     ),
     ('snowflake', 'text'): (
         '%(import_col_1)s',
