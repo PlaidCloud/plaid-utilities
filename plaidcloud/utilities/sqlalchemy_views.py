@@ -2,7 +2,14 @@
 
 import sqlalchemy
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql.ddl import _DropView, CreateColumn
+from sqlalchemy.sql.ddl import CreateColumn
+try:
+    from sqlalchemy.sql.ddl import _DropView
+except ImportError:
+    # SQLAlchemy dropped the leading underscore, the same rename it applied to
+    # _CreateBase below. Both spellings have to work while the pins differ
+    # across repos that import this module.
+    from sqlalchemy.sql.ddl import DropView as _DropView
 try:
     from sqlalchemy.sql.ddl import _CreateBase as CreateBase
 except:

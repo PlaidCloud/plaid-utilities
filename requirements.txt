@@ -5,7 +5,7 @@ plaidcloud-rpc>=1.16.0
 PyYAML
 requests
 orjson
-SQLAlchemy
+SQLAlchemy<2.1  # snowflake-sqlalchemy does not support 2.1: it subclasses sqlalchemy.orm.context.ORMSelectCompileState, which 2.1 renamed to _ORMSelectCompileState, so merely LOADING the snowflake dialect raises AttributeError. 2.1 also renamed _DropView and switched postgresql:// to the psycopg3 driver. Unpinned, this repo's CI went red the day 2.1.1 published, on master as much as on any branch. Lift the ceiling when snowflake-sqlalchemy ships 2.1 support.
 texttable
 toolz
 xlwings;platform_system=="Windows"

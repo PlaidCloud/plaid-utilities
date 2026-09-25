@@ -594,17 +594,38 @@ def compile_import_cast_starrocks(element, compiler, **kw):
     elif dtype == 'interval':
         return compiler.process(col, **kw) + '::interval'
     elif dtype == 'boolean':
-        return compiler.process(func.cast(col, Boolean), **kw)
-    elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
+        # sc-30414: mirror the Databend variant's 't'/'f'/'1'/'0' mapping.
+        # A bare CAST('t' AS BOOLEAN) is NULL on StarRocks, so the three
+        # spellings Databend accepts silently imported as NULL instead.
+        return compiler.process(
+            func.cast(
+                sqlalchemy.case(
+                    (func.cast(col, sqlalchemy.Text) == 't', sqlalchemy.literal('TRUE', sqlalchemy.String)),
+                    (func.cast(col, sqlalchemy.Text) == '1', sqlalchemy.literal('TRUE', sqlalchemy.String)),
+                    (func.cast(col, sqlalchemy.Text) == 'f', sqlalchemy.literal('FALSE', sqlalchemy.String)),
+                    (func.cast(col, sqlalchemy.Text) == '0', sqlalchemy.literal('FALSE', sqlalchemy.String)),
+                    else_=col
+                ),
+                Boolean,
+            ),
+            **kw
+        )
+    elif dtype in ['integer', 'bigint', 'smallint', 'numeric', 'currency']:
+        # sc-30414. Two divergences from the Databend variant, both silent:
+        #   * Databend strips whitespace ANYWHERE in the value first
+        #     (regexp_replace(col, '\s*', '')), so '1 234' imports as 1234.
+        #     StarRocks was casting the raw text, which yields NULL.
+        #   * trailing negatives went to to_number(col, '...MI'), but the
+        #     StarRocks to_number variant IGNORES the mask (it is a plain
+        #     DECIMAL cast), so '123-' imported as NULL rather than -123.
+        # Rebuild both out of functions StarRocks actually has.
+        expr = func.regexp_replace(col, r'\s*', '')
         if trailing_negs:
-            return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
-        return compiler.process(func.cast(col, Numeric(38, 10)), **kw)
-    elif dtype == 'currency':
-        if trailing_negs:
-            # to_number renders a DECIMAL(38, 10) intermediate (see its compiler);
-            # the physical DECIMAL(18, 4) target column narrows it on insert.
-            return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
-        return compiler.process(func.cast(col, Numeric(18, 4)), **kw)
+            expr = sqlalchemy.case(
+                (func.regexp(expr, '^[0-9]*\\.?[0-9]*-$') == 1, func.concat('-', func.replace(expr, '-', ''))),
+                else_=expr
+            )
+        return compiler.process(func.cast(expr, Numeric(18, 4) if dtype == 'currency' else Numeric(38, 10)), **kw)
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
@@ -1088,7 +1109,7 @@ def compile_sql_integerize_truncate(element, compiler, **kw):
     return compiler.process(func.cast(func.trunc(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
 
 
-@compiles(sql_integerize_truncate, 'databend', 'starrocks')
+@compiles(sql_integerize_truncate, 'databend')
 def compile_sql_integerize_truncate_databend(element, compiler, **kw):
     """
     Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
@@ -1096,6 +1117,28 @@ def compile_sql_integerize_truncate_databend(element, compiler, **kw):
     arg, = list(element.clauses)
 
     return compiler.process(func.cast(func.truncate(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
+
+
+@compiles(sql_integerize_truncate, 'starrocks')
+def compile_sql_integerize_truncate_starrocks(element, compiler, **kw):
+    """
+    Turn common number formatting into a number. use metric abbreviations, remove stuff like $, etc.
+    """
+    # sc-30414. StarRocks was sharing the Databend rendering, whose
+    # _squash_to_numeric casts through a BARE Numeric. That is DECIMAL(18, 3)
+    # on Databend but DECIMAL(10, 0) on StarRocks, which ROUNDS the fraction
+    # away BEFORE truncate() ever runs: integerize_truncate('2.7') answered 3
+    # on StarRocks and 2 on Databend -- same expression, no error, different
+    # value. Pin the intermediate scale so truncate() sees the decimals, the
+    # same fix the Snowflake variant below already carries for the identical
+    # bare-NUMERIC trap. (38, 10) rather than Databend's (18, 3) because it is
+    # the scale every other pinned cast in this module uses; the two agree on
+    # every value with <= 3 decimal places, and past that Databend is the one
+    # rounding at its own DECIMAL(18, 3) ceiling.
+    arg, = list(element.clauses)
+
+    squashed = func.cast(func.nullif(func.numericize(arg), ''), sqlalchemy.Numeric(38, 10))
+    return compiler.process(func.cast(func.truncate(squashed), sqlalchemy.Integer), **kw)
 
 
 @compiles(sql_integerize_truncate, 'snowflake')
@@ -1846,13 +1889,29 @@ def compile_to_char_databend(element, compiler, **kw):
         )
 
 
+#: sc-30414. to_char's Postgres NUMERIC masks (0/9 grouping, currency, fixed
+#: decimals) have no StarRocks equivalent. Kept as an importable message — not
+#: just an inline `raise` — for the same reason as
+#: SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS above: the whole function DOES
+#: work on StarRocks for a date mask and for no mask at all, so the Tier-3
+#: derivation cannot use the whole-class _STARROCKS_UNSUPPORTED mechanism.
+TO_CHAR_STARROCKS_UNSUPPORTED_NUMERIC_MASK = (
+    "to_char(<number>, '<0/9 mask>') has no StarRocks equivalent: StarRocks has no Postgres-style numeric "
+    'format model, so the grouping separators, currency symbol and fixed decimal places the mask asks for '
+    'would be dropped and the column would hold a different STRING than it does on Databend '
+    "(to_char(1234.5, '999,999.99') is ' 1,234.50' on Databend and '1234.5' on StarRocks)"
+)
+
+
 @compiles(sql_to_char, 'starrocks')
 def compile_to_char_starrocks(element, compiler, **kw):
     # StarRocks has no Postgres-style to_char. Dates render via date_format
-    # (MySQL specifiers); everything else casts to a string. StarRocks cannot
-    # honor a Postgres numeric mask (grouping/currency/fixed decimals), so a
-    # numeric mask degrades to the value cast to CHAR — the numeric value is
-    # preserved, only cosmetic formatting is dropped.
+    # (MySQL specifiers); no mask at all casts to a string.
+    #
+    # sc-30414: a NUMERIC mask used to degrade silently to CAST(... AS CHAR).
+    # to_char returns a STRING, so dropping the mask IS a different value, not
+    # a cosmetic difference — it fails loudly now, so pre-flight blocks the
+    # project instead of the migration rewriting the column's contents.
     source, *args = list(element.clauses)
     if args:
         format_, *args = args
@@ -1860,7 +1919,10 @@ def compile_to_char_starrocks(element, compiler, **kw):
     else:
         format_ = None
 
-    if format_ is None or '0' in format_ or '9' in format_:
+    if format_ is not None and ('0' in format_ or '9' in format_):
+        raise CompileError(TO_CHAR_STARROCKS_UNSUPPORTED_NUMERIC_MASK)
+
+    if format_ is None:
         return f"CAST({compiler.process(source)} AS CHAR)"
 
     return f"date_format({compiler.process(source)}, {compiler.process(sqlalchemy.literal(_starrocks_date_format(format_)))})"
@@ -1903,17 +1965,6 @@ def compile_to_number(element, compiler, **kw):
         func.to_int64(string)
     )
 
-@compiles(sql_to_number, 'starrocks')
-def compile_to_number_starrocks(element, compiler, **kw):
-    # StarRocks has no to_number(); the format mask is advisory only. Cast to a
-    # wide decimal (unparseable input yields NULL). Also the target for the
-    # import_cast trailing-negatives path, which would otherwise emit a
-    # nonexistent to_number() on StarRocks.
-    string = list(element.clauses)[0]
-    return compiler.process(
-        func.cast(string, Numeric(38, 10))
-    )
-
 @compiles(sql_to_number, 'snowflake')
 def compile_to_number_snowflake(element, compiler, **kw):
     # Snowflake TO_NUMBER understands the 0/9/D/G/MI-style masks natively, but
@@ -1921,6 +1972,23 @@ def compile_to_number_snowflake(element, compiler, **kw):
     # every fractional digit away. Pin (38, 10).
     string, format_ = list(element.clauses)
     return f"to_number({compiler.process(string, **kw)}, {compiler.process(format_, **kw)}, 38, 10)"
+
+_mark_starrocks_unsupported(
+    sql_to_number,
+    # sc-30414. StarRocks has no to_number(). The variant this replaces cast to
+    # DECIMAL(38, 10) and dropped the mask, but Databend's to_number renders
+    # to_int64 — an INTEGER. to_number('12.7', '999999') was therefore 12.7 on
+    # StarRocks and an integer on Databend: a different type and a different
+    # value, silently. A matching rendering would have to reproduce to_int64's
+    # own rounding/refusal behaviour on a fractional or unparseable string,
+    # which cannot be established without a live Databend/StarRocks pair, so
+    # this fails closed instead. Nothing inside this module targets it any
+    # more — import_cast's trailing-negatives path was rebuilt in sc-30414 out
+    # of regexp/concat/replace rather than routed through here.
+    starrocks_unsupported='to_number has no verified StarRocks equivalent: Databend renders it as to_int64 '
+                          '(an integer) and StarRocks has no to_number, so any StarRocks rendering returns a '
+                          'different type and a different value for a fractional input')
+
 
 class sql_transaction_timestamp(GenericFunction):
     name = 'transaction_timestamp'
@@ -2124,7 +2192,6 @@ _FUNCTION_RENAMES = {
         'modulo': 'mod',           # Alteryx Mod()
         'ord': 'ascii',            # Alteryx CharToInt() (StarRocks has no ord)
         'today': 'current_date',   # Alteryx DateTimeToday()
-        'regexp_instr': 'regexp',  # REGEX_Match(): emitted as `regexp_instr(col, pat) > 0`; regexp() returns 1/0
         'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
         'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
         'add_years': 'years_add', 'add_months': 'months_add', 'add_days': 'days_add',
@@ -2544,6 +2611,42 @@ def compile_try_to_float64_snowflake(element, compiler, **kw):
     return f"try_to_double({compiler.process(value, **kw)})"
 
 
+class regexp_instr(GenericFunction):
+    """Databend regexp_instr(str, pat): 1-based offset of the first match, 0 when
+    absent. Defined explicitly rather than generated by _register_rename because
+    StarRocks needs a rewrite, not a rename (sc-30414), and Snowflake ships the
+    same contract natively."""
+    name = 'regexp_instr'
+    inherit_cache = True
+
+
+@compiles(regexp_instr, 'starrocks')
+def compile_regexp_instr_starrocks(element, compiler, **kw):
+    # sc-30414. StarRocks has no regexp_instr. This used to be a plain rename
+    # to regexp(), which returns 1/0 rather than a position -- correct only
+    # inside the Alteryx converter's `regexp_instr(col, pat) > 0` idiom, and
+    # silently wrong for every other use (`regexp_instr(col, pat) = 3`, or the
+    # position fed to substr()). Databend returns the 1-based offset of the
+    # first match, 0 when absent, NULL when either argument is NULL.
+    #
+    # locate(regexp_extract(col, pat, 0), col) reproduces that offset: RE2 is
+    # leftmost-match, so the extracted text cannot occur earlier in the string
+    # than the match itself. The CASE is keyed on regexp()'s 1/0/NULL rather
+    # than on a truthiness test so a NULL argument still yields NULL instead
+    # of collapsing to 0.
+    clauses = list(element.clauses)
+    col, pattern = clauses[0], clauses[1]
+    matched = func.regexp(col, pattern)
+    return compiler.process(
+        sqlalchemy.case(
+            (matched == 1, func.locate(func.regexp_extract(col, pattern, 0), col)),
+            (matched == 0, sqlalchemy.literal(0)),
+            else_=sqlalchemy.null(),
+        ),
+        **kw
+    )
+
+
 class regexp_substr(GenericFunction):
     name = 'regexp_substr'
     inherit_cache = True
@@ -2551,9 +2654,16 @@ class regexp_substr(GenericFunction):
 @compiles(regexp_substr, 'starrocks')
 def compile_regexp_substr_starrocks(element, compiler, **kw):
     # StarRocks spells first-match extraction regexp_extract(str, pat, 0).
+    #
+    # sc-30414: regexp_extract returns an EMPTY STRING when nothing matches,
+    # where Databend's regexp_substr returns NULL -- so `regexp_substr(x, p)
+    # IS NULL` was false on StarRocks for every non-matching row, and a
+    # coalesce() over it picked the '' instead of its fallback. nullif('')
+    # restores Databend's contract; it is the same wrapper sql_numericize's
+    # StarRocks variant already applies around its own regexp_extract calls.
     clauses = list(element.clauses)
     col, pattern = clauses[0], clauses[1]
-    return compiler.process(func.regexp_extract(col, pattern, 0), **kw)
+    return compiler.process(func.nullif(func.regexp_extract(col, pattern, 0), ''), **kw)
 
 
 #: Databend date_diff(unit, start, end) = end - start. StarRocks has no such
