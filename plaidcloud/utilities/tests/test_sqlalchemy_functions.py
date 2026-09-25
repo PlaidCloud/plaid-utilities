@@ -211,41 +211,45 @@ class TestImportColDatabend(DatabendTest):
 #         self.assertEqual(5, compiled.params['left_2'])
 
 class TestImportColStarrocks(TestImportCol, StarrocksTest):
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
     def test_import_col_numeric(self):
-        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
-                          'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
-        self.assertEqual('Column1', compiled.params['import_col_1'])
-        self.assertEqual('\\s*', compiled.params['regexp_replace_1'])
-        self.assertEqual('', compiled.params['regexp_replace_2'])
-        self.assertEqual('', compiled.params['regexp_replace_3'])
-        self.assertEqual(0.0, compiled.params['param_1'])
+        # sc-30414: the whitespace squash reaches the CAST, matching Databend —
+        # it used to be probed for emptiness and then thrown away, so '1 234'
+        # cast as raw text and imported as NULL.
+        self.assertEqual(
+            "CASE WHEN (regexp_replace('Column1', '\\\\s*', '') = '') THEN 0.0 "
+            "ELSE CAST(regexp_replace('Column1', '\\\\s*', '') AS DECIMAL(38, 10)) END",
+            self._sql(sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False)))
 
     def test_import_col_numeric_trailing_negatives(self):
-        # StarRocks has no to_number(); the trailing-negatives import_cast path
-        # therefore falls through to the wide-decimal cast (to_number specializes
-        # to CAST(... AS DECIMAL(38, 10)) on StarRocks). Trailing-minus handling
-        # is lost — bad input yields NULL rather than a hard error.
-        expr = sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual(('CASE WHEN (regexp_replace(%(import_col_1)s, %(regexp_replace_1)s, %(regexp_replace_2)s) = %(regexp_replace_3)s) '
-                          'THEN %(param_1)s ELSE CAST(%(import_col_1)s AS DECIMAL(38, 10)) END'), str(compiled))
-        self.assertEqual('Column1', compiled.params['import_col_1'])
-        self.assertEqual(0.0, compiled.params['param_1'])
+        # sc-30414: '123-' must import as -123, as it does on Databend. This
+        # used to route through to_number(col, '...MI'), whose StarRocks variant
+        # ignored the mask entirely and cast the raw '123-' to DECIMAL (NULL).
+        self.assertIn(
+            "CASE WHEN (regexp(regexp_replace('Column1', '\\\\s*', ''), '^[0-9]*\\\\.?[0-9]*-$') = 1) "
+            "THEN concat('-', replace(regexp_replace('Column1', '\\\\s*', ''), '-', ''))",
+            self._sql(sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', True)))
 
     def test_import_cast_currency(self):
-        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', False)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('CAST(%(import_cast_1)s AS DECIMAL(18, 4))', str(compiled))
-        self.assertEqual('Column1', compiled.params['import_cast_1'])
+        self.assertEqual("CAST(regexp_replace('Column1', '\\\\s*', '') AS DECIMAL(18, 4))",
+                         self._sql(sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', False)))
 
     def test_import_cast_currency_trailing_negatives(self):
-        # Same as numeric: to_number specializes to the wide-decimal cast on
-        # StarRocks. The (18, 4) target column still governs storage width.
-        expr = sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', True)
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('CAST(%(import_cast_1)s AS DECIMAL(38, 10))', str(compiled))
+        # sc-30414: the currency path kept the (18, 4) width AND now applies the
+        # trailing-minus rewrite instead of dropping it.
+        sql = self._sql(sqlalchemy.func.import_cast('Column1', 'currency', 'YYYY-MM-DD', True))
+        self.assertIn("concat('-', replace(regexp_replace('Column1', '\\\\s*', ''), '-', ''))", sql)
+        self.assertTrue(sql.endswith('AS DECIMAL(18, 4))'), sql)
+
+    def test_import_cast_boolean_maps_databends_spellings(self):
+        # sc-30414: a bare CAST('t' AS BOOLEAN) is NULL on StarRocks, so the
+        # 't'/'f'/'1'/'0' spellings Databend accepts silently imported as NULL.
+        sql = self._sql(sqlalchemy.func.import_cast('Column1', 'boolean', '', False))
+        self.assertIn("WHEN (CAST('Column1' AS STRING) = 't') THEN 'TRUE'", sql)
+        self.assertIn("WHEN (CAST('Column1' AS STRING) = 'f') THEN 'FALSE'", sql)
+        self.assertTrue(sql.endswith('AS BOOLEAN)'), sql)
 
 
 # --- Typed staging compile switch (sc-23281) --------------------------------
@@ -1357,8 +1361,15 @@ class TestConverterRenamesStarrocks(StarrocksTest):
     def test_today_becomes_current_date(self):
         self.assertEqual('current_date()', self._sql(sqlalchemy.func.today()))
 
-    def test_regexp_instr_becomes_regexp(self):
-        self.assertEqual("regexp('s', 'p')", self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
+    def test_regexp_instr_returns_a_position_not_a_boolean(self):
+        # sc-30414: this was a plain rename to regexp(), which answers 1/0 —
+        # right only inside the converter's `regexp_instr(...) > 0` idiom and
+        # silently wrong everywhere else. Databend returns the 1-based offset,
+        # 0 when absent, NULL when an argument is NULL.
+        self.assertEqual(
+            "CASE WHEN (regexp('s', 'p') = 1) THEN locate(regexp_extract('s', 'p', 0), 's') "
+            "WHEN (regexp('s', 'p') = 0) THEN 0 ELSE NULL END",
+            self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
 
     def test_datetime_extractors_become_mysql_names(self):
         self.assertEqual("year('2020-01-01')", self._sql(sqlalchemy.func.to_year('2020-01-01')))
@@ -1387,7 +1398,10 @@ class TestConverterRenamesStarrocks(StarrocksTest):
         self.assertEqual("CAST('1.5' AS DOUBLE)", self._sql(sqlalchemy.func.try_to_float64('1.5')))
 
     def test_regexp_substr_becomes_regexp_extract(self):
-        self.assertEqual("regexp_extract('s', 'p', 0)", self._sql(sqlalchemy.func.regexp_substr('s', 'p')))
+        # sc-30414: nullif('') because regexp_extract answers '' on no match
+        # where Databend's regexp_substr answers NULL.
+        self.assertEqual("nullif(regexp_extract('s', 'p', 0), '')",
+                         self._sql(sqlalchemy.func.regexp_substr('s', 'p')))
 
     def test_date_diff_becomes_unit_diff_with_swapped_args(self):
         # date_diff('day', dt2, dt1) (= dt1 - dt2 on Databend) → days_diff(dt1, dt2).
@@ -1448,12 +1462,23 @@ class TestToCharStarrocks(StarrocksTest):
         self.assertEqual(dt, compiled.params['to_char_1'])
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
 
-    def test_to_char_number_casts_to_char(self):
-        # StarRocks cannot honor a Postgres numeric mask; value is cast to CHAR.
+    def test_to_char_numeric_mask_refuses(self):
+        # sc-30414: StarRocks cannot honor a Postgres numeric mask. Dropping it
+        # used to be silent, but to_char RETURNS A STRING, so the grouping
+        # separators, currency symbol and fixed decimals the mask asks for are
+        # part of the value — the column would hold different text than on
+        # Databend. Fail closed so pre-flight blocks the project instead.
         expr = sqlalchemy.func.to_char(123456.789, 'LFM999,999,999,999D00')
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('CAST(%(to_char_1)s AS CHAR)', str(compiled))
-        self.assertEqual(123456.789, compiled.params['to_char_1'])
+        with self.assertRaises(CompileError) as ctx:
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertIn('no StarRocks equivalent', str(ctx.exception))
+
+    def test_numeric_mask_refusal_is_derivable(self):
+        # The message is importable, not just raised inline, so the epic's
+        # Tier-3 derivation can enumerate it (same contract as
+        # SAFE_EXTRACT_STARROCKS_UNSUPPORTED_FIELDS).
+        self.assertIn('no StarRocks equivalent',
+                      sf.TO_CHAR_STARROCKS_UNSUPPORTED_NUMERIC_MASK)
 
     def test_to_char_no_format_casts_to_char(self):
         expr = sqlalchemy.func.to_char(sqlalchemy.column('c'))
@@ -1555,11 +1580,19 @@ class TestStarrocksDateFormatValues(StarrocksTest):
 
 
 class TestToNumberStarrocks(StarrocksTest):
-    def test_to_number_casts_to_decimal(self):
+    def test_to_number_refuses(self):
+        # sc-30414: the old variant cast to DECIMAL(38, 10), but Databend's
+        # to_number renders to_int64 — an INTEGER. Same call, different type and
+        # a different value for any fractional input, with no error. No
+        # matching rendering can be established without a live pair, so it
+        # fails closed.
         expr = sqlalchemy.func.to_number('12345', '999999')
-        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
-        self.assertEqual('CAST(%(to_number_1)s AS DECIMAL(38, 10))', str(compiled))
-        self.assertEqual('12345', compiled.params['to_number_1'])
+        with self.assertRaises(CompileError):
+            expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+
+    def test_refusal_is_in_the_derivable_registry(self):
+        self.assertIn(sf.sql_to_number,
+                      sf._STARROCKS_UNSUPPORTED)  # pylint: disable=protected-access
 
 
 class TestToNumberDatabendUnchanged(DatabendTest):
@@ -2129,6 +2162,19 @@ class TestIntegerizeTruncateDatabend(DatabendTest):
         compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertTrue(str(compiled).startswith('CAST(truncate(CAST(nullif('))
         self.assertTrue(str(compiled).endswith('AS DECIMAL(38, 10))) AS INTEGER)'))
+
+
+class TestIntegerizeTruncateStarrocks(StarrocksTest):
+    def test_integerize_truncate_keeps_decimals_for_truncate(self):
+        # sc-30414. StarRocks used to share the Databend rendering, whose
+        # _squash_to_numeric casts through a BARE Numeric — DECIMAL(18, 3) on
+        # Databend but DECIMAL(10, 0) on StarRocks, which ROUNDS before
+        # truncate() runs: '2.7' answered 3 on StarRocks and 2 on Databend.
+        expr = sqlalchemy.func.integerize_truncate(sqlalchemy.column('a'))
+        compiled = expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
+        self.assertTrue(str(compiled).startswith('CAST(truncate(CAST(nullif('))
+        self.assertIn('AS DECIMAL(38, 10))', str(compiled))
+        self.assertNotIn('AS DECIMAL))', str(compiled))
 
 
 class TestIntegerizeTruncateSnowflake(SnowflakeTest):
