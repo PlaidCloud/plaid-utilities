@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy
 import sqlalchemy.orm
+from sqlalchemy.sql import visitors
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
-from plaidcloud.rpc.type_conversion import require_dtype_capability, sqlalchemy_from_dtype
+from plaidcloud.rpc.type_conversion import UnsupportedDtype, require_dtype_capability, sqlalchemy_from_dtype
 from toolz.dicttoolz import assoc, merge, valfilter
 from toolz.functoolz import compose, curry, juxt
 from toolz.functoolz import identity as ident
@@ -49,9 +50,11 @@ SCHEMA_PREFIX = 'anlz'
 table_dot_column_regex = re.compile(r'^table(\d*)\..*')
 
 class SQLExpressionError(Exception):
-    # Will typically be caught by
-    # workflow_runner.function.utility.transform_handler and converted into a
-    # UserError
+    # A user-facing refusal. plaid's step dispatcher handles this type explicitly and renders
+    # the message verbatim (plaid/app/analyze/execution/error_text.py), so the text below is
+    # what the user reads — name the column and what to do about it. workflow-runner's
+    # transform_handler converts it to a UserError on the five sub-workflow steps it still
+    # owns; plaid does not import transform_handler at all.
     pass
 
 
@@ -1172,6 +1175,187 @@ def modified_select_query(config, project, metadata, fmt=None, mapping_fn=None, 
     return simple_select_query(cleaned_config, project, metadata, variables)
 
 
+# Aggregation strings that leave the column's expression unwrapped (see get_agg_fn), while
+# NOT putting it in the GROUP BY (see get_select_query). 'group'/'group_null' are also
+# unwrapped, but they are grouped, so they are not in this set.
+UNAGGREGATED_UNGROUPED_AGGS = frozenset({None, '', 'dont_group', 'dont_group_null'})
+GROUPING_AGGS = frozenset({'group', 'group_null'})
+
+
+def is_passthrough_agg(agg):
+    """Whether `agg` leaves the column's value alone: no aggregate wrapped round it and no
+    GROUP BY entry for it.
+
+    The one definition of that vocabulary, so callers deciding "does this config aggregate?"
+    do not each restate it. `plaid`'s `frame_join_multi` derives its `aggregate` flag from
+    exactly this question and spells it `tc.get('agg') and tc.get('agg') != 'dont_group'`,
+    which misreads `dont_group_null` — `get_agg_fn` strips the `_null` suffix and returns
+    `ident` for it, and it is not a grouping token either, so it aggregates nothing and groups
+    nothing. Import this instead of restating it.
+    """
+    return agg in UNAGGREGATED_UNGROUPED_AGGS
+
+
+def column_contributes_an_aggregate(target_column):
+    """Whether this target column puts a real aggregate in the query.
+
+    Grouping tokens are excluded (they group, they do not aggregate) and so are constants:
+    `constant_from_clause` hard-passes `None` as the agg, so a constant's `agg` never reaches
+    the SQL, which is the same reason `get_select_query` keeps constants out of the GROUP BY.
+    """
+    agg = target_column.get('agg')
+    return not is_passthrough_agg(agg) and agg not in GROUPING_AGGS and not target_column.get('constant')
+
+
+def _source_column_key(tables, target_column_config, source_column_configs, table_numbering_start=1, tables_by_alias=None):
+    """The (table name, column name) a source-backed target column resolves to, matching
+    source_from_clause's own resolution, or None if it cannot be resolved here."""
+    source = target_column_config.get('source')
+    try:
+        table = get_column_table(
+            tables, target_column_config, source_column_configs,
+            table_numbering_start=table_numbering_start,
+            tables_by_alias=tables_by_alias,
+        )
+    except SQLExpressionError:
+        # Let the real error surface from get_from_clause instead of from this check.
+        return None
+
+    source_without_table = source.split('.', 1)[1] if '.' in source else source
+    if source in table.columns:
+        return (table, source)
+    if source_without_table in table.columns:
+        return (table, source_without_table)
+    return None
+
+
+def _columns_in(expressions):
+    """Every table column appearing anywhere inside `expressions`, as (Table object, column name).
+
+    Keyed on the `Table` object rather than its name, so a self-join grouping `a.region` while
+    projecting `b.region` is two different keys, as are same-named tables in different schemas.
+
+    Reads the built GROUP BY expressions rather than the config, so a grouping column written
+    as an `expression` counts the columns it actually references. Window functions and
+    literals contribute nothing, which is what we want.
+    """
+    return {
+        (element.table, element.name)
+        for expression in expressions
+        for element in visitors.iterate(expression)
+        if isinstance(element, sqlalchemy.Column) and element.table is not None
+    }
+
+
+def _dtype_can(dtype, capability):
+    """Whether the registry lets `dtype` do `capability`. An unrecognised dtype answers True,
+    so this only ever narrows the advice, never the refusal."""
+    if not dtype:
+        return True
+    try:
+        require_dtype_capability(dtype, capability, 'a target column')
+    except UnsupportedDtype:
+        return False
+    except Exception:
+        return True
+    return True
+
+
+def _remedy_for(dtype):
+    """What the user can actually do about it, which depends on what the dtype can do.
+
+    Naming a remedy the platform itself refuses sends the user round a loop: `vector` is the
+    trigger to expect, because it is the dtype with no `default_agg` and so the one
+    `table_explorer_common.agg_type` answers `dont_group` for — and it refuses `joinable_as_key`
+    too, so neither grouping it nor aggregating it is available.
+    """
+    can_group = _dtype_can(dtype, 'joinable_as_key')
+    can_aggregate = _dtype_can(dtype, 'default_agg')
+    if can_group:
+        return (
+            "Set its aggregation to 'Group By' to keep one row per value, choose an aggregation "
+            "such as Sum, Min, Max or Count, or remove the column from the step's output."
+        )
+    if can_aggregate:
+        return (
+            f'A {dtype} column cannot be a group-by key, so either give it an aggregation such '
+            "as Min, Max or Count, or remove the column from the step's output."
+        )
+    return (
+        f'A {dtype} column can be neither grouped nor aggregated, so either remove the column '
+        "from the step's output or turn this step's aggregation off."
+    )
+
+
+def assert_aggregate_projection_is_groupable(
+    tables, target_columns, source_columns, grouping_columns, table_numbering_start=1,
+    tables_by_alias=None, use_row_number_for_serial=True,
+):
+    """Refuse an aggregate config that projects a bare source column which is neither grouped
+    nor aggregated.
+
+    Such a column is emitted as a naked column reference in the SELECT list while the query
+    carries a GROUP BY that does not contain it. Every warehouse this package targets —
+    `dialects.REQUIRED_DIALECTS` is StarRocks, Databend, Databricks and Snowflake — enforces
+    GROUP BY and rejects it, so there is no engine on which such a step runs today. The defect
+    is dtype-agnostic: a text column and a vector column produce the identical invalid shape.
+
+    `grouping_columns` is the built GROUP BY list, so an expression-backed grouping column is
+    read for the columns it actually references rather than guessed at.
+
+    Deliberately narrow, so that no config which is valid today is refused:
+
+    * Only the plain `source` path is checked. An `expression` is the user's own SQL and
+      routinely supplies its own aggregate — `agg: 'dont_group'` plus an aggregating
+      expression is the documented way to write one (the Alteryx Summarize/WeightedAvg
+      conversions are built that way) — and deciding whether an arbitrary expression
+      aggregates would mean guessing at function names, including UDAFs we do not know.
+    * A source column the GROUP BY already references is fine, whether it got there as a
+      grouping column of its own (`SELECT region, region AS region_copy ... GROUP BY region`
+      is legal) or inside a grouping expression.
+    * Constants are exempt, and their `agg` is ignored when deciding whether this query
+      aggregates at all — `constant_from_clause` hard-passes `None`, so a constant's `agg`
+      never reaches the SQL, which is why `grouping_columns` ignores it too.
+    * `serial`/`bigserial` and the magic dtypes are not exempted by anything here: they reach
+      the check and fall out of it for carrying no `source`, which is the only way
+      `get_from_clause` renders them as `row_number()` or a magic literal in the first place.
+      A column of one of those dtypes that *does* name a source column is emitted as that
+      bare column, so it is the defect, not an exemption.
+    * A config that turns aggregation on but names no grouping column and no real aggregate
+      is not an aggregate query at all: get_select_query emits no GROUP BY, so `SELECT col
+      FROM t` is plain, valid SQL. frame_join_anti's existence subquery is built that way.
+
+    Known gap: a projected column the GROUP BY references only *inside* a larger expression
+    (`GROUP BY lower(region)` while projecting bare `region`) still passes, because proving
+    functional dependence through an arbitrary expression is not something this check can do.
+    It stands down there rather than risk a false refusal.
+    """
+    really_aggregates = any(column_contributes_an_aggregate(tc) for tc in target_columns)
+    if not grouping_columns and not really_aggregates:
+        return
+
+    grouped_keys = _columns_in(grouping_columns)
+
+    for tc in target_columns:
+        if tc.get('constant') or tc.get('expression') or not tc.get('source'):
+            continue
+        if not is_passthrough_agg(tc.get('agg')):
+            continue
+        if not use_row_number_for_serial and tc.get('dtype') in ('serial', 'bigserial'):
+            continue  # dropped from the SELECT list entirely
+        key = _source_column_key(
+            tables, tc, source_columns,
+            table_numbering_start=table_numbering_start, tables_by_alias=tables_by_alias,
+        )
+        if key is None or key in grouped_keys:
+            continue
+        raise SQLExpressionError(
+            f"Column '{tc.get('target')}' (from source column '{tc.get('source')}') is neither "
+            'grouped nor aggregated, but this step aggregates. Its aggregation is currently '
+            f"{tc.get('agg') or 'unset'}. {_remedy_for(tc.get('dtype'))}"
+        )
+
+
 def get_select_query(
     tables: list[sqlalchemy.Table], source_columns: list[list[dict]], target_columns: list[dict], wheres: list[str],
     config: dict = None, variables: dict = None, aggregate: bool = None, having: str = None,
@@ -1325,6 +1509,15 @@ def get_select_query(
                 and (use_row_number_for_serial or tc.get('dtype') not in ('serial', 'bigserial'))
             )
         ]
+        # `count` projects only count(*), so nothing in target_columns reaches the SELECT list
+        # and an ungrouped column there is harmless.
+        if not count:
+            assert_aggregate_projection_is_groupable(
+                tables, target_columns, source_columns, grouping_columns,
+                table_numbering_start=table_numbering_start,
+                tables_by_alias=tables_by_alias,
+                use_row_number_for_serial=use_row_number_for_serial,
+            )
         # ROLLUP()/CUBE()/GROUPING SETS() with an empty argument list is a SQL syntax
         # error ('syntax error at or near ")"' — the empty grouping set is spelled
         # 'GROUP BY ()'), whereas group_by() with no columns is a no-op that emits no

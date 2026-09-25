@@ -2863,5 +2863,275 @@ class TestApplyRulesIterations(TestSQLExpression):
         self.assertEqual([('A', '0', 'R1', ''), ('B', '1', 'R2', 'b')] + unmatched, self.pandas_rows(df_rules))
 
 
+class TestAggVocabulary(TestSQLExpression):
+    """One definition of "this agg leaves the value alone", so callers stop restating it."""
+
+    def test_every_agg_get_agg_fn_passes_through_is_a_passthrough(self):
+        """The vocabulary must match `get_agg_fn`'s identity set minus the grouping tokens —
+        `dont_group_null` included, which `frame_join_multi`'s hand-rolled spelling misses."""
+        for agg in (None, '', 'dont_group', 'dont_group_null'):
+            with self.subTest(agg=agg):
+                self.assertIs(se.get_agg_fn(agg), ident)
+                self.assertTrue(se.is_passthrough_agg(agg))
+
+    def test_grouping_and_real_aggregates_are_not_passthroughs(self):
+        for agg in ('group', 'group_null', 'sum', 'count', 'count_distinct', 'min'):
+            with self.subTest(agg=agg):
+                self.assertFalse(se.is_passthrough_agg(agg))
+
+    def test_only_a_real_aggregate_contributes_one(self):
+        self.assertTrue(se.column_contributes_an_aggregate({'source': 'a', 'agg': 'sum'}))
+        self.assertFalse(se.column_contributes_an_aggregate({'source': 'a', 'agg': 'group'}))
+        self.assertFalse(se.column_contributes_an_aggregate({'source': 'a', 'agg': 'dont_group'}))
+        self.assertFalse(se.column_contributes_an_aggregate({'source': 'a'}))
+
+    def test_a_constants_agg_contributes_nothing(self):
+        """`constant_from_clause` hard-passes `None` as the agg, so it never reaches the SQL."""
+        self.assertFalse(se.column_contributes_an_aggregate({'constant': 'x', 'agg': 'sum'}))
+
+
+class TestAggregateProjectionRefusal(TestSQLExpression):
+    """An aggregate step must not project a bare source column that is neither grouped nor
+    aggregated (sc-30766).
+
+    `agg: 'dont_group'` and an absent `agg` key both left the column unwrapped in the SELECT
+    list while the GROUP BY omitted it, which StarRocks rejects. The defect is dtype-agnostic
+    — `text` produces the identical invalid shape a vector column does — so these assertions
+    are made on the rendered StarRocks SQL string, not on any classifier's verdict.
+    """
+
+    def setUp(self):
+        self.source_columns = [[
+            {'source': 'region', 'dtype': 'text'},
+            {'source': 'note', 'dtype': 'text'},
+            {'source': 'amount', 'dtype': 'numeric'},
+        ]]
+        self.table = se.get_table_rep('src', self.source_columns[0], 'sch')
+        self.grouped_region = {'target': 'region', 'source': 'region', 'dtype': 'text', 'agg': 'group'}
+
+    def render(self, *target_columns, **kwargs):
+        kwargs.setdefault('aggregate', True)
+        sql, _params = compiled(
+            se.get_select_query([self.table], self.source_columns, list(target_columns), [], **kwargs),
+            dialect='starrocks',
+        )
+        # `compiled` flattens newlines to spaces, so clause boundaries arrive as runs of
+        # whitespace. Collapse them; the assertions pin SQL text, not indentation.
+        return ' '.join(sql.split())
+
+    def test_dont_group_source_column_is_refused(self):
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.render(self.grouped_region, {'target': 'note', 'source': 'note', 'dtype': 'text', 'agg': 'dont_group'})
+        self.assertIn("'note'", str(raised.exception))
+        self.assertIn('neither grouped nor aggregated', str(raised.exception))
+
+    def test_missing_agg_source_column_is_refused(self):
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.render(self.grouped_region, {'target': 'note', 'source': 'note', 'dtype': 'text'})
+        self.assertIn("'note'", str(raised.exception))
+        self.assertIn('neither grouped nor aggregated', str(raised.exception))
+
+    def test_refusal_names_the_offending_column_not_a_grouped_one(self):
+        """The message has to point at the column the user must fix."""
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.render(
+                self.grouped_region,
+                {'target': 'amount', 'source': 'amount', 'dtype': 'numeric', 'agg': 'sum'},
+                {'target': 'note_out', 'source': 'note', 'dtype': 'text', 'agg': 'dont_group'},
+            )
+        self.assertIn("'note_out'", str(raised.exception))
+        self.assertNotIn("'region'", str(raised.exception))
+
+    # --- shapes that were valid before the refusal and must render EXACTLY as they did ---
+
+    def test_real_aggregate_still_renders(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(sum(sch.src.amount) AS DECIMAL(38, 10)) AS amount '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region, {'target': 'amount', 'source': 'amount', 'dtype': 'numeric', 'agg': 'sum'}),
+        )
+
+    def test_constant_still_renders(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(%(param_1)s AS STRING) AS lit '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region, {'target': 'lit', 'constant': 'x', 'dtype': 'text'}),
+        )
+
+    def test_dont_group_with_self_aggregating_expression_still_renders(self):
+        """The Alteryx Summarize/WeightedAvg conversions are built exactly this way."""
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, '
+            'CAST(sum(sch.src.amount) / count(sch.src.amount) AS DECIMAL(38, 10)) AS wavg '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(
+                self.grouped_region,
+                {
+                    'target': 'wavg', 'dtype': 'numeric', 'agg': 'dont_group',
+                    'expression': 'func.sum(table1.amount)/func.count(table1.amount)',
+                },
+            ),
+        )
+
+    def test_dont_group_on_an_already_grouped_source_column_still_renders(self):
+        """`SELECT region, region AS region_copy ... GROUP BY region` is legal SQL."""
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(sch.src.region AS STRING) AS region_copy '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(
+                self.grouped_region,
+                {'target': 'region_copy', 'source': 'region', 'dtype': 'text', 'agg': 'dont_group'},
+            ),
+        )
+
+    def test_serial_row_number_still_renders(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(row_number() OVER () AS SIGNED INTEGER) AS rn '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region, {'target': 'rn', 'dtype': 'serial'}),
+        )
+
+    def test_count_query_ignores_an_ungrouped_projection(self):
+        """`count` projects only count(*), so target_columns never reach the SELECT list."""
+        self.assertEqual(
+            'SELECT count(*) AS count_1 FROM sch.src GROUP BY sch.src.region',
+            self.render(
+                self.grouped_region,
+                {'target': 'note', 'source': 'note', 'dtype': 'text', 'agg': 'dont_group'},
+                count=True,
+            ),
+        )
+
+    def test_a_constants_agg_does_not_arm_the_refusal(self):
+        """`constant_from_clause` hard-passes `None` as the agg, so a constant's `agg` never
+        reaches the SQL. It must not decide that this query aggregates either — `grouping_columns`
+        ignores a constant for the same reason. `frame_join_multi` derives `aggregate` over every
+        target column including constants, so a constant at `agg: 'sum'` is reachable."""
+        columns = [
+            {'source': 'region', 'target': 'region', 'dtype': 'text', 'agg': 'dont_group'},
+            {'source': 'amount', 'target': 'amount', 'dtype': 'numeric', 'agg': 'dont_group'},
+        ]
+        without_constant = self.render(*columns)
+        with_constant = self.render(*columns, {'target': 'tag', 'constant': 'x', 'dtype': 'text', 'agg': 'sum'})
+        self.assertNotIn('GROUP BY', without_constant)
+        self.assertNotIn('GROUP BY', with_constant)
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, '
+            'CAST(sch.src.amount AS DECIMAL(38, 10)) AS amount, '
+            'CAST(%(param_1)s AS STRING) AS tag FROM sch.src',
+            with_constant,
+        )
+
+    def test_a_column_with_both_a_source_and_an_expression_is_not_refused(self):
+        """The expression wins in `get_from_clause`, so the `source` key is inert — a column
+        carrying both must be read as an expression. Pins the `expression` arm of the skip,
+        which a source-less expression column cannot reach."""
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, '
+            'CAST(sum(sch.src.amount) AS DECIMAL(38, 10)) AS agg_amount '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(
+                self.grouped_region,
+                {
+                    'source': 'amount', 'target': 'agg_amount', 'dtype': 'numeric',
+                    'agg': 'dont_group', 'expression': 'func.sum(table1.amount)',
+                },
+            ),
+        )
+
+    def test_an_expression_backed_grouping_column_does_not_excuse_an_ungrouped_projection(self):
+        """The GROUP BY is read for the columns it actually references, so grouping on an
+        expression does not wave the check through. Converter output groups on expressions
+        routinely."""
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            self.render(
+                {'target': 'r', 'dtype': 'text', 'agg': 'group', 'expression': 'table1.region'},
+                {'source': 'note', 'target': 'note', 'dtype': 'text', 'agg': 'dont_group'},
+            )
+        self.assertIn("'note'", str(raised.exception))
+
+    def test_a_grouping_expression_over_the_projected_column_is_accepted(self):
+        """`SELECT note ... GROUP BY CAST(note AS STRING)` references the column in its own
+        GROUP BY, so it is not the defect this refuses."""
+        self.assertEqual(
+            'SELECT CAST(sch.src.note AS STRING) AS r, CAST(sch.src.note AS STRING) AS note_out '
+            'FROM sch.src GROUP BY CAST(sch.src.note AS STRING)',
+            self.render(
+                {'target': 'r', 'dtype': 'text', 'agg': 'group', 'expression': 'table1.note'},
+                {'source': 'note', 'target': 'note_out', 'dtype': 'text', 'agg': 'dont_group'},
+            ),
+        )
+
+    def test_the_remedy_never_names_something_the_dtype_refuses(self):
+        """A vector refuses `joinable_as_key` AND `default_agg`, so neither "Group By" nor
+        "choose an aggregation" is available — naming either sends the user round a loop. This
+        is the trigger to expect, since vector is what `agg_type` answers `dont_group` for."""
+        source_columns = [[{'source': 'region', 'dtype': 'text'}, {'source': 'embedding', 'dtype': 'vector'}]]
+        table = se.get_table_rep('src', source_columns[0], 'sch')
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            se.get_select_query(
+                [table], source_columns,
+                [
+                    self.grouped_region,
+                    {'source': 'embedding', 'target': 'embedding', 'dtype': 'vector', 'agg': 'dont_group'},
+                ],
+                [], aggregate=True,
+            )
+        message = str(raised.exception)
+        self.assertIn("'embedding'", message)
+        self.assertIn('neither grouped nor aggregated', message)
+        self.assertIn('can be neither grouped nor aggregated', message)
+        self.assertNotIn('Group By', message)
+
+    def test_two_sources_of_the_same_name_are_not_confused(self):
+        """Keyed on the `Table` object, not its name. Two tables can share a name — the same
+        table name in two schemas, which `frame_join_multi` accepts from MCP — and grouping one
+        side's `region` must not excuse projecting the other's. An `Alias` already carries a
+        distinct `.name`, so this cross-schema pair is the case that discriminates."""
+        left = se.get_table_rep('src', self.source_columns[0], 'sch_a')
+        right = se.get_table_rep('src', self.source_columns[0], 'sch_b')
+        self.assertEqual(right.name, left.name)  # the collision the check must survive
+        self.assertIsNot(right, left)
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            se.get_select_query(
+                [left, right], [self.source_columns[0], self.source_columns[0]],
+                [
+                    {'source': 'region', 'target': 'region', 'dtype': 'text', 'agg': 'group',
+                     'source_table': 'table1'},
+                    {'source': 'region', 'target': 'other_region', 'dtype': 'text',
+                     'agg': 'dont_group', 'source_table': 'table2'},
+                ],
+                [], aggregate=True,
+            )
+        self.assertIn("'other_region'", str(raised.exception))
+
+    def test_a_magic_column_is_not_refused(self):
+        """Not an exemption in the body — a magic column carries no `source`, which is the only
+        way `get_from_clause` renders it as a magic literal at all."""
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(%(param_1)s AS STRING) AS src_name '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region, {'target': 'src_name', 'dtype': 'source_table_name'}),
+        )
+
+    def test_aggregation_on_with_nothing_grouped_or_aggregated_still_renders(self):
+        """No grouping column and no real aggregate means no GROUP BY is emitted at all, so
+        the projection is plain, valid SQL. frame_join_anti's existence subquery is built
+        this way."""
+        sql = self.render({'target': 'note', 'source': 'note', 'dtype': 'text', 'agg': 'dont_group'})
+        self.assertEqual('SELECT CAST(sch.src.note AS STRING) AS note FROM sch.src', sql)
+        self.assertNotIn('GROUP BY', sql)
+
+    def test_non_aggregate_step_still_projects_the_column(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(sch.src.note AS STRING) AS note FROM sch.src',
+            self.render(
+                self.grouped_region,
+                {'target': 'note', 'source': 'note', 'dtype': 'text', 'agg': 'dont_group'},
+                aggregate=False,
+            ),
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
