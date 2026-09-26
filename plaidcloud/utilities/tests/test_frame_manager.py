@@ -262,7 +262,9 @@ class TestFrameManager(unittest.TestCase):
         self.assertIn('bogus', str(ctx.exception))
 
     def test_dtype_from_sql_refuses_a_dtype_with_no_pandas_representation(self):
-        for dtype in ('uuid', 'geometry', 'geography', 'bitmap'):
+        """uuid gained a pandas form (`object`) in plaid-rpc 1.16.1 and moved to DTYPE_SAMPLES —
+        it is no longer refused here."""
+        for dtype in ('geometry', 'geography', 'bitmap'):
             with self.subTest(dtype=dtype):
                 with self.assertRaises(UnsupportedDtype):
                     frame_manager.dtype_from_sql(dtype)
@@ -366,6 +368,7 @@ class TestFrameManager(unittest.TestCase):
         'json': ('{}', 'object', 'object'),
         'largebinary': ('abc', 'object', 'object'),
         'vector': ('[0.1, 0.2]', 'object', 'object'),
+        'uuid': ('12345678-1234-5678-1234-567812345678', 'object', 'object'),
     }
 
     def test_a_typed_psv_loads_every_dtype_that_has_a_pandas_representation(self):

@@ -497,7 +497,7 @@ def dtype_from_sql(sql):
 
     Raises:
         UnsupportedDtype: if `sql` is undeclared, or has no pandas representation
-            (uuid, bitmap, geometry, geography)
+            (bitmap, geometry, geography)
     """
     return require_dtype_capability(sql, 'pandas', 'dtype_from_sql').pandas
 
