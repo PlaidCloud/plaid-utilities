@@ -3037,7 +3037,7 @@ class TestVectorDistanceStarrocks(StarrocksTest):
 
 
 class TestVectorDistanceRefusesOtherDialects(unittest.TestCase):
-    """Only StarRocks is wired (epic 30343 D3). Every other dialect must refuse
+    """StarRocks and Snowflake are wired (epic 30343 D3, sc-30898). Every other dialect must refuse
     by name rather than emit an unverified formula -- including 'default', which
     is what a bare str(query) compiles against.
 
@@ -3063,9 +3063,60 @@ class TestVectorDistanceRefusesOtherDialects(unittest.TestCase):
         return str(ctx.exception)
 
     def test_every_other_dialect_names_itself_in_the_refusal(self):
-        for dialect_name in ('databend', 'snowflake', 'databricks', 'duckdb', 'greenplum', 'default'):
+        # 'snowflake' is deliberately absent: it has its own variant (sc-30898). A
+        # DefaultDialect with its `name` set to 'snowflake' dispatches to that variant,
+        # so leaving it here would pin the opposite of what ships.
+        for dialect_name in ('databend', 'databricks', 'duckdb', 'greenplum', 'default'):
             with self.subTest(dialect=dialect_name):
                 self.assertIn(repr(dialect_name), self._refusal(dialect_name))
 
     def test_the_refusal_says_why(self):
-        self.assertIn('StarRocks-only', self._refusal('databend'))
+        self.assertIn('StarRocks and Snowflake only', self._refusal('databend'))
+
+
+class TestVectorDistanceSnowflake(SnowflakeTest):
+    """sc-30898. Tier 1 only: these pin the string this author wrote against
+    Snowflake's published function reference. They cannot tell a distance from its
+    square -- only Tier 2, run against a live Snowflake account, can, and there is no
+    Snowflake connection on any tenant yet
+    (test_vector_distance_conformance.SnowflakeVectorDistanceConformance)."""
+
+    def _sql(self, metric):
+        expr = sqlalchemy.func.vector_distance(metric, sqlalchemy.column('a'), sqlalchemy.column('b'))
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_cosine_is_one_minus_snowflakes_similarity(self):
+        self.assertEqual('(1 - vector_cosine_similarity(a, b))', self._sql('cosine'))
+
+    def test_the_cosine_group_survives_enclosing_arithmetic(self):
+        vd = sqlalchemy.func.vector_distance('cosine', sqlalchemy.column('a'), sqlalchemy.column('b'))
+        inner = '(1 - vector_cosine_similarity(a, b))'
+        for label, expr, expected in (
+            ('scaled', vd * 2, f'{inner} * 2'),
+            ('similarity round trip', 1 - vd, f'1 - {inner}'),
+            ('negated', -vd, f'-{inner}'),
+        ):
+            with self.subTest(composition=label):
+                self.assertEqual(expected, str(expr.compile(
+                    dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+    def test_l2_is_not_wrapped_in_sqrt(self):
+        # The mirror of the StarRocks pin, and the reason the two branches cannot share
+        # a rendering: VECTOR_L2_DISTANCE is already a true Euclidean distance, so a
+        # sqrt() here would make every threshold wrong by a square root while leaving
+        # every ranking test green.
+        self.assertEqual('vector_l2_distance(a, b)', self._sql('l2'))
+        self.assertNotIn('sqrt', self._sql('l2'))
+
+    def test_neither_metric_masks_a_null_distance(self):
+        for metric in sf.VECTOR_DISTANCE_METRICS:
+            with self.subTest(metric=metric):
+                sql = self._sql(metric).upper()
+                for masker in ('COALESCE', 'IFNULL', 'ISNULL(', 'NVL', 'NULLIF',
+                               'IS NULL', 'IF(', 'CASE WHEN'):
+                    self.assertNotIn(masker, sql)
+
+    def test_an_unknown_metric_is_refused_by_name(self):
+        with self.assertRaises(CompileError) as ctx:
+            self._sql('inner_product')
+        self.assertIn('inner_product', str(ctx.exception))

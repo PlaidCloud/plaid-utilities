@@ -2846,10 +2846,17 @@ st_makepolygon = _register_geom_fn(
 # thresholds and displayed scores break even though ranking survives; for
 # normalized embeddings cosine ranking is identical to inner product anyway.
 #
-# StarRocks is the only engine wired (epic 30343 D3, and `vector` compiles to
-# ARRAY<FLOAT> on StarRocks alone), so the DEFAULT rendering refuses rather than
-# emitting an unverified formula: a dispatch table of guessed spellings would be
-# permanently green in Tier 1 and wrong on first contact with the warehouse.
+# StarRocks and Snowflake are the wired engines (epic 30343 D3 plus sc-30898);
+# every other DEFAULT rendering refuses rather than emitting an unverified
+# formula: a dispatch table of guessed spellings would be permanently green in
+# Tier 1 and wrong on first contact with the warehouse. Databricks is excluded
+# deliberately -- it has no native cosine or L2 over arrays at all -- and
+# Databend's v1 engine is retiring.
+#
+# 🚨 The two engines' native functions are NOT symmetric. StarRocks'
+# `l2_distance` returns the SQUARE and is wrapped in sqrt(); Snowflake's
+# `VECTOR_L2_DISTANCE` is already a true distance and must NOT be. Snowflake
+# also accepts only VECTOR-typed operands, where StarRocks compares arrays.
 #
 # 🚨 l2 wraps l2_distance in sqrt(). StarRocks' l2_distance returns SQUARED
 # Euclidean distance under a name that says distance — verified live on
@@ -2896,7 +2903,8 @@ class vector_distance(GenericFunction):
 def compile_vector_distance(element, compiler, **kw):
     raise CompileError(
         f'vector_distance has no verified {compiler.dialect.name!r} rendering; the vector '
-        'dtype is StarRocks-only (epic 30343 D3), and PlaidVector refuses every other dialect'
+        'dtype is StarRocks and Snowflake only (epic 30343 D3, sc-30898), and PlaidVector '
+        'refuses every other dialect'
     )
 
 
@@ -2925,6 +2933,41 @@ def compile_vector_distance_starrocks(element, compiler, **kw):
         return compiler.process((1 - func.cosine_similarity(left, right)).self_group(), **kw)
     if metric == 'l2':
         return compiler.process(func.sqrt(func.l2_distance(left, right)), **kw)
+    raise CompileError(
+        f'vector_distance metric {metric!r} is not one of {VECTOR_DISTANCE_METRICS}; '
+        'inner product is excluded because it is not a distance on unnormalized vectors'
+    )
+
+
+@compiles(vector_distance, 'snowflake')
+def compile_vector_distance_snowflake(element, compiler, **kw):
+    """Snowflake's own vector functions (sc-30898).
+
+    🚨 Both operands must be VECTOR-typed. Snowflake's VECTOR_* functions reject an
+    ARRAY outright ("Invalid argument types"), so a query vector composed as an array
+    literal has to be cast -- `[...]::VECTOR(FLOAT, n)` -- before it reaches here.
+    `vector_search._query_vector` is what does that, and is the only caller; a stored
+    `vector` column needs nothing, being `VECTOR(FLOAT, n)` already
+    (`PlaidVector.load_dialect_impl`).
+
+    🚨 No sqrt() on the l2 branch, unlike StarRocks. VECTOR_L2_DISTANCE is a TRUE
+    Euclidean distance per Snowflake's function reference, where StarRocks'
+    same-named-looking `l2_distance` returns the SQUARE (measured, sc-30350). Wrapping
+    it here would make every Snowflake threshold and displayed number wrong by a square
+    root -- the mirror image of the StarRocks defect, and just as invisible to a
+    ranking test.
+    """
+    metric, left, right = list(element.clauses)
+    metric = metric.effective_value
+    if metric == 'cosine':
+        # 🚨 self_group() for the same reason the StarRocks branch needs it, which is not
+        # tidiness: un-grouped, SQLAlchemy treats the outer element as a Function of
+        # maximum precedence and declines to parenthesize, so `1 - x` mis-associates
+        # inside any enclosing arithmetic and the similarity round trip comes back with
+        # its sign flipped. Nothing about that is engine-specific.
+        return compiler.process((1 - func.vector_cosine_similarity(left, right)).self_group(), **kw)
+    if metric == 'l2':
+        return compiler.process(func.vector_l2_distance(left, right), **kw)
     raise CompileError(
         f'vector_distance metric {metric!r} is not one of {VECTOR_DISTANCE_METRICS}; '
         'inner product is excluded because it is not a distance on unnormalized vectors'
