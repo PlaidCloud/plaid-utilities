@@ -186,14 +186,25 @@ def reference_distance(metric, a, b):
     raise AssertionError(f'no reference implementation for metric {metric!r}')
 
 
-def distance_sql(metric, a, b):
-    """The canonical expression itself, compiled for StarRocks -- not a hand-written
-    query, so the live tier verifies what callers actually emit."""
+#: How each engine spells a vector literal. Snowflake's VECTOR_* functions reject an
+#: ARRAY outright, so a Snowflake operand is CAST to VECTOR(FLOAT, n) -- the same cast
+#: `vector_search._query_vector` emits for a query vector, and the reason a width is
+#: part of the type there (sc-30898).
+_VECTOR_LITERAL_SQL = {
+    'starrocks': lambda values: 'CAST([{}] AS ARRAY<FLOAT>)'.format(
+        ', '.join(repr(float(v)) for v in values)),
+    'snowflake': lambda values: 'CAST([{}] AS VECTOR(FLOAT, {}))'.format(
+        ', '.join(repr(float(v)) for v in values), len(values)),
+}
+
+
+def distance_sql(metric, a, b, dialect_name='starrocks'):
+    """The canonical expression itself, compiled for `dialect_name` -- not a
+    hand-written query, so the live tier verifies what callers actually emit."""
     def literal(values):
-        return sqlalchemy.literal_column(
-            'CAST([{}] AS ARRAY<FLOAT>)'.format(', '.join(repr(float(v)) for v in values)))
+        return sqlalchemy.literal_column(_VECTOR_LITERAL_SQL[dialect_name](values))
     expr = sf.vector_distance(metric, literal(a), literal(b))
-    dialect = sqlalchemy.dialects.registry.load('starrocks')()
+    dialect = sqlalchemy.dialects.registry.load(dialect_name)()
     return str(expr.compile(dialect=dialect, compile_kwargs={'literal_binds': True}))
 
 
@@ -358,6 +369,20 @@ class TestConformanceHarness(unittest.TestCase):
         self.assertGreater(ABSOLUTE_TOLERANCE,
                            abs(MEASURED_CANONICAL_STARROCKS_4_1_3[('identical_768', 'cosine')]))
 
+    def test_the_snowflake_rendering_casts_its_operands_to_vector(self):
+        # Snowflake's VECTOR_* functions reject an ARRAY operand outright, so the cast is
+        # not cosmetic -- and the width in it is why a Snowflake vector column has to
+        # declare one (sc-30898). Pinned here because the live tier that would catch a
+        # wrong cast cannot be run yet.
+        self.assertEqual(
+            '(1 - vector_cosine_similarity(CAST([1.0, 2.0, 3.0] AS VECTOR(FLOAT, 3)), '
+            'CAST([4.0, 5.0, 6.0] AS VECTOR(FLOAT, 3))))',
+            distance_sql('cosine', [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], dialect_name='snowflake'))
+        self.assertEqual(
+            'vector_l2_distance(CAST([1.0, 2.0, 3.0] AS VECTOR(FLOAT, 3)), '
+            'CAST([4.0, 5.0, 6.0] AS VECTOR(FLOAT, 3)))',
+            distance_sql('l2', [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], dialect_name='snowflake'))
+
     def test_an_unmodelled_metric_is_not_silently_skipped(self):
         with self.assertRaises(AssertionError):
             reference_distance('inner_product', [1.0], [2.0])
@@ -376,4 +401,96 @@ class TestStarrocksVectorDistanceLive(unittest.TestCase):  # pragma: no cover - 
                 return conn.execute(sqlalchemy.text(f'SELECT {sql}')).scalar()
 
             failures = conformance_failures(execute, str(version))
+        self.assertEqual([], failures, '\n'.join(failures))
+
+
+# ---------------------------------------------------------------------------
+# Snowflake (sc-30898) -- STRUCTURE ONLY, baseline UNMEASURED
+# ---------------------------------------------------------------------------
+#: 🚨 EMPTY ON PURPOSE, and not a gap someone forgot. There is no Snowflake connection
+#: on any tenant, so not one cell of a Snowflake baseline has been executed, and nothing
+#: here may be cited as engine output. The StarRocks values above are measured; inventing
+#: Snowflake ones by running `reference_distance` would produce a permanently green tier 2
+#: over a formula no warehouse has ever evaluated -- the exact failure this whole module
+#: exists to prevent, one layer down.
+#:
+#: `reference_distance` is NOT a Snowflake reference either. Its maths is engine-neutral,
+#: but its NULL branch models StarRocks' float32 accumulator overflow specifically
+#: (sc-30350, measured), and whether Snowflake's VECTOR_* functions overflow to NULL, to
+#: an error, or not at all is unknown. That is why the class below records rather than
+#: certifies.
+#:
+#: To close this: get a Snowflake account onto a tenant, run the live class, paste the
+#: cells it reports here, and set VERIFIED_SNOWFLAKE_VERSION from the same session.
+MEASURED_CANONICAL_SNOWFLAKE = {}
+
+#: The Snowflake release the baseline above was measured on. None while it is unmeasured.
+VERIFIED_SNOWFLAKE_VERSION = None
+
+#: A separate DSN from the StarRocks one: the two tiers are different engines and are run
+#: from different accounts, and pointing one variable at both would silently run the
+#: StarRocks cases against Snowflake.
+SNOWFLAKE_CONFORMANCE_DSN_ENV = 'PLAID_VECTOR_CONFORMANCE_SNOWFLAKE_DSN'
+
+
+def snowflake_measurements(execute, cases=CASES):
+    """`{(case, metric): value}` for every cell, measured through `execute`.
+
+    Deliberately no diffing: there is nothing verified to diff against yet, and a
+    comparison against a StarRocks-derived expectation would report Snowflake's real
+    behaviour as a failure (or, worse, pass by coincidence).
+    """
+    return {
+        (name, metric): execute(distance_sql(metric, a, b, dialect_name='snowflake'))
+        for name, a, b in cases
+        for metric in sf.VECTOR_DISTANCE_METRICS
+    }
+
+
+@unittest.skipUnless(
+    os.environ.get(SNOWFLAKE_CONFORMANCE_DSN_ENV),
+    f'live Snowflake conformance requires {SNOWFLAKE_CONFORMANCE_DSN_ENV}')
+class TestSnowflakeVectorDistanceLive(unittest.TestCase):  # pragma: no cover - requires a warehouse
+    """Records the Snowflake baseline on its first run; enforces it on every run after.
+
+    The first run FAILS by design, reporting every cell it measured. That is the handoff:
+    a person reads the values, records them in MEASURED_CANONICAL_SNOWFLAKE with the
+    release they came from, and from then on this class is an ordinary regression gate.
+    """
+
+    def test_records_or_enforces_the_baseline(self):
+        engine = sqlalchemy.create_engine(os.environ[SNOWFLAKE_CONFORMANCE_DSN_ENV])
+        with engine.connect() as conn:
+            version = conn.execute(sqlalchemy.text('SELECT CURRENT_VERSION()')).scalar()
+
+            def execute(sql):
+                return conn.execute(sqlalchemy.text(f'SELECT {sql}')).scalar()
+
+            measured = snowflake_measurements(execute)
+
+        if not MEASURED_CANONICAL_SNOWFLAKE:
+            self.fail(
+                f'Snowflake vector_distance baseline is unmeasured. Measured on release '
+                f'{version!r}:\n' + '\n'.join(
+                    f'    {key!r}: {value!r},' for key, value in sorted(
+                        measured.items(), key=lambda item: item[0])
+                ) + '\nRecord these in MEASURED_CANONICAL_SNOWFLAKE and set '
+                'VERIFIED_SNOWFLAKE_VERSION, then re-run.')
+
+        failures = []
+        if _release(version) != VERIFIED_SNOWFLAKE_VERSION:
+            failures.append(
+                f'engine version {version!r} is not the verified '
+                f'{VERIFIED_SNOWFLAKE_VERSION!r}: re-verify the metric semantics live')
+        for key, expected in sorted(MEASURED_CANONICAL_SNOWFLAKE.items()):
+            actual = measured.get(key)
+            if expected is None or actual is None:
+                if expected is not actual:
+                    failures.append(f'{key}: expected {expected!r}, got {actual!r}')
+                continue
+            tolerance = ABSOLUTE_TOLERANCE + RELATIVE_TOLERANCE * abs(expected)
+            if abs(float(actual) - expected) > tolerance:
+                failures.append(
+                    f'{key}: expected {expected!r}, got {actual!r} '
+                    f'(difference {abs(float(actual) - expected)!r} exceeds {tolerance!r})')
         self.assertEqual([], failures, '\n'.join(failures))
