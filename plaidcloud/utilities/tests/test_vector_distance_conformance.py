@@ -195,6 +195,12 @@ _VECTOR_LITERAL_SQL = {
         ', '.join(repr(float(v)) for v in values)),
     'snowflake': lambda values: 'CAST([{}] AS VECTOR(FLOAT, {}))'.format(
         ', '.join(repr(float(v)) for v in values), len(values)),
+    # 🚨 `array(...)`, not `[...]`: Databricks SQL has no bracket array literal. And the
+    # cast is not cosmetic -- an unsuffixed numeric literal is DECIMAL there, so
+    # `array(1.0, 2.0)` is `ARRAY<DECIMAL(2,1)>`, which the vector builtins reject.
+    # `vector_search._query_vector` emits exactly this shape (sc-30921).
+    'databricks': lambda values: 'CAST(array({}) AS ARRAY<FLOAT>)'.format(
+        ', '.join(repr(float(v)) for v in values)),
 }
 
 
@@ -383,6 +389,31 @@ class TestConformanceHarness(unittest.TestCase):
             'CAST([4.0, 5.0, 6.0] AS VECTOR(FLOAT, 3)))',
             distance_sql('l2', [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], dialect_name='snowflake'))
 
+    def test_the_databricks_rendering_casts_its_operands_to_array_of_float(self):
+        # Two independent reasons the cast is load-bearing, both of which make this the
+        # difference between a query and no query on Databricks: there is no bracket
+        # array literal in its SQL at all, and an unsuffixed numeric literal is DECIMAL,
+        # so `array(1.0, 2.0, 3.0)` is ARRAY<DECIMAL(2,1)> and the vector builtins reject
+        # it. Pinned here because the live tier that would catch a wrong cast cannot be
+        # run -- there is no reachable Databricks warehouse (sc-30921).
+        self.assertEqual(
+            '(1 - vector_cosine_similarity(CAST(array(1.0, 2.0, 3.0) AS ARRAY<FLOAT>), '
+            'CAST(array(4.0, 5.0, 6.0) AS ARRAY<FLOAT>)))',
+            distance_sql('cosine', [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], dialect_name='databricks'))
+        self.assertEqual(
+            'vector_l2_distance(CAST(array(1.0, 2.0, 3.0) AS ARRAY<FLOAT>), '
+            'CAST(array(4.0, 5.0, 6.0) AS ARRAY<FLOAT>))',
+            distance_sql('l2', [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], dialect_name='databricks'))
+
+    def test_the_databricks_baseline_is_unmeasured_and_says_so(self):
+        # A guard against the one way this ships wrong: somebody filling the baseline
+        # from `reference_distance` instead of from a warehouse. If it is ever populated,
+        # the version must be recorded in the same change, from the same session.
+        if MEASURED_CANONICAL_DATABRICKS:
+            self.assertIsNotNone(VERIFIED_DATABRICKS_VERSION)
+        else:
+            self.assertIsNone(VERIFIED_DATABRICKS_VERSION)
+
     def test_an_unmodelled_metric_is_not_silently_skipped(self):
         with self.assertRaises(AssertionError):
             reference_distance('inner_product', [1.0], [2.0])
@@ -483,6 +514,110 @@ class TestSnowflakeVectorDistanceLive(unittest.TestCase):  # pragma: no cover - 
                 f'engine version {version!r} is not the verified '
                 f'{VERIFIED_SNOWFLAKE_VERSION!r}: re-verify the metric semantics live')
         for key, expected in sorted(MEASURED_CANONICAL_SNOWFLAKE.items()):
+            actual = measured.get(key)
+            if expected is None or actual is None:
+                if expected is not actual:
+                    failures.append(f'{key}: expected {expected!r}, got {actual!r}')
+                continue
+            tolerance = ABSOLUTE_TOLERANCE + RELATIVE_TOLERANCE * abs(expected)
+            if abs(float(actual) - expected) > tolerance:
+                failures.append(
+                    f'{key}: expected {expected!r}, got {actual!r} '
+                    f'(difference {abs(float(actual) - expected)!r} exceeds {tolerance!r})')
+        self.assertEqual([], failures, '\n'.join(failures))
+
+
+# ---------------------------------------------------------------------------
+# Databricks (sc-30921) -- STRUCTURE ONLY, baseline UNMEASURED
+# ---------------------------------------------------------------------------
+#: 🚨 EMPTY ON PURPOSE, for the same reason MEASURED_CANONICAL_SNOWFLAKE is, and with a
+#: sharper reason on top: there is no reachable Databricks warehouse at all.
+#: `databricks-test` on paul-dev answers `auth_failed` ("Invalid access token"), there is
+#: no passthrough path that would run a query through a connection anyway, and no tenant
+#: runs a Databricks lakehouse. So not one cell here has been executed and nothing in it
+#: may be cited as engine output. Running `reference_distance` to fill it would produce a
+#: permanently green Tier 2 over a formula no warehouse has evaluated -- the exact failure
+#: this module exists to prevent.
+#:
+#: `reference_distance` is not a Databricks reference either: its NULL branch models
+#: StarRocks' float32 accumulator overflow (sc-30350, measured). Databricks' documented
+#: NULL cases are different ones -- NULL input, a NULL element, an empty or zero-magnitude
+#: vector -- and whether its accumulator overflows to NULL is unknown. That is why the
+#: class below records rather than certifies.
+#:
+#: To close this: get a Databricks warehouse on DBR >= 18.1 reachable with a working
+#: token, run the live class, paste the cells it reports here, and set
+#: VERIFIED_DATABRICKS_VERSION from the same session.
+MEASURED_CANONICAL_DATABRICKS = {}
+
+#: The Databricks release the baseline above was measured on. None while it is unmeasured.
+#: 🚨 This is also the only place a DBR version is written down anywhere in the stack.
+#: Nothing probes a warehouse's runtime version, so the DBR >= 18.1 requirement of
+#: `vector_cosine_similarity`/`vector_l2_distance` is NOT gated: a pre-18.1 warehouse
+#: fails at query time on an unknown function. Recording a version here does not create
+#: a gate -- it annotates a run, the same way VERIFIED_STARROCKS_VERSION does.
+VERIFIED_DATABRICKS_VERSION = None
+
+#: Its own DSN, separate from the StarRocks and Snowflake ones: three different engines
+#: run from three different accounts, and one variable pointed at several would silently
+#: run one engine's cases against another.
+DATABRICKS_CONFORMANCE_DSN_ENV = 'PLAID_VECTOR_CONFORMANCE_DATABRICKS_DSN'
+
+
+def databricks_measurements(execute, cases=CASES):
+    """`{(case, metric): value}` for every cell, measured through `execute`.
+
+    Deliberately no diffing, for the reason `snowflake_measurements` has none: there is
+    nothing verified to diff against, and a StarRocks-derived expectation would report
+    Databricks' real behaviour as a failure or pass by coincidence.
+    """
+    return {
+        (name, metric): execute(distance_sql(metric, a, b, dialect_name='databricks'))
+        for name, a, b in cases
+        for metric in sf.VECTOR_DISTANCE_METRICS
+    }
+
+
+@unittest.skipUnless(
+    os.environ.get(DATABRICKS_CONFORMANCE_DSN_ENV),
+    f'live Databricks conformance requires {DATABRICKS_CONFORMANCE_DSN_ENV}')
+class TestDatabricksVectorDistanceLive(unittest.TestCase):  # pragma: no cover - requires a warehouse
+    """Records the Databricks baseline on its first run; enforces it on every run after.
+
+    The first run FAILS by design, reporting every cell it measured. That is the handoff:
+    a person reads the values, records them in MEASURED_CANONICAL_DATABRICKS with the
+    release they came from, and from then on this class is an ordinary regression gate.
+
+    Nobody has run it. The warehouse it needs does not exist yet (see
+    MEASURED_CANONICAL_DATABRICKS), so what ships is the structure and the handoff, not a
+    measurement.
+    """
+
+    def test_records_or_enforces_the_baseline(self):
+        engine = sqlalchemy.create_engine(os.environ[DATABRICKS_CONFORMANCE_DSN_ENV])
+        with engine.connect() as conn:
+            version = conn.execute(sqlalchemy.text('SELECT current_version().dbr_version')).scalar()
+
+            def execute(sql):
+                return conn.execute(sqlalchemy.text(f'SELECT {sql}')).scalar()
+
+            measured = databricks_measurements(execute)
+
+        if not MEASURED_CANONICAL_DATABRICKS:
+            self.fail(
+                f'Databricks vector_distance baseline is unmeasured. Measured on DBR '
+                f'{version!r}:\n' + '\n'.join(
+                    f'    {key!r}: {value!r},' for key, value in sorted(
+                        measured.items(), key=lambda item: item[0])
+                ) + '\nRecord these in MEASURED_CANONICAL_DATABRICKS and set '
+                'VERIFIED_DATABRICKS_VERSION, then re-run.')
+
+        failures = []
+        if _release(version) != VERIFIED_DATABRICKS_VERSION:
+            failures.append(
+                f'engine version {version!r} is not the verified '
+                f'{VERIFIED_DATABRICKS_VERSION!r}: re-verify the metric semantics live')
+        for key, expected in sorted(MEASURED_CANONICAL_DATABRICKS.items()):
             actual = measured.get(key)
             if expected is None or actual is None:
                 if expected is not actual:

@@ -55,6 +55,11 @@ class SnowflakeTest(BaseTest):
     dialect = 'snowflake'
 
 
+class DatabricksTest(BaseTest):
+
+    dialect = 'databricks'
+
+
 class TestImportCol(BaseTest):
 
     def test_import_col_text(self):
@@ -3037,7 +3042,8 @@ class TestVectorDistanceStarrocks(StarrocksTest):
 
 
 class TestVectorDistanceRefusesOtherDialects(unittest.TestCase):
-    """StarRocks and Snowflake are wired (epic 30343 D3, sc-30898). Every other dialect must refuse
+    """StarRocks, Snowflake and Databricks are wired (epic 30343 D3, sc-30898, sc-30921).
+    Every other dialect must refuse
     by name rather than emit an unverified formula -- including 'default', which
     is what a bare str(query) compiles against.
 
@@ -3063,15 +3069,16 @@ class TestVectorDistanceRefusesOtherDialects(unittest.TestCase):
         return str(ctx.exception)
 
     def test_every_other_dialect_names_itself_in_the_refusal(self):
-        # 'snowflake' is deliberately absent: it has its own variant (sc-30898). A
-        # DefaultDialect with its `name` set to 'snowflake' dispatches to that variant,
-        # so leaving it here would pin the opposite of what ships.
-        for dialect_name in ('databend', 'databricks', 'duckdb', 'greenplum', 'default'):
+        # 'snowflake' and 'databricks' are deliberately absent: each has its own variant
+        # (sc-30898, sc-30921). A DefaultDialect with its `name` set to one of them
+        # dispatches to that variant, so leaving it here would pin the opposite of what
+        # ships.
+        for dialect_name in ('databend', 'duckdb', 'greenplum', 'default'):
             with self.subTest(dialect=dialect_name):
                 self.assertIn(repr(dialect_name), self._refusal(dialect_name))
 
     def test_the_refusal_says_why(self):
-        self.assertIn('StarRocks and Snowflake only', self._refusal('databend'))
+        self.assertIn('StarRocks, Snowflake and Databricks only', self._refusal('databend'))
 
 
 class TestVectorDistanceSnowflake(SnowflakeTest):
@@ -3107,6 +3114,56 @@ class TestVectorDistanceSnowflake(SnowflakeTest):
         # every ranking test green.
         self.assertEqual('vector_l2_distance(a, b)', self._sql('l2'))
         self.assertNotIn('sqrt', self._sql('l2'))
+
+
+class TestVectorDistanceDatabricks(DatabricksTest):
+    """sc-30921. Tier 1 only: these pin the string this author wrote against the
+    Databricks SQL function reference. They cannot tell a distance from its square --
+    only Tier 2, run against a live Databricks warehouse, can, and there is none:
+    `databricks-test` on paul-dev answers `auth_failed` and no tenant runs a Databricks
+    lakehouse (test_vector_distance_conformance.TestDatabricksVectorDistanceLive)."""
+
+    def _sql(self, metric):
+        expr = sqlalchemy.func.vector_distance(metric, sqlalchemy.column('a'), sqlalchemy.column('b'))
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={"literal_binds": True}))
+
+    def test_cosine_is_one_minus_databricks_own_similarity(self):
+        self.assertEqual('(1 - vector_cosine_similarity(a, b))', self._sql('cosine'))
+
+    def test_the_cosine_group_survives_enclosing_arithmetic(self):
+        vd = sqlalchemy.func.vector_distance('cosine', sqlalchemy.column('a'), sqlalchemy.column('b'))
+        inner = '(1 - vector_cosine_similarity(a, b))'
+        for label, expr, expected in (
+            ('scaled', vd * 2, f'{inner} * 2'),
+            ('similarity round trip', 1 - vd, f'1 - {inner}'),
+            ('negated', -vd, f'-{inner}'),
+        ):
+            with self.subTest(composition=label):
+                self.assertEqual(expected, str(expr.compile(
+                    dialect=self.eng.dialect, compile_kwargs={"literal_binds": True})))
+
+    def test_l2_is_not_wrapped_in_sqrt(self):
+        # Databricks' vector_l2_distance is a true Euclidean distance, like Snowflake's
+        # and unlike StarRocks' squared l2_distance. A sqrt() here would leave every
+        # ranking test green and every threshold wrong by a square root.
+        self.assertEqual('vector_l2_distance(a, b)', self._sql('l2'))
+        self.assertNotIn('sqrt', self._sql('l2'))
+
+    def test_neither_metric_masks_a_null_distance(self):
+        # NULL input, a NULL element, an empty vector or a zero-magnitude vector all
+        # return NULL from these builtins. Masking that here would turn a visible NULL
+        # into an invisible wrong answer; the ORDER BY guard belongs to the search step.
+        for metric in sf.VECTOR_DISTANCE_METRICS:
+            with self.subTest(metric=metric):
+                sql = self._sql(metric).upper()
+                for masker in ('COALESCE', 'IFNULL', 'ISNULL(', 'NVL', 'NULLIF',
+                               'IS NULL', 'IF(', 'CASE WHEN'):
+                    self.assertNotIn(masker, sql)
+
+    def test_an_unknown_metric_is_refused_by_name(self):
+        with self.assertRaises(CompileError) as ctx:
+            self._sql('inner_product')
+        self.assertIn('inner_product', str(ctx.exception))
 
     def test_neither_metric_masks_a_null_distance(self):
         for metric in sf.VECTOR_DISTANCE_METRICS:
