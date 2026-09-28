@@ -2,7 +2,7 @@
 
 ## 1.41.0
 
-- `stringtransforms` (`apply_variables`, `replaceTags`) and the `SCHEMA_PREFIX`/`TABLE_PREFIX` constants now live in plaidcloud-rpc 1.19.0 (`plaidcloud.rpc.stringtransforms`, `plaidcloud.rpc.identifiers`) and are re-exported from `plaidcloud.utilities.stringtransforms` and `plaidcloud.utilities.query`, so every existing import keeps working. `sql_expression` had its own second copy of `SCHEMA_PREFIX`, which now imports the one. A service that only substitutes variables or recognises a table id can depend on plaidcloud-rpc alone, without the pandas and numpy this package requires. Requires `plaidcloud-rpc>=1.19.0` ([sc-30827](https://app.shortcut.com/plaidcloud/story/30827)) ([@rad-pat](https://github.com/rad-pat)).
+- `stringtransforms` (`apply_variables`, `replaceTags`) and the `SCHEMA_PREFIX`/`TABLE_PREFIX` constants now live in plaidcloud-rpc 1.19.0 (`plaidcloud.rpc.stringtransforms`, `plaidcloud.rpc.identifiers`) and are re-exported from `plaidcloud.utilities.stringtransforms` and `plaidcloud.utilities.query`, so every existing import keeps working. `sql_expression`'s own second copy of `SCHEMA_PREFIX`, which nothing read, is gone. A service that only substitutes variables or recognises a table id can depend on plaidcloud-rpc alone, without the pandas and numpy this package requires. Requires `plaidcloud-rpc>=1.19.0`, the `full` extra included ([sc-30827](https://app.shortcut.com/plaidcloud/story/30827)) ([@rad-pat](https://github.com/rad-pat)).
 
 ## 1.40.0
 
