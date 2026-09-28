@@ -2846,17 +2846,28 @@ st_makepolygon = _register_geom_fn(
 # thresholds and displayed scores break even though ranking survives; for
 # normalized embeddings cosine ranking is identical to inner product anyway.
 #
-# StarRocks and Snowflake are the wired engines (epic 30343 D3 plus sc-30898);
-# every other DEFAULT rendering refuses rather than emitting an unverified
-# formula: a dispatch table of guessed spellings would be permanently green in
-# Tier 1 and wrong on first contact with the warehouse. Databricks is excluded
-# deliberately -- it has no native cosine or L2 over arrays at all -- and
-# Databend's v1 engine is retiring.
+# StarRocks, Snowflake and Databricks are the wired engines (epic 30343 D3 plus
+# sc-30898 and sc-30921); every other DEFAULT rendering refuses rather than
+# emitting an unverified formula: a dispatch table of guessed spellings would be
+# permanently green in Tier 1 and wrong on first contact with the warehouse.
+# Databend's v1 engine is retiring, so it gets no arm.
 #
-# 🚨 The two engines' native functions are NOT symmetric. StarRocks'
-# `l2_distance` returns the SQUARE and is wrapped in sqrt(); Snowflake's
-# `VECTOR_L2_DISTANCE` is already a true distance and must NOT be. Snowflake
-# also accepts only VECTOR-typed operands, where StarRocks compares arrays.
+# 🚨 The three engines' native functions are NOT symmetric, and the asymmetry is
+# invisible to a ranking test. StarRocks' `l2_distance` returns the SQUARE and is
+# wrapped in sqrt(); Snowflake's `VECTOR_L2_DISTANCE` and Databricks'
+# `vector_l2_distance` are already true distances and must NOT be. Snowflake
+# accepts only VECTOR-typed operands, where StarRocks and Databricks compare
+# arrays -- but Databricks accepts only `ARRAY<FLOAT>` and errors on
+# `ARRAY<DOUBLE>`/`ARRAY<DECIMAL>`, so an operand it did not read out of a
+# `vector` column has to be cast (`vector_search._query_vector` does that).
+#
+# 🚨 Databricks' vector builtins need DBR >= 18.1. Nothing in this repo or its
+# callers knows a warehouse's runtime version -- there is no probe to gate on and
+# none is invented here -- so a pre-18.1 warehouse fails at query time with an
+# unknown-function error. A composed higher-order fallback over
+# `aggregate`/`zip_with`/`transform` exists if that ever matters, but it is
+# semantically LOOSER: `zip_with` pads the shorter array with nulls, so a length
+# mismatch would return NULL where the builtin raises VECTOR_DIMENSION_MISMATCH.
 #
 # 🚨 l2 wraps l2_distance in sqrt(). StarRocks' l2_distance returns SQUARED
 # Euclidean distance under a name that says distance — verified live on
@@ -2903,8 +2914,8 @@ class vector_distance(GenericFunction):
 def compile_vector_distance(element, compiler, **kw):
     raise CompileError(
         f'vector_distance has no verified {compiler.dialect.name!r} rendering; the vector '
-        'dtype is StarRocks and Snowflake only (epic 30343 D3, sc-30898), and PlaidVector '
-        'refuses every other dialect'
+        'dtype is StarRocks, Snowflake and Databricks only (epic 30343 D3, sc-30898, '
+        'sc-30921), and PlaidVector refuses every other dialect'
     )
 
 
@@ -2961,6 +2972,45 @@ def compile_vector_distance_snowflake(element, compiler, **kw):
     metric = metric.effective_value
     if metric == 'cosine':
         # 🚨 self_group() for the same reason the StarRocks branch needs it, which is not
+        # tidiness: un-grouped, SQLAlchemy treats the outer element as a Function of
+        # maximum precedence and declines to parenthesize, so `1 - x` mis-associates
+        # inside any enclosing arithmetic and the similarity round trip comes back with
+        # its sign flipped. Nothing about that is engine-specific.
+        return compiler.process((1 - func.vector_cosine_similarity(left, right)).self_group(), **kw)
+    if metric == 'l2':
+        return compiler.process(func.vector_l2_distance(left, right), **kw)
+    raise CompileError(
+        f'vector_distance metric {metric!r} is not one of {VECTOR_DISTANCE_METRICS}; '
+        'inner product is excluded because it is not a distance on unnormalized vectors'
+    )
+
+
+@compiles(vector_distance, 'databricks')
+def compile_vector_distance_databricks(element, compiler, **kw):
+    """Databricks' own vector builtins (sc-30921).
+
+    🚨 Both operands must be `ARRAY<FLOAT>`. `ARRAY<DOUBLE>` and `ARRAY<DECIMAL>` are
+    errors, not slower renderings -- and an unsuffixed SQL numeric literal is DECIMAL on
+    Databricks, so an array literal composed in text is rejected until it is cast.
+    `vector_search._query_vector` emits `CAST(array(...) AS ARRAY<FLOAT>)` for exactly
+    that reason; a stored `vector` column needs nothing, being `ARRAY<FLOAT>` already
+    (`plaidcloud.rpc.database.PlaidVector`).
+
+    🚨 No sqrt() on the l2 branch, same as Snowflake and unlike StarRocks.
+    `vector_l2_distance` is a TRUE Euclidean distance per the Databricks SQL function
+    reference, where StarRocks' same-named-looking `l2_distance` returns the SQUARE
+    (measured, sc-30350). A sqrt() here would leave every ranking green and every
+    threshold and displayed number wrong by a square root.
+
+    🚨 DBR >= 18.1. Nothing knows a warehouse's runtime version, so this renders
+    unconditionally and a pre-18.1 warehouse fails at query time on an unknown function
+    rather than being refused up front. See the module comment above for the fallback
+    that was deliberately not written and why it would be looser.
+    """
+    metric, left, right = list(element.clauses)
+    metric = metric.effective_value
+    if metric == 'cosine':
+        # 🚨 self_group() for the reason both sibling branches need it, which is not
         # tidiness: un-grouped, SQLAlchemy treats the outer element as a Function of
         # maximum precedence and declines to parenthesize, so `1 - x` mis-associates
         # inside any enclosing arithmetic and the similarity round trip comes back with
