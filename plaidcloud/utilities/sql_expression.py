@@ -14,7 +14,6 @@ import sqlalchemy
 import sqlalchemy.orm
 from sqlalchemy.sql import visitors
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
-from plaidcloud.rpc.identifiers import SCHEMA_PREFIX
 from plaidcloud.rpc.type_conversion import UnsupportedDtype, require_dtype_capability, sqlalchemy_from_dtype
 from toolz.dicttoolz import assoc, merge, valfilter
 from toolz.functoolz import compose, curry, juxt
