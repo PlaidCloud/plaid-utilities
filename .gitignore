@@ -8,3 +8,5 @@ dim_current/
 flycheck*
 */wingdbstub.py
 .coverage
+coverage.xml
+pytestresult.xml
