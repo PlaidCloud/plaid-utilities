@@ -17,6 +17,7 @@ from urllib3.util.retry import Retry
 from urllib.parse import urlparse, urlunparse
 
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
+from plaidcloud.rpc.identifiers import SCHEMA_PREFIX, TABLE_PREFIX
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
 from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
 from plaidcloud.utilities import data_helpers as dh
@@ -32,8 +33,6 @@ __email__ = 'paul.morel@tartansolutions.com'
 
 
 logger = logging.getLogger(__name__)
-SCHEMA_PREFIX = 'anlz'
-TABLE_PREFIX = 'analyzetable_'
 
 # We must override the default pandas na values to disallow 'NA'.
 # We are doing this by setting our own list, rather than using pandas.io.common._NA_VALUES in
