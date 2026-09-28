@@ -4,6 +4,6 @@
 substituting variables need not install pandas; re-exported for every existing
 `plaidcloud.utilities.stringtransforms` import."""
 
-from plaidcloud.rpc.stringtransforms import apply_variables, replaceTags
+from plaidcloud.rpc.stringtransforms import VariableSubstitutionError, apply_variables, replaceTags
 
-__all__ = ['apply_variables', 'replaceTags']
+__all__ = ['VariableSubstitutionError', 'apply_variables', 'replaceTags']
