@@ -46,7 +46,6 @@ MAGIC_COLUMN_MAPPING = {
 }
 
 CSV_TYPE_DELIMITER = '::'
-SCHEMA_PREFIX = 'anlz'
 table_dot_column_regex = re.compile(r'^table(\d*)\..*')
 
 class SQLExpressionError(Exception):
