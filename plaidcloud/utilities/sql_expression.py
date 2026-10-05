@@ -1246,6 +1246,23 @@ def _columns_in(expressions):
     }
 
 
+AGGREGATE_FUNCTION_NAMES = frozenset({
+    'sum', 'count', 'min', 'max', 'avg', 'mean', 'median', 'stddev', 'stddev_pop', 'stddev_samp',
+    'variance', 'var_pop', 'var_samp', 'bool_and', 'bool_or', 'array_agg', 'string_agg',
+    'group_concat', 'any_value', 'approx_count_distinct', 'percentile_cont', 'percentile_disc',
+})
+
+
+def _has_top_level_aggregate(element):
+    """Whether the built expression contains an aggregate function outside any window (`over`)
+    or scalar subquery, which have their own scope."""
+    if isinstance(element, (sqlalchemy.sql.elements.Over, sqlalchemy.sql.selectable.SelectBase)):
+        return False
+    if isinstance(element, sqlalchemy.sql.functions.FunctionElement) and element.name.lower() in AGGREGATE_FUNCTION_NAMES:
+        return True
+    return any(_has_top_level_aggregate(child) for child in element.get_children())
+
+
 def _dtype_can(dtype, capability):
     """Whether the registry lets `dtype` do `capability`. An unrecognised dtype answers True,
     so this only ever narrows the advice, never the refusal."""
@@ -1539,7 +1556,12 @@ def get_select_query(
             select_query = select_query.group_by(*grouping_columns)
 
     # Build DISTINCT section of our select query
-    if distinct:
+    # With no GROUP BY, a projection holding an aggregate is exactly one row, so DISTINCT is a
+    # no-op; StarRocks rejects `SELECT DISTINCT <aggregate>` without GROUP BY (1064).
+    if distinct and not (
+        not select_query._group_by_clauses
+        and any(_has_top_level_aggregate(column) for column in select_query.selected_columns)
+    ):
         # if any([tc for tc in target_columns if not tc.get('distinct')]):
         #     raise Exception('Distinct cannot be used if all columns are not distinct')
         # every other database way
