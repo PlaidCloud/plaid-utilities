@@ -41,7 +41,6 @@ on:
     paths-ignore:
       - '**/*.rst'
       - '**/*.adoc'
-      - '**/CHANGELOG*'
       - '**/LICENSE*'
       - '**.lock'
       - '**/package-lock.json'

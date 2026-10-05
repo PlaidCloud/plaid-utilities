@@ -95,5 +95,5 @@ infer conventions from the existing code.
 - Tests live in `tests/` mirroring source layout. New behavior needs a test.
 - New runtime dependencies need a justification in the PR description.
 - Public APIs are defined under `src/<pkg>/__init__.py`; changes there are
-  contract changes and need a CHANGELOG entry.
+  contract changes.
 - Database migrations live in `migrations/`; never edit a merged migration.

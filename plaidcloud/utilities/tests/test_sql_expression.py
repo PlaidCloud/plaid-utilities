@@ -1719,6 +1719,42 @@ class TestGetSelectQuery(TestSQLExpression):
             ),
         )
 
+    def _distinct_sql(self, columns, **kwargs):
+        return compiled(se.get_select_query(
+            [self.table], self.source_columns, columns, [], distinct=True, **kwargs,
+        ))[0]
+
+    def test_distinct_skipped_for_aggregate_inside_expression(self):
+        # sc-31634 repro: aggregate=False, the aggregate lives in the expression; StarRocks rejects DISTINCT (1064)
+        rc = {
+            'target': 'RC', 'source': None, 'agg': 'group', 'dtype': 'text',
+            'expression': "func.sum(case((table.Column1 == 'A', 1), else_=0))",
+        }
+        query = self._distinct_sql([rc], aggregate=False)
+        self.assertNotIn('DISTINCT', query)
+        self.assertIn('sum(', query)
+
+    def test_distinct_skipped_for_aggregate_with_constant(self):
+        constant = {'target': 'Five', 'constant': '5', 'dtype': 'numeric'}
+        self.assertNotIn('DISTINCT', self._distinct_sql([self.sum_column_2, constant], aggregate=True))
+
+    def test_distinct_kept_for_windowed_aggregate(self):
+        windowed = {
+            'target': 'W', 'source': None, 'dtype': 'numeric',
+            'expression': 'func.sum(table.Column2).over()',
+        }
+        self.assertIn('SELECT DISTINCT', self._distinct_sql([windowed], aggregate=False))
+
+    def test_distinct_kept_for_plain_column(self):
+        self.assertIn('SELECT DISTINCT', self._distinct_sql([self.distinct_column_1]))
+
+    def test_distinct_kept_for_aggregate_with_group_by(self):
+        self.assertIn('SELECT DISTINCT', self._distinct_sql([self.groupby_column_1, self.sum_column_2], aggregate=True))
+
+    def test_distinct_kept_for_all_constant_projection(self):
+        constant = {'target': 'Five', 'constant': '5', 'dtype': 'numeric'}
+        self.assertIn('SELECT DISTINCT', self._distinct_sql([constant]))
+
     def test_dont_distinct_on_constant(self):
         # constants aren't included in distinct
         distinct_constant = {'target': 'Five', 'constant': '5', 'dtype': 'numeric', 'distinct': True}
