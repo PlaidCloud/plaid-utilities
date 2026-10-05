@@ -1504,6 +1504,29 @@ class TestToCharStarrocks(StarrocksTest):
             expr.compile(dialect=self.eng.dialect, compile_kwargs={"render_postcompile": True})
         self.assertIn('no StarRocks equivalent', str(ctx.exception))
 
+    def test_to_char_digit_mask_matches_databend(self):
+        # sc-31732: frame_update 'RevisedData_' + func.to_char(table.KeyCol, '9').
+        # Databend gives ' 1' for 1, ' #' for 10 and 1000, '-1' for -1, and
+        # rounds half to even. Evaluated on StarRocks 4.1 against Databend's
+        # output for 0/9 masks over INT, DECIMAL, DOUBLE and FLOAT inputs.
+        expr = sqlalchemy.func.to_char(sqlalchemy.column('KeyCol'), '9')
+        rounded = ('CAST(CASE WHEN "KeyCol" - floor("KeyCol") = 0.5 AND floor("KeyCol") % 2 = 0 '
+                   'THEN floor("KeyCol") ELSE floor("KeyCol" + 0.5) END AS BIGINT)')
+        sign = 'CASE WHEN "KeyCol" < 0 THEN \'-\' ELSE \' \' END'
+        digits = f'CAST(abs({rounded}) AS VARCHAR)'
+        self.assertEqual(
+            f"CASE WHEN abs({rounded}) >= 10 THEN concat({sign}, '#') "
+            f"ELSE lpad(concat({sign}, lpad({digits}, greatest(length({digits}), 1), '0')), 2, ' ') END",
+            str(expr.compile(dialect=self.eng.dialect)).replace('`', '"'),
+        )
+
+    def test_to_char_digit_mask_zero_pads_from_the_first_zero(self):
+        # to_char(5, '9909') is '   05' on Databend: two forced digits, five wide.
+        sql = str(sqlalchemy.func.to_char(sqlalchemy.column('c'), '9909').compile(dialect=self.eng.dialect))
+        self.assertIn('>= 10000 THEN concat(', sql)
+        self.assertIn("'####')", sql)
+        self.assertIn("2), '0')), 5, ' ') END", sql)
+
     def test_numeric_mask_refusal_is_derivable(self):
         # The message is importable, not just raised inline, so the epic's
         # Tier-3 derivation can enumerate it (same contract as
