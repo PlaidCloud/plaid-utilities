@@ -1903,6 +1903,26 @@ TO_CHAR_STARROCKS_UNSUPPORTED_NUMERIC_MASK = (
 )
 
 
+def _starrocks_to_char_digit_mask(x, mask):
+    # sc-31732: Databend's to_char for a bare 0/9 mask, value for value — a
+    # sign column ('-' or ' ') then len(mask) digit positions; rounds half to
+    # EVEN (2.5 -> ' 2', 3.5 -> ' 4'); a value too wide for the mask fills it
+    # with '#' (to_char(10, '9') is ' #'); digits from the first '0' onward are
+    # zero-padded, the '9's before it are blank.
+    n = len(mask)
+    zero_width = n - mask.index('0') if '0' in mask else 1
+    rounded = (
+        f"CAST(CASE WHEN {x} - floor({x}) = 0.5 AND floor({x}) % 2 = 0 THEN floor({x}) "
+        f"ELSE floor({x} + 0.5) END AS BIGINT)"
+    )
+    sign = f"CASE WHEN {x} < 0 THEN '-' ELSE ' ' END"
+    digits = f"CAST(abs({rounded}) AS VARCHAR)"
+    return (
+        f"CASE WHEN abs({rounded}) >= {10 ** n} THEN concat({sign}, '{'#' * n}') "
+        f"ELSE lpad(concat({sign}, lpad({digits}, greatest(length({digits}), {zero_width}), '0')), {n + 1}, ' ') END"
+    )
+
+
 @compiles(sql_to_char, 'starrocks')
 def compile_to_char_starrocks(element, compiler, **kw):
     # StarRocks has no Postgres-style to_char. Dates render via date_format
@@ -1918,6 +1938,9 @@ def compile_to_char_starrocks(element, compiler, **kw):
         format_ = format_.effective_value
     else:
         format_ = None
+
+    if format_ is not None and re.fullmatch('[09]+', format_):
+        return _starrocks_to_char_digit_mask(compiler.process(source, **kw), format_)
 
     if format_ is not None and ('0' in format_ or '9' in format_):
         raise CompileError(TO_CHAR_STARROCKS_UNSUPPORTED_NUMERIC_MASK)
