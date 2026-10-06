@@ -2405,8 +2405,12 @@ def _fjm_resolve_column(expr: str, tables_by_alias: dict) -> sqlalchemy.ColumnEl
 
 
 def _fjm_resolve_bound(value, tables_by_alias: dict):
-    """A BETWEEN bound is either a column reference (alias.col) or a primitive literal."""
-    if isinstance(value, str) and _FJM_COLUMN_REF_RE.fullmatch(value):
+    """A BETWEEN bound is either a column reference (alias.col) or a primitive literal. Mirrors
+    the validator's `_is_column_ref`: a `<known alias>.` prefix makes it a column."""
+    if isinstance(value, str) and (
+        _FJM_COLUMN_REF_RE.fullmatch(value)
+        or ('.' in value and value.partition('.')[0] in tables_by_alias)
+    ):
         return _fjm_resolve_column(value, tables_by_alias)
     return sqlalchemy.literal(value)
 

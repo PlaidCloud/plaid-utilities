@@ -532,6 +532,41 @@ class TestRealColumnNamesAndDtypeAliases(unittest.TestCase):
             with self.subTest(name=name):
                 validate_frame_join_multi_config(cfg)  # no raise
 
+    def test_spaced_column_in_a_join_condition_accepted(self):
+        cfg = self._base()
+        cfg['sources'][0]['source_columns'][1]['id'] = 'Customer Id'
+        cfg['sources'][1]['source_columns'][0]['id'] = 'Cust (Id)'
+        cfg['edges'][0]['conditions'][0].update(
+            left_expr='sales.Customer Id', right_expr='cust.Cust (Id)')
+        validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_a_spaced_between_bound_on_a_known_alias_is_a_column(self):
+        # Read as a literal it would pass unchecked and compare against the string itself.
+        cfg = self._base()
+        cfg['edges'][0]['conditions'] = [{
+            'left_expr': 'sales.customer_id', 'operator': 'BETWEEN',
+            'between_low': 'cust.no such col', 'right_expr': 'cust.id',
+        }]
+        with self.assertRaises(JoinMultiValidationError) as ctx:
+            validate_frame_join_multi_config(cfg)
+        self.assertEqual(ctx.exception.reason, 'between_bound_column_unknown')
+
+    def test_a_between_bound_equal_to_an_alias_name_stays_a_literal(self):
+        cfg = self._base()
+        cfg['edges'][0]['conditions'] = [
+            {'left_expr': 'sales.total', 'operator': 'BETWEEN',
+             'between_low': 'cust', 'right_expr': 'sales'},
+            {'left_expr': 'sales.customer_id', 'operator': '=', 'right_expr': 'cust.id'},
+        ]
+        validate_frame_join_multi_config(cfg)  # no raise
+
+    def test_quote_char_in_a_join_condition_rejected(self):
+        cfg = self._base()
+        cfg['edges'][0]['conditions'][0]['right_expr'] = 'cust.id"'
+        with self.assertRaises(JoinMultiValidationError) as ctx:
+            validate_frame_join_multi_config(cfg)
+        self.assertEqual(ctx.exception.reason, 'right_expr_invalid')
+
     def test_spaced_target_name_accepted(self):
         cfg = self._base()
         cfg['target_columns'][0]['target'] = 'Sale Id (primary)'
