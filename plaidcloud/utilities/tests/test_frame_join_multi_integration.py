@@ -79,6 +79,38 @@ class TestValidatorExecutorRoundTrip(unittest.TestCase):
             self.assertEqual(actual_cols, expected_cols,
                              f"alias {s['alias']!r}: columns mismatch")
 
+    def test_spaced_join_key_predicate_compiles_quoted(self):
+        cfg = copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+        cfg['sources'][0]['source_columns'][1]['id'] = 'Customer Id'
+        cfg['edges'][0]['conditions'][0]['left_expr'] = 'sales.Customer Id'
+        validate_frame_join_multi_config(cfg)
+        pred = edge_predicate(cfg['edges'][0], self._build_tables(cfg))
+        self.assertEqual(str(pred.compile()), 'sales."Customer Id" = cust.id')
+
+    def test_spaced_between_bound_compiles_as_a_column(self):
+        cfg = copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+        cfg['sources'][1]['source_columns'].append({'id': 'Max Id', 'dtype': 'text'})
+        cfg['edges'][0]['conditions'] = [{
+            'left_expr': 'sales.customer_id', 'operator': 'BETWEEN',
+            'between_low': 'cust.id', 'right_expr': 'cust.Max Id',
+        }]
+        validate_frame_join_multi_config(cfg)
+        pred = edge_predicate(cfg['edges'][0], self._build_tables(cfg))
+        self.assertEqual(
+            str(pred.compile()), 'sales.customer_id BETWEEN cust.id AND cust."Max Id"')
+
+    def test_a_between_bound_equal_to_an_alias_name_compiles_as_a_literal(self):
+        cfg = copy.deepcopy(_strip_meta(FIXTURES['valid_two_source_inner']))
+        cfg['edges'][0]['conditions'].append({
+            'left_expr': 'sales.total', 'operator': 'BETWEEN',
+            'between_low': 'cust', 'right_expr': 'sales',
+        })
+        validate_frame_join_multi_config(cfg)
+        pred = edge_predicate(cfg['edges'][0], self._build_tables(cfg))
+        self.assertIn(
+            "sales.total BETWEEN 'cust' AND 'sales'",
+            str(pred.compile(compile_kwargs={'literal_binds': True})))
+
     def test_valid_three_source_tree_predicate_compiles(self):
         cfg = _strip_meta(FIXTURES['valid_three_source_tree'])
         validate_frame_join_multi_config(cfg)

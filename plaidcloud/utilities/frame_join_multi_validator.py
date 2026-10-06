@@ -117,8 +117,13 @@ _COLUMN_ID_FORBIDDEN = re.compile(r'[\x00-\x1f"`\\]')
 _MAX_COLUMN_ID_LEN = 255
 
 
-def _is_column_ref(value) -> bool:
-    return isinstance(value, str) and _COLUMN_REF_RE.fullmatch(value) is not None
+def _is_column_ref(value, aliases) -> bool:
+    """Whether a BETWEEN bound names a column rather than a string literal: identifier-shaped,
+    or `<known alias>.<anything>` — so a spaced column is not silently read as a literal."""
+    if not isinstance(value, str):
+        return False
+    alias, dot, _ = value.partition('.')
+    return _COLUMN_REF_RE.fullmatch(value) is not None or (bool(dot) and alias in aliases)
 
 
 def _column_id_ok(value) -> bool:
@@ -127,6 +132,16 @@ def _column_id_ok(value) -> bool:
         and 0 < len(value) <= _MAX_COLUMN_ID_LEN
         and _COLUMN_ID_FORBIDDEN.search(value) is None
     )
+
+
+def _is_condition_column(value) -> bool:
+    """An edge condition's `alias.column` operand. The column half is a real column name, so it
+    passes the same gate as a source column id — `t1.Build Plant` resolves and quotes exactly
+    like the `Build Plant` its source declares."""
+    if not isinstance(value, str):
+        return False
+    alias, dot, col = value.partition('.')
+    return bool(dot) and _ALIAS_RE.fullmatch(alias) is not None and _column_id_ok(col)
 
 
 _DTYPE_CONTEXT = 'a frame_join_multi config'
@@ -431,7 +446,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
                 _err('operator_invalid', f'{cfield}.operator')
 
             left_expr = c.get('left_expr')
-            if not isinstance(left_expr, str) or not _COLUMN_REF_RE.fullmatch(left_expr):
+            if not _is_condition_column(left_expr):
                 _err('left_expr_invalid', f'{cfield}.left_expr')
             left_alias, left_col = left_expr.split('.', 1)
             if left_alias not in aliases_set:
@@ -450,7 +465,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
             elif op == 'BETWEEN':
                 # item 8: BETWEEN over two literals is a filter, not a join key -- only a
                 # column-ref bound makes the left side one.
-                if any(_is_column_ref(b) for b in (c.get('between_low'), c.get('right_expr'))):
+                if any(_is_column_ref(b, aliases_set) for b in (c.get('between_low'), c.get('right_expr'))):
                     _require_joinable(alias_to_dtypes, left_alias, left_col,
                                       'left_expr_dtype_not_joinable', f'{cfield}.left_expr')
                 _validate_between_bound(c.get('between_low'), aliases_set,
@@ -462,7 +477,7 @@ def validate_frame_join_multi_config(config: dict, dialect: str | None = None) -
             else:
                 # Binary column-to-column operators
                 right_expr = c.get('right_expr')
-                if not isinstance(right_expr, str) or not _COLUMN_REF_RE.fullmatch(right_expr):
+                if not _is_condition_column(right_expr):
                     _err('right_expr_invalid', f'{cfield}.right_expr')
                 right_alias, right_col = right_expr.split('.', 1)
                 if right_alias not in aliases_set:
@@ -677,7 +692,7 @@ def _validate_pattern(pattern, field):
 def _validate_between_bound(bound, aliases_set, alias_to_dtypes, field, aliases_seen_in_edge):
     """A BETWEEN bound is either a column ref (alias.col) or a primitive literal."""
     if isinstance(bound, str):
-        if _COLUMN_REF_RE.fullmatch(bound):
+        if _is_column_ref(bound, aliases_set):
             alias, col = bound.split('.', 1)
             if alias not in aliases_set:
                 _err('between_bound_alias_unknown', field)
