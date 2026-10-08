@@ -961,6 +961,17 @@ class Result(object):
         }
 
 
+def _float(precision=None, asdecimal=False, decimal_return_scale=None):
+    """`Float` in an expression is 64-bit (sc-31931); only an explicit precision <= 24 asks for 32-bit.
+
+    Not `sqlalchemy.Double` itself: the MySQL-derived StarRocks dialect rejects `Double(53)`
+    at compile ("specify both precision and scale"), where `Float(53)` used to compile.
+    """
+    if precision is not None and precision <= 24:
+        return sqlalchemy.Float(precision, asdecimal, decimal_return_scale)
+    return sqlalchemy.Double(asdecimal=asdecimal, decimal_return_scale=decimal_return_scale)
+
+
 def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, table_numbering_start: int = 1, tables_by_alias: dict|None = None):
     """Returns a dict of 'builtins' and table accessor variables for user
     written expressions."""
@@ -996,9 +1007,9 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
         'bigint': sqlalchemy.BIGINT,
         'Bigint': sqlalchemy.BIGINT,
         'BIGINT': sqlalchemy.BIGINT,
-        'float': sqlalchemy.Float,
-        'Float': sqlalchemy.Float,
-        'FLOAT': sqlalchemy.Float,
+        'float': _float,
+        'Float': _float,
+        'FLOAT': _float,
         'integer': sqlalchemy.INTEGER,
         'Integer': sqlalchemy.INTEGER,
         'INTEGER': sqlalchemy.INTEGER,

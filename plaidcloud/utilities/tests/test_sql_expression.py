@@ -5,7 +5,7 @@ import unittest
 import pandas
 import sqlalchemy
 from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
-from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype
+from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype, sqlalchemy_from_dtype
 from sqlalchemy.dialects import mssql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
@@ -3167,6 +3167,104 @@ class TestAggregateProjectionRefusal(TestSQLExpression):
                 aggregate=False,
             ),
         )
+
+
+class TestFloatIsDouble(unittest.TestCase):
+    """`cast(x, Float)` is 64-bit everywhere; StarRocks and Databend FLOAT is 32-bit and loses precision on amounts (sc-31931)."""
+
+    EXPECTED = {
+        'postgresql': 'CAST(t.amt AS DOUBLE PRECISION)',
+        'snowflake': 'CAST(t.amt AS DOUBLE)',
+        'databend': 'CAST(t.amt AS DOUBLE)',
+        'starrocks': 'CAST(t.amt AS DOUBLE)',
+    }
+
+    def test_float_names_cast_to_double(self):
+        table = sqlalchemy.table('t', sqlalchemy.column('amt', sqlalchemy.Text))
+        for type_name in ('Float', 'float', 'FLOAT'):
+            expression = se.eval_expression(f"cast(get_column(table, 'amt'), {type_name})", {}, [table])
+            for dialect, cast in self.EXPECTED.items():
+                with self.subTest(type_name=type_name, dialect=dialect):
+                    try:
+                        sql, _ = _compiled(sqlalchemy.select(expression), dialect=dialect)
+                    except sqlalchemy.exc.NoSuchModuleError:
+                        self.skipTest(f'{dialect} dialect not installed')
+                    self.assertIn(cast, sql)
+
+    def test_float_precision(self):
+        """Float(p > 24) is double everywhere (StarRocks rejects a sized Double); Float(p <= 24) stays single."""
+        table = sqlalchemy.table('t', sqlalchemy.column('amt', sqlalchemy.Text))
+        expected = {
+            'Float(53)': self.EXPECTED,
+            'Float(precision=53)': self.EXPECTED,
+            'Float(10)': {
+                'postgresql': 'CAST(t.amt AS FLOAT(10))',
+                'snowflake': 'CAST(t.amt AS FLOAT)',
+                'databend': 'CAST(t.amt AS FLOAT)',
+                'starrocks': 'CAST(t.amt AS FLOAT)',
+            },
+        }
+        for type_expr, casts in expected.items():
+            expression = se.eval_expression(f"cast(get_column(table, 'amt'), {type_expr})", {}, [table])
+            for dialect, cast in casts.items():
+                with self.subTest(type_expr=type_expr, dialect=dialect):
+                    sql, _ = _compiled(sqlalchemy.select(expression), dialect=dialect)
+                    self.assertIn(cast, sql)
+
+
+class TestStarRocksCastTargets(unittest.TestCase):
+    """Every expression-namespace and dtype cast renders a CAST of the right width on StarRocks.
+
+    The MySQL-derived compiler drops casts it has no MySQL target for, renders BIGINT as
+    SIGNED INTEGER (32-bit INT before StarRocks 4.1.3) and an unsized Numeric as
+    DECIMAL (= DECIMAL(10, 0)).
+    """
+
+    NAMESPACE = {
+        'float': 'DOUBLE',
+        'bigint': 'BIGINT',
+        'numeric': 'DECIMAL(38, 10)',
+        'currency': 'DECIMAL(18, 4)',
+        'json': 'JSON',
+        'text': 'STRING',
+        'integer': 'SIGNED INTEGER',
+        'boolean': 'BOOLEAN',
+        'date': 'DATE',
+        'timestamp': 'DATETIME',
+    }
+    DTYPES = {
+        'float': 'DOUBLE',
+        'double': 'DOUBLE',
+        'bigint': 'BIGINT',
+        'numeric': 'DECIMAL(38, 10)',
+        'json': 'JSON',
+        'vector': 'ARRAY<FLOAT>',
+    }
+    TYPES = {
+        sqlalchemy.Float(10): 'FLOAT',
+        sqlalchemy.Float(53): 'DOUBLE',
+        sqlalchemy.Numeric(20, 4): 'DECIMAL(20, 4)',
+    }
+
+    def assert_cast(self, type_, target):
+        table = sqlalchemy.table('t', sqlalchemy.column('c', sqlalchemy.Text))
+        sql, _ = _compiled(sqlalchemy.select(sqlalchemy.cast(table.c.c, type_)), dialect='starrocks')
+        self.assertIn(f'CAST(t.c AS {target})', sql)
+
+    def test_namespace_types(self):
+        for name, target in self.NAMESPACE.items():
+            with self.subTest(name=name):
+                self.assert_cast(se.get_safe_dict([])[name], target)
+
+    def test_dtypes(self):
+        for dtype, target in self.DTYPES.items():
+            with self.subTest(dtype=dtype):
+                self.assert_cast(sqlalchemy_from_dtype(dtype), target)
+
+    def test_sized_types(self):
+        for type_, target in self.TYPES.items():
+            with self.subTest(type_=type_):
+                self.assert_cast(type_, target)
 
 
 if __name__ == '__main__':
