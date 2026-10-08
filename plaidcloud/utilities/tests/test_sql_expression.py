@@ -3191,6 +3191,26 @@ class TestFloatIsDouble(unittest.TestCase):
                         self.skipTest(f'{dialect} dialect not installed')
                     self.assertIn(cast, sql)
 
+    def test_float_precision(self):
+        """Float(p > 24) is double everywhere (StarRocks rejects a sized Double); Float(p <= 24) stays single."""
+        table = sqlalchemy.table('t', sqlalchemy.column('amt', sqlalchemy.Text))
+        expected = {
+            'Float(53)': self.EXPECTED,
+            'Float(precision=53)': self.EXPECTED,
+            'Float(10)': {
+                'postgresql': 'CAST(t.amt AS FLOAT(10))',
+                'snowflake': 'CAST(t.amt AS FLOAT)',
+                'databend': 'CAST(t.amt AS FLOAT)',
+                'starrocks': 'CAST(t.amt AS FLOAT)',
+            },
+        }
+        for type_expr, casts in expected.items():
+            expression = se.eval_expression(f"cast(get_column(table, 'amt'), {type_expr})", {}, [table])
+            for dialect, cast in casts.items():
+                with self.subTest(type_expr=type_expr, dialect=dialect):
+                    sql, _ = _compiled(sqlalchemy.select(expression), dialect=dialect)
+                    self.assertIn(cast, sql)
+
 
 class TestStarRocksCastTargets(unittest.TestCase):
     """Every expression-namespace and dtype cast renders a CAST of the right width on StarRocks.
