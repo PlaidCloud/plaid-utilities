@@ -3181,4 +3181,7 @@ def _cast_targets_string(cast_type):
 def compile_cast_starrocks(element, compiler, **kw):
     if _cast_targets_string(element.type):
         return f'CAST({compiler.process(element.clause, **kw)} AS STRING)'
+    if isinstance(element.type, sqlalchemy.Double):
+        # The MySQL-derived compiler has no CAST target for DOUBLE and silently drops the cast.
+        return f'CAST({compiler.process(element.clause, **kw)} AS DOUBLE)'
     return compiler.visit_cast(element, **kw)

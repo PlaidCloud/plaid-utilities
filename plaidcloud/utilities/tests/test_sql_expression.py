@@ -3169,5 +3169,28 @@ class TestAggregateProjectionRefusal(TestSQLExpression):
         )
 
 
+class TestFloatIsDouble(unittest.TestCase):
+    """`cast(x, Float)` is 64-bit everywhere; StarRocks and Databend FLOAT is 32-bit and loses precision on amounts (sc-31931)."""
+
+    EXPECTED = {
+        'postgresql': 'CAST(t.amt AS DOUBLE PRECISION)',
+        'snowflake': 'CAST(t.amt AS DOUBLE)',
+        'databend': 'CAST(t.amt AS DOUBLE)',
+        'starrocks': 'CAST(t.amt AS DOUBLE)',
+    }
+
+    def test_float_names_cast_to_double(self):
+        table = sqlalchemy.table('t', sqlalchemy.column('amt', sqlalchemy.Text))
+        for type_name in ('Float', 'float', 'FLOAT'):
+            expression = se.eval_expression(f"cast(get_column(table, 'amt'), {type_name})", {}, [table])
+            for dialect, cast in self.EXPECTED.items():
+                with self.subTest(type_name=type_name, dialect=dialect):
+                    try:
+                        sql, _ = _compiled(sqlalchemy.select(expression), dialect=dialect)
+                    except sqlalchemy.exc.NoSuchModuleError:
+                        self.skipTest(f'{dialect} dialect not installed')
+                    self.assertIn(cast, sql)
+
+
 if __name__ == '__main__':
     unittest.main()
