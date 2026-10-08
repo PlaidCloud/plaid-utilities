@@ -3177,11 +3177,34 @@ def _cast_targets_string(cast_type):
     return length is None or length > 255
 
 
+def _starrocks_cast_target(element, compiler):
+    """The StarRocks CAST target for the casts the MySQL-derived compiler gets wrong, else None."""
+    if _cast_targets_string(element.type):
+        return 'STRING'
+    t = element.type
+    while isinstance(t, sqlalchemy.types.TypeDecorator):
+        t = t.load_dialect_impl(compiler.dialect)
+    if isinstance(t, sqlalchemy.types.Float):
+        # MySQL has no FLOAT/DOUBLE CAST before 8.0.17 and StarRocks reports 4.x, so the
+        # cast was silently dropped. An unsized Float is double precision, as on Postgres.
+        return 'FLOAT' if not isinstance(t, Double) and t.precision is not None and t.precision <= 24 else 'DOUBLE'
+    if isinstance(t, sqlalchemy.types.BigInteger):
+        # MySQL renders every integer as SIGNED INTEGER, which StarRocks before 4.1.3
+        # (4.1.0-rc01 included) parses as a 32-bit INT: values past 2^31 become NULL.
+        return 'BIGINT'
+    if isinstance(t, Numeric) and t.precision is None:
+        # A bare DECIMAL is DECIMAL(10, 0) on StarRocks and drops the fraction; Databend
+        # and PlaidNumeric both use DECIMAL(38, 10).
+        return 'DECIMAL(38, 10)'
+    if compiler.process(element.typeclause) is None:
+        # Any other type MySQL has no CAST target for (PlaidJSON, PlaidVector) would be dropped.
+        return compiler.dialect.type_compiler_instance.process(element.type)
+    return None
+
+
 @compiles(sqlalchemy.sql.elements.Cast, 'starrocks')
 def compile_cast_starrocks(element, compiler, **kw):
-    if _cast_targets_string(element.type):
-        return f'CAST({compiler.process(element.clause, **kw)} AS STRING)'
-    if isinstance(element.type, sqlalchemy.Double):
-        # The MySQL-derived compiler has no CAST target for DOUBLE and silently drops the cast.
-        return f'CAST({compiler.process(element.clause, **kw)} AS DOUBLE)'
-    return compiler.visit_cast(element, **kw)
+    target = _starrocks_cast_target(element, compiler)
+    if target is None:
+        return compiler.visit_cast(element, **kw)
+    return f'CAST({compiler.process(element.clause, **kw)} AS {target})'
