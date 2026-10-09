@@ -110,5 +110,46 @@ class TestRoundHalfEven(unittest.TestCase):
                 self.assertEqual(decimal.Decimal(expected), decimal.Decimal(str(result)))
 
 
+class TestNaturalSort(unittest.TestCase):
+    source_columns = [{'source': 's', 'dtype': 'text'}]
+    table = sqlalchemy.Table('t', sqlalchemy.MetaData(), sqlalchemy.Column('s', sqlalchemy.Text))
+
+    def order_by(self, sort, dialect):
+        table = se.get_table_rep('table_1', self.source_columns, 'anlz')
+        target = {'source': 's', 'target': 's', 'dtype': 'text', 'sort': sort}
+        return sql(se.get_select_query([table], [self.source_columns], [target], []), dialect).split('ORDER BY ')[1]
+
+    def test_natural_sorts_on_the_key_in_both_directions_with_nulls(self):
+        for dialect in DIALECTS:
+            for sort, tail in [
+                ({'ascending': True, 'natural': True}, "ASC"),
+                ({'ascending': False, 'natural': True, 'nulls': 'first'}, "DESC NULLS FIRST"),
+            ]:
+                with self.subTest(dialect=dialect, sort=sort):
+                    ordering = self.order_by(sort, dialect)
+                    self.assertTrue(ordering.startswith('regexp_replace(regexp_replace('))
+                    self.assertTrue(ordering.endswith(tail))
+
+    def test_plain_sort_has_no_key(self):
+        self.assertNotIn('regexp_replace', self.order_by({'ascending': True}, 'databend'))
+
+    def test_starrocks_backreference_is_re2_and_databend_is_rust(self):
+        self.assertIn("'$1'", self.order_by({'ascending': True, 'natural': True}, 'databend'))
+        self.assertIn("'\\\\1'", self.order_by({'ascending': True, 'natural': True}, 'starrocks'))
+
+    def test_order_of_values_with_the_re2_flavour(self):
+        # DuckDB speaks RE2 like StarRocks, so the StarRocks parameters run as they are.
+        params = list(sqlalchemy.func.natural_sort_key(self.table.c.s).compile(
+            dialect=sqlalchemy.create_engine('starrocks://127.0.0.1/').dialect).params.values())
+        connection = duckdb.connect()
+        connection.execute('CREATE TABLE t (s VARCHAR)')
+        values = ['a10', 'a2', 'a1', 'b1', 'a02x', 'a2x', 'file12.txt', 'file9.txt', 'file100.txt', '10', '9', 'a', '']
+        connection.executemany('INSERT INTO t VALUES (?)', [(v,) for v in values])
+        ordered = [row[0] for row in connection.execute(
+            "SELECT s FROM t ORDER BY regexp_replace(regexp_replace(s, ?, ?, 'g'), ?, ?, 'g'), s", params).fetchall()]
+        self.assertEqual(
+            ['', '9', '10', 'a', 'a1', 'a2', 'a02x', 'a2x', 'a10', 'b1', 'file9.txt', 'file12.txt', 'file100.txt'], ordered)
+
+
 if __name__ == '__main__':
     unittest.main()

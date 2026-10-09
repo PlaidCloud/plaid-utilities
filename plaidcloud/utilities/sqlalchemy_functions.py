@@ -1510,6 +1510,33 @@ def compile_round_half_even(element, compiler, **kw):
     return compiler.process(result, **kw)
 
 
+#: Digit runs longer than this compare by their last NATURAL_SORT_WIDTH digits only.
+NATURAL_SORT_WIDTH = 38
+
+
+class natural_sort_key(GenericFunction):
+    """A string whose plain ordering is the natural ordering of its argument: digit runs compare as numbers (``a2`` < ``a10``)."""
+    name = 'natural_sort_key'
+    type = sqlalchemy.String
+    inherit_cache = True
+
+def _natural_sort_key(element, compiler, pad_group, keep_group, **kw):
+    text, = list(element.clauses)
+    # Zero-pad every digit run by a full width, then keep its last NATURAL_SORT_WIDTH digits: equal-width runs sort as numbers.
+    # [0-9] and no lookaround keep the patterns inside what both Rust regex (Databend) and RE2 (StarRocks) accept.
+    padded = func.regexp_replace(func.cast(text, sqlalchemy.Text), '([0-9]+)', '0' * NATURAL_SORT_WIDTH + pad_group)
+    return compiler.process(
+        func.regexp_replace(padded, '[0-9]*([0-9]{%d})' % NATURAL_SORT_WIDTH, keep_group), **kw)
+
+@compiles(natural_sort_key)
+def compile_natural_sort_key(element, compiler, **kw):
+    return _natural_sort_key(element, compiler, '$1', '$1', **kw)
+
+@compiles(natural_sort_key, 'starrocks')
+def compile_natural_sort_key_starrocks(element, compiler, **kw):
+    return _natural_sort_key(element, compiler, '\\1', '\\1', **kw)
+
+
 class safe_ltrim(GenericFunction):
     name = 'ltrim'
 
