@@ -11,8 +11,7 @@ DIALECTS = ('databend', 'starrocks')
 
 
 def sql(statement, dialect):
-    engine = sqlalchemy.create_engine(f'{dialect}://127.0.0.1/')
-    return str(statement.compile(dialect=engine.dialect, compile_kwargs={'literal_binds': True}))
+    return str(statement.compile(dialect=sqlalchemy.dialects.registry.load(dialect)(), compile_kwargs={'literal_binds': True}))
 
 
 class TestSortNulls(unittest.TestCase):
