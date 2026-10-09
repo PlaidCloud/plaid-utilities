@@ -151,5 +151,57 @@ class TestNaturalSort(unittest.TestCase):
             ['', '9', '10', 'a', 'a1', 'a2', 'a02x', 'a2x', 'a10', 'b1', 'file9.txt', 'file12.txt', 'file100.txt'], ordered)
 
 
+class TestOtherDialects(unittest.TestCase):
+    text = sqlalchemy.Table('t', sqlalchemy.MetaData(), sqlalchemy.Column('s', sqlalchemy.Text))
+    number = sqlalchemy.Table('n', sqlalchemy.MetaData(), sqlalchemy.Column('i', sqlalchemy.Integer), sqlalchemy.Column('f', sqlalchemy.Float))
+
+    def key_sql(self, dialect):
+        return sql(sqlalchemy.func.natural_sort_key(self.text.c.s), dialect)
+
+    def test_natural_key_spelling_per_dialect(self):
+        for dialect, repl, flag in [
+            ('databend', "'$1'", False), ('databricks', "'$1'", False),
+            ('starrocks', "'\\\\1'", False), ('snowflake', "'\\\\1'", False),
+            ('postgresql', "'\\\\1'", True), ('duckdb', "'\\\\1'", True),
+        ]:
+            with self.subTest(dialect=dialect):
+                rendered = self.key_sql(dialect)
+                self.assertIn(repl, rendered)
+                self.assertEqual(flag, "'g')" in rendered)
+
+    def test_natural_key_refuses_unverified_dialects(self):
+        with self.assertRaisesRegex(sqlalchemy.exc.CompileError, 'mssql'):
+            self.key_sql('mssql')
+
+    def test_natural_key_orders_on_duckdb(self):
+        engine = sqlalchemy.create_engine('duckdb:///:memory:')
+        with engine.begin() as connection:
+            connection.exec_driver_sql('CREATE TABLE t (s VARCHAR)')
+            connection.exec_driver_sql("INSERT INTO t VALUES ('a10'), ('a2'), ('a1'), ('b1')")
+            ordered = [row[0] for row in connection.execute(
+                sqlalchemy.select(self.text.c.s).order_by(sqlalchemy.func.natural_sort_key(self.text.c.s)))]
+        self.assertEqual(['a1', 'a2', 'a10', 'b1'], ordered)
+
+    def test_round_half_even_on_duckdb_for_int_and_float(self):
+        engine = sqlalchemy.create_engine('duckdb:///:memory:')
+        with engine.begin() as connection:
+            connection.exec_driver_sql('CREATE TABLE n (i INTEGER, f DOUBLE)')
+            connection.exec_driver_sql('INSERT INTO n VALUES (25, 2.5), (35, 3.5), (15, 0.125), (-25, -2.5)')
+            rows = connection.execute(sqlalchemy.select(
+                sqlalchemy.func.round_half_even(self.number.c.i, -1),
+                sqlalchemy.func.round_half_even(self.number.c.f),
+                sqlalchemy.func.round_half_even(self.number.c.f, 2),
+                sqlalchemy.func.round_half_even(self.number.c.i, 1),
+            ).select_from(self.number)).fetchall()
+        self.assertEqual([(20, 2, 2.5, 25), (40, 4, 3.5, 35), (20, 0, 0.12, 15), (-20, -2, -2.5, -25)],
+                         [tuple(float(v) for v in row) for row in rows])
+
+    def test_nulls_first_refused_on_mssql_only_when_asked(self):
+        column = self.text.c.s
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            sql(sqlalchemy.select(column).order_by(sqlalchemy.nulls_first(sqlalchemy.asc(column))), 'mssql')
+        self.assertIn('ORDER BY t.s ASC', sql(sqlalchemy.select(column).order_by(sqlalchemy.asc(column)), 'mssql'))
+
+
 if __name__ == '__main__':
     unittest.main()
