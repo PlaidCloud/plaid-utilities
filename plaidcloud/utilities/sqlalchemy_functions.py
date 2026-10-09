@@ -11,6 +11,8 @@ from sqlalchemy.exc import SAWarning, CompileError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum, mode as sa_mode
 from sqlalchemy.types import Numeric, Boolean, Double
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import UnaryExpression, WithinGroup
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
@@ -1480,6 +1482,84 @@ def compile_safe_round(element, compiler, **kw):
     return f"round({all_compiled_args})"
 
 
+class round_half_even(GenericFunction):
+    """Banker's rounding: ties go to the even neighbour. ``round_half_even(x[, digits])``, digits a literal integer.
+
+    A binary float rounds on its actual value (``2.675`` is a hair under the tie, so it rounds up only if the float is above it).
+    """
+    name = 'round_half_even'
+    inherit_cache = True
+
+@compiles(round_half_even)
+def compile_round_half_even(element, compiler, **kw):
+    # Built from floor/mod only: neither Databend nor StarRocks has a half-even round, and `round` here casts to DECIMAL(38,10) first.
+    number, *rest = list(element.clauses)
+    digits = getattr(rest[0], 'value', None) if rest else 0
+    if not isinstance(digits, int):
+        raise CompileError('round_half_even needs a literal integer digit count')
+    if isinstance(number.type, sqlalchemy.String) or compiler.dialect.name not in ('databend', 'starrocks'):
+        # Text must be numeric to round; other engines have only been run through DuckDB, where an integer column would
+        # otherwise truncate on division and a float's tie test depends on the engine's float arithmetic.
+        number = func.cast(number, sqlalchemy.Numeric(38, 10))
+
+    factor = sqlalchemy.literal_column(str(10 ** abs(digits)))
+    scaled = number * factor if digits > 0 else number / factor if digits < 0 else number
+    whole = func.floor(scaled)
+    half = sqlalchemy.literal_column('0.5')
+    rounded = case(
+        (scaled - whole > half, whole + 1),
+        (scaled - whole < half, whole),
+        (func.mod(whole, 2) == 0, whole),
+        else_=whole + 1,
+    )
+    result = rounded / factor if digits > 0 else rounded * factor if digits < 0 else rounded
+    return compiler.process(result, **kw)
+
+
+#: Digit runs longer than this compare by their last NATURAL_SORT_WIDTH digits only.
+NATURAL_SORT_WIDTH = 38
+
+
+class natural_sort_key(GenericFunction):
+    """A string whose plain ordering is the natural ordering of its argument: digit runs compare as numbers (``a2`` < ``a10``)."""
+    name = 'natural_sort_key'
+    type = sqlalchemy.String
+    inherit_cache = True
+
+#: dialect -> (replacement spelling for the captured run, flag that makes regexp_replace replace every match or None).
+#: Only dialects whose spelling has been checked appear; any other refuses to compile rather than sort wrongly.
+_NATURAL_SORT_DIALECTS = {
+    'databend': ('$1', None),
+    'databricks': ('$1', None),
+    'starrocks': ('\\1', None),
+    'snowflake': ('\\1', None),
+    'postgresql': ('\\1', 'g'),
+    'greenplum': ('\\1', 'g'),
+    'duckdb': ('\\1', 'g'),
+}
+
+@compiles(natural_sort_key)
+def compile_natural_sort_key(element, compiler, **kw):
+    try:
+        group, flag = _NATURAL_SORT_DIALECTS[compiler.dialect.name]
+    except KeyError:
+        raise CompileError(f'natural_sort_key has no verified form for the {compiler.dialect.name!r} dialect') from None
+    text, = list(element.clauses)
+    extra = [flag] if flag else []
+    # Zero-pad every digit run by a full width, then keep its last NATURAL_SORT_WIDTH digits: equal-width runs sort as numbers.
+    # [0-9] and no lookaround keep the patterns inside what both Rust regex and RE2 accept.
+    padded = func.regexp_replace(func.cast(text, sqlalchemy.Text), '([0-9]+)', '0' * NATURAL_SORT_WIDTH + group, *extra)
+    return compiler.process(
+        func.regexp_replace(padded, '[0-9]*([0-9]{%d})' % NATURAL_SORT_WIDTH, group, *extra), **kw)
+
+
+@compiles(UnaryExpression, 'mssql')
+def compile_unary_mssql(element, compiler, **kw):
+    if element.modifier in (operators.nulls_first_op, operators.nulls_last_op):
+        raise CompileError('SQL Server has no NULLS FIRST/LAST in ORDER BY')
+    return compiler.visit_unary(element, **kw)
+
+
 class safe_ltrim(GenericFunction):
     name = 'ltrim'
 
@@ -2301,6 +2381,18 @@ def compile_string_agg_starrocks(element, compiler, **kw):
     # concatenates it onto every value instead ('a-,b-,c-' rather than 'a-b-c').
     value, *separator = list(element.clauses)
     rendered = compiler.process(value, **kw)
+    if separator:
+        rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
+    return f'group_concat({rendered})'
+
+
+@compiles(WithinGroup, 'starrocks')
+def compile_within_group_starrocks(element, compiler, **kw):
+    # An ordered string_agg: StarRocks has no WITHIN GROUP, group_concat takes its ORDER BY inside the call, before SEPARATOR.
+    if not isinstance(element.element, string_agg):
+        return compiler.visit_withingroup(element, **kw)
+    value, *separator = list(element.element.clauses)
+    rendered = f'{compiler.process(value, **kw)} ORDER BY {compiler.process(element.order_by, **kw)}'
     if separator:
         rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
     return f'group_concat({rendered})'

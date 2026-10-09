@@ -609,13 +609,14 @@ def get_column_table(
     raise SQLExpressionError(f"Mapped source column {source_name} is not in any source tables.")
 
 
-def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, trim_type: bool|None = False):
+def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, trim_type: bool|None = False, sort_options: dict|None = None):
     """Returns a function to apply to the source/constant/expression of a target column.
     sort_type, cast_type, and agg_type should be None if that kind of processing is not needed, or the appropriate type if it is.
     cast_type should be a sqlalchemy dtype,
     sort_type should be True (for ascending) or False (for descending),
     agg_type should be a string from the 'agg' param of the column.
     trim_type should be a boolean indicating if a trim should be applied
+    sort_options carries the sort extras from _sort_options: 'nulls' ('first'/'last' to place NULLs explicitly) and 'natural' (digit runs compare as numbers)
 
     Processing will always include applying the label in the param 'name'
     """
@@ -633,6 +634,11 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
         sort_fn = sqlalchemy.desc
     else:
         sort_fn = ident
+    if sort_type is not None and sort_options:
+        if sort_options.get('natural'):
+            sort_fn = compose(sort_fn, sqlalchemy.func.natural_sort_key)
+        if sort_options.get('nulls'):
+            sort_fn = compose(sqlalchemy.nulls_first if sort_options['nulls'] == 'first' else sqlalchemy.nulls_last, sort_fn)
 
     def label_fn(expr: sqlalchemy.ColumnElement):
         return expr.label(name)
@@ -646,7 +652,7 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
     return compose(label_fn, sort_fn, trim_fn, cast_fn, agg_fn)
 
 # TODO: write tests, though TestGetFromClause already covers this
-def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False, trim_zeroes: bool = False):
+def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False, trim_zeroes: bool = False, sort_options: dict|None = None):
     """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
     if disable_variables:
         var_fn = ident
@@ -655,11 +661,11 @@ def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalch
     const = sqlalchemy.literal(var_fn(constant), type_=cast_type)
 
     # never aggregate
-    return process_fn(sort_type, cast_type, None, name, trim_zeroes)(const)
+    return process_fn(sort_type, cast_type, None, name, trim_zeroes, sort_options)(const)
 
 # TODO: write tests, though TestGetFromClause already covers this
-def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None):
-    """Get a representation of a target column based on an expression."""
+def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, variables: dict = None, disable_variables: bool = False, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None, sort_options: dict | None = None):
+    """Get a representation of a target column based on an expression. See process_fn & get_from_clause for explanation of arguments"""
     expr = eval_expression(
         expression.strip(),
         variables,
@@ -687,10 +693,10 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
             name, expression,
         )
         expr = sqlalchemy.null()
-    return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(expr)
+    return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes, sort_options)(expr)
 
 # TODO: write tests, though TestGetFromClause already covers this
-def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None):
+def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_column_config: dict, source_column_configs: list[list[dict]], cast: bool, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, agg_type: str|None, name: str, table_numbering_start: int = 1, trim_zeroes: bool = False, *, tables_by_alias: dict | None = None, sort_options: dict | None = None):
     """Get a representation of a target column based on a source column."""
     table = get_column_table(
         tables, target_column_config, source_column_configs,
@@ -723,7 +729,7 @@ def source_from_clause(source: str, tables: list[sqlalchemy.Table], target_colum
     else:
         cancellable_cast_type = None
 
-    return process_fn(sort_type, cancellable_cast_type, agg_type, name, trim_zeroes)(col)
+    return process_fn(sort_type, cancellable_cast_type, agg_type, name, trim_zeroes, sort_options)(col)
 
 
 def _sort_ascending(sort_config) -> bool | None:
@@ -736,6 +742,18 @@ def _sort_ascending(sort_config) -> bool | None:
     if isinstance(sort_config, dict):
         return sort_config.get('ascending')
     return {'asc': True, 'desc': False}.get(sort_config)
+
+
+def _sort_options(sort_config) -> dict | None:
+    """The extras of a ``sort`` dict: ``nulls`` ('first'/'last'; absent is the engine's default) and ``natural`` (digit runs compare as numbers)."""
+    if not isinstance(sort_config, dict):
+        return None
+    options = {}
+    if sort_config.get('nulls') in ('first', 'last'):
+        options['nulls'] = sort_config['nulls']
+    if sort_config.get('natural'):
+        options['natural'] = True
+    return options or None
 
 
 def _owning_source_columns(
@@ -884,24 +902,26 @@ def get_from_clause(
 
     if sort:
         sort_type = _sort_ascending(target_column_config.get('sort'))
+        sort_options = _sort_options(target_column_config.get('sort'))
     else:
         sort_type = None
+        sort_options = None
 
     if constant:
-        return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables, trim_zeroes)
+        return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables, trim_zeroes, sort_options)
     if expression:
-        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias)
+        return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias, sort_options=sort_options)
     if source:
-        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias)
+        return source_from_clause(source, tables, target_column_config, source_column_configs, cast, sort_type, cast_type, agg_type, name, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias, sort_options=sort_options)
     if target_column_config.get('dtype') in {'serial', 'bigserial'}:
         if use_row_number_for_serial:
-            return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
+            return process_fn(sort_type, cast_type, agg_type, name, trim_zeroes, sort_options)(sqlalchemy.func.row_number().over(order_by=sort_columns or []))
         return None
 
     if target_column_config.get('dtype') in set(MAGIC_COLUMN_MAPPING.keys()):
         if target_column_config.get('dtype') == 'source_table_name':
             # never aggregate
-            return process_fn(sort_type, cast_type, None, name, trim_zeroes)(sqlalchemy.literal(tables[0].name, type_=cast_type))
+            return process_fn(sort_type, cast_type, None, name, trim_zeroes, sort_options)(sqlalchemy.literal(tables[0].name, type_=cast_type))
         return None
 
     # If we get here...
