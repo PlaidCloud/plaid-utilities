@@ -1,6 +1,8 @@
 """Emitted SQL for the executor options the KNIME converter needs (epic 32079, Phase 6)."""
+import decimal
 import unittest
 
+import duckdb
 import sqlalchemy
 
 from plaidcloud.utilities import sql_expression as se
@@ -69,6 +71,43 @@ class TestOrderedStringAgg(unittest.TestCase):
     def test_unordered_starrocks_is_unchanged(self):
         rendered = self.aggregate("func.string_agg(table.s, ', ')", 'starrocks')
         self.assertIn("group_concat(anlz.table_1.s SEPARATOR ', ')", rendered)
+
+
+class TestRoundHalfEven(unittest.TestCase):
+    table = sqlalchemy.Table('t', sqlalchemy.MetaData(), sqlalchemy.Column('v', sqlalchemy.Numeric(38, 6)))
+
+    def test_no_decimal_38_10_cast_and_no_round_on_either_dialect(self):
+        for dialect in DIALECTS:
+            with self.subTest(dialect=dialect):
+                rendered = sql(sqlalchemy.func.round_half_even(self.table.c.v, 2), dialect)
+                self.assertIn('floor(t.v * 100)', rendered)
+                self.assertNotIn('CAST', rendered)
+                self.assertNotIn('round(', rendered)
+
+    def test_digits_must_be_literal(self):
+        with self.assertRaises(sqlalchemy.exc.CompileError):
+            sql(sqlalchemy.func.round_half_even(self.table.c.v, self.table.c.v), 'databend')
+
+    def test_values(self):
+        connection = duckdb.connect()
+        connection.execute('CREATE TABLE t (v DECIMAL(38,6))')
+        cases = [
+            # (value, digits, expected)
+            ('0.5', 0, '0'), ('1.5', 0, '2'), ('2.5', 0, '2'), ('3.5', 0, '4'), ('-0.5', 0, '0'), ('-1.5', 0, '-2'),
+            ('-2.5', 0, '-2'), ('2.4', 0, '2'), ('2.6', 0, '3'), ('-2.6', 0, '-3'),
+            ('1.005', 2, '1.00'), ('2.675', 2, '2.68'), ('0.125', 2, '0.12'), ('0.135', 2, '0.14'), ('-0.125', 2, '-0.12'),
+            ('25', -1, '20'), ('35', -1, '40'), ('15', -1, '20'), ('-25', -1, '-20'),
+            ('12345678901234567890.5', 0, '12345678901234567890'), ('12345678901234567891.5', 0, '12345678901234567892'),
+            ('0.123125', 5, '0.12312'),
+        ]
+        for value, digits, expected in cases:
+            with self.subTest(value=value, digits=digits):
+                connection.execute('DELETE FROM t')
+                connection.execute(f'INSERT INTO t VALUES ({value})')
+                expression = sqlalchemy.func.round_half_even(self.table.c.v, digits)
+                (result,), = connection.execute(
+                    'SELECT ' + sql(expression, 'postgresql') + ' FROM t').fetchall()
+                self.assertEqual(decimal.Decimal(expected), decimal.Decimal(str(result)))
 
 
 if __name__ == '__main__':

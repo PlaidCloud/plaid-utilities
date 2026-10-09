@@ -1481,6 +1481,35 @@ def compile_safe_round(element, compiler, **kw):
     return f"round({all_compiled_args})"
 
 
+class round_half_even(GenericFunction):
+    """Banker's rounding: ties go to the even neighbour. ``round_half_even(x[, digits])``, digits a literal integer."""
+    name = 'round_half_even'
+    inherit_cache = True
+
+@compiles(round_half_even)
+def compile_round_half_even(element, compiler, **kw):
+    # Built from floor/mod only: neither Databend nor StarRocks has a half-even round, and `round` here casts to DECIMAL(38,10) first.
+    number, *rest = list(element.clauses)
+    digits = getattr(rest[0], 'value', None) if rest else 0
+    if not isinstance(digits, int):
+        raise CompileError('round_half_even needs a literal integer digit count')
+    if isinstance(number.type, sqlalchemy.String):
+        number = func.cast(number, sqlalchemy.Numeric(38, 10))
+
+    factor = sqlalchemy.literal_column(str(10 ** abs(digits)))
+    scaled = number * factor if digits > 0 else number / factor if digits < 0 else number
+    whole = func.floor(scaled)
+    half = sqlalchemy.literal_column('0.5')
+    rounded = case(
+        (scaled - whole > half, whole + 1),
+        (scaled - whole < half, whole),
+        (func.mod(whole, 2) == 0, whole),
+        else_=whole + 1,
+    )
+    result = rounded / factor if digits > 0 else rounded * factor if digits < 0 else rounded
+    return compiler.process(result, **kw)
+
+
 class safe_ltrim(GenericFunction):
     name = 'ltrim'
 
