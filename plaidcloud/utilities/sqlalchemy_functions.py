@@ -11,6 +11,7 @@ from sqlalchemy.exc import SAWarning, CompileError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.functions import FunctionElement, GenericFunction, ReturnTypeFromArgs, sum, mode as sa_mode
 from sqlalchemy.types import Numeric, Boolean, Double
+from sqlalchemy.sql.elements import WithinGroup
 from sqlalchemy.sql.expression import FromClause
 from sqlalchemy.sql import case, func
 
@@ -2301,6 +2302,18 @@ def compile_string_agg_starrocks(element, compiler, **kw):
     # concatenates it onto every value instead ('a-,b-,c-' rather than 'a-b-c').
     value, *separator = list(element.clauses)
     rendered = compiler.process(value, **kw)
+    if separator:
+        rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
+    return f'group_concat({rendered})'
+
+
+@compiles(WithinGroup, 'starrocks')
+def compile_within_group_starrocks(element, compiler, **kw):
+    # An ordered string_agg: StarRocks has no WITHIN GROUP, group_concat takes its ORDER BY inside the call, before SEPARATOR.
+    if not isinstance(element.element, string_agg):
+        return compiler.visit_withingroup(element, **kw)
+    value, *separator = list(element.element.clauses)
+    rendered = f'{compiler.process(value, **kw)} ORDER BY {compiler.process(element.order_by, **kw)}'
     if separator:
         rendered += f' SEPARATOR {compiler.process(separator[0], **kw)}'
     return f'group_concat({rendered})'

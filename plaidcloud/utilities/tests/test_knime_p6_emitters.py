@@ -41,5 +41,35 @@ class TestSortNulls(unittest.TestCase):
                     self.assertNotIn('NULLS', self.order_by(sort, dialect))
 
 
+class TestOrderedStringAgg(unittest.TestCase):
+    source_columns = [{'source': 'v', 'dtype': 'integer'}, {'source': 's', 'dtype': 'text'}]
+
+    def aggregate(self, expression, dialect):
+        table = se.get_table_rep('table_1', self.source_columns, 'anlz')
+        targets = [
+            {'target': 'k', 'source': 'v', 'dtype': 'integer', 'agg': 'group'},
+            {'target': 'c', 'expression': expression, 'dtype': 'text', 'agg': 'dont_group'},
+        ]
+        statement = se.get_select_query([table], [self.source_columns], targets, [], aggregate=True)
+        return sql(statement, dialect)
+
+    def test_ordered_databend_uses_within_group(self):
+        rendered = self.aggregate("func.string_agg(table.s, ', ').within_group(table.v)", 'databend')
+        self.assertIn("string_agg(anlz.table_1.s, ', ') WITHIN GROUP (ORDER BY anlz.table_1.v)", rendered)
+
+    def test_ordered_starrocks_uses_group_concat_order_by(self):
+        rendered = self.aggregate("func.string_agg(table.s, ', ').within_group(table.v)", 'starrocks')
+        self.assertIn("group_concat(anlz.table_1.s ORDER BY anlz.table_1.v SEPARATOR ', ')", rendered)
+        self.assertNotIn('WITHIN GROUP', rendered)
+
+    def test_ordered_starrocks_descending_and_multiple_keys(self):
+        rendered = self.aggregate("func.string_agg(table.s, '|').within_group(table.v.desc(), table.s)", 'starrocks')
+        self.assertIn("group_concat(anlz.table_1.s ORDER BY anlz.table_1.v DESC, anlz.table_1.s SEPARATOR '|')", rendered)
+
+    def test_unordered_starrocks_is_unchanged(self):
+        rendered = self.aggregate("func.string_agg(table.s, ', ')", 'starrocks')
+        self.assertIn("group_concat(anlz.table_1.s SEPARATOR ', ')", rendered)
+
+
 if __name__ == '__main__':
     unittest.main()
