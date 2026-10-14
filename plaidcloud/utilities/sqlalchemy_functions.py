@@ -2308,7 +2308,7 @@ _FUNCTION_RENAMES = {
         'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
     },
     'databricks': {
-        'modulo': 'mod', 'ord': 'ascii', 'today': 'current_date',
+        'ord': 'ascii', 'today': 'current_date',
         'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
         'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
     },
@@ -3334,6 +3334,19 @@ def compile_text_databricks(element, compiler, **kw):
     return 'STRING'
 
 
+@compiles(sqlalchemy.Float, 'databricks')
+def compile_float_databricks(element, compiler, **kw):
+    # Spark's FLOAT is 32-bit; a Float here is the 64-bit DOUBLE every warehouse casts to.
+    return 'DOUBLE'
+
+
+@compiles(modulo, 'databricks')
+def compile_modulo_databricks(element, compiler, **kw):
+    # A zero divisor is an error under ANSI; StarRocks and DuckDB answer NULL.
+    dividend, divisor = (compiler.process(c, **kw) for c in element.clauses)
+    return f'mod({dividend}, nullif({divisor}, 0))'
+
+
 @compiles(sqlalchemy.sql.elements.Cast, 'databricks')
 def compile_cast_databricks(element, compiler, **kw):
     return f'try_cast({compiler.process(element.clause, **kw)} AS {compiler.process(element.typeclause, **kw)})'
@@ -3377,8 +3390,8 @@ def compile_try_to_float64_databricks(element, compiler, **kw):
 
 @compiles(regexp_substr, 'databricks')
 def compile_regexp_substr_databricks(element, compiler, **kw):
-    # regexp_substr is NULL on a miss in Spark; every other warehouse answers ''
-    # (NULL only for a NULL subject), which regexp_extract does too.
+    # regexp_substr is NULL on a miss in Spark; the StarRocks hook and the DuckDB
+    # harness answer '' (NULL only for a NULL subject), which regexp_extract does too.
     arguments = [compiler.process(c, **kw) for c in element.clauses]
     if len(arguments) != 2:
         raise CompileError('regexp_substr takes the subject and the pattern: a position or occurrence is not carried')
@@ -3421,7 +3434,10 @@ def _java_literal(text):
 
 
 def _java_pattern(text, tokens):
-    """`text`, whose tokens are the keys of `tokens`, as a Java datetime pattern."""
+    """`text`, whose tokens are the keys of `tokens`, as a Java datetime pattern.
+
+    A one-letter field touching another letter or digit on either side is widened (see `_JAVA_FIXED_WIDTH`), so `YYYYMMDD` reads `20200515`.
+    """
     ordered = sorted(tokens, key=len, reverse=True)
     out = []
     literal = []
@@ -3431,8 +3447,12 @@ def _java_pattern(text, tokens):
             if text.startswith(token, index):
                 out.append(_java_literal(''.join(literal)))
                 literal = []
-                out.append(tokens[token])
+                field = tokens[token]
+                touching = text[max(index - 1, 0):index].isalnum() or text[index + len(token):index + len(token) + 1].isalnum()
                 index += len(token)
+                if field in _JAVA_FIXED_WIDTH and touching:
+                    field = _JAVA_FIXED_WIDTH[field]
+                out.append(field)
                 break
         else:
             literal.append(text[index])
@@ -3460,6 +3480,9 @@ _POSTGRES_FORMAT_TO_JAVA = {
 _POSTGRES_PARSE_TO_JAVA = {
     **_POSTGRES_FORMAT_TO_JAVA, 'MM': 'M', 'DD': 'd', 'HH24': 'H', 'HH12': 'h', 'HH': 'h', 'MI': 'm', 'SS': 's',
 }
+#: A one-letter field reads one or two digits, but Java cannot split two of them
+#: that sit side by side (`yyyyMdd`): a field followed by another is fixed width.
+_JAVA_FIXED_WIDTH = {'M': 'MM', 'd': 'dd', 'H': 'HH', 'h': 'hh', 'm': 'mm', 's': 'ss'}
 
 
 def _databricks_pattern(format_, tokens, compiler, **kw):
@@ -3469,12 +3492,46 @@ def _databricks_pattern(format_, tokens, compiler, **kw):
     return compiler.process(sqlalchemy.literal(_java_pattern(value, tokens)), **kw)
 
 
+#: MySQL week specifiers Java has no letter for (its `w` is locale-dependent), as
+#: expressions of the moment. %U is the week of the year counting from the first
+#: Sunday (00-53), %w the weekday with Sunday 0, both as MySQL defines them.
+_MYSQL_EXPRESSIONS = {
+    '%w': 'CAST(dayofweek({moment}) - 1 AS STRING)',
+    '%U': "lpad(CAST(floor((dayofyear({moment}) + 6 - (dayofweek({moment}) - 1)) / 7) AS STRING), 2, '0')",
+}
+_MYSQL_SPECIFIER = re.compile(r'(%.)', re.DOTALL)
+
+
 @compiles(date_format, 'databricks')
 def compile_date_format_databricks(element, compiler, **kw):
     source, *fmt = list(element.clauses)
+    moment = compiler.process(source, **kw)
     if not fmt:
-        return f"date_format({compiler.process(source, **kw)}, 'yyyy-MM-dd HH:mm:ss')"
-    return f'date_format({compiler.process(source, **kw)}, {_databricks_pattern(fmt[0], _MYSQL_TO_JAVA, compiler, **kw)})'
+        return f"date_format({moment}, 'yyyy-MM-dd HH:mm:ss')"
+    value = getattr(fmt[0], 'value', None)
+    if not isinstance(value, str):
+        raise CompileError('a Databricks date format has to be a constant string')
+    pieces = []
+    pattern = ''
+
+    def flush():
+        nonlocal pattern
+        if pattern:
+            pieces.append(f"date_format({moment}, {compiler.process(sqlalchemy.literal(pattern), **kw)})")
+            pattern = ''
+
+    for part in _MYSQL_SPECIFIER.split(value):
+        if part in _MYSQL_TO_JAVA:
+            pattern += _MYSQL_TO_JAVA[part]
+        elif part in _MYSQL_EXPRESSIONS:
+            flush()
+            pieces.append(_MYSQL_EXPRESSIONS[part].format(moment=moment))
+        elif len(part) == 2 and part[0] == '%':
+            raise CompileError(f'date format specifier {part!r} in {value!r} has no Databricks spelling')
+        else:
+            pattern += _java_literal(part)
+    flush()
+    return pieces[0] if len(pieces) == 1 else f"concat({', '.join(pieces)})"
 
 
 @compiles(sql_to_char, 'databricks')

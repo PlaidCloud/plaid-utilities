@@ -28,7 +28,7 @@ def databricks(expression):
 
 @pytest.mark.parametrize('expression, expected', [
     ("func.today()", 'current_date()'),
-    ("func.modulo(get_column(table, 'A'), 3)", 'mod(sc.t.`A`, 3)'),
+    ("func.modulo(get_column(table, 'A'), 3)", 'mod(sc.t.`A`, nullif(3, 0))'),
     ("func.ord(get_column(table, 'S'))", 'ascii(sc.t.`S`)'),
     ("func.to_year(get_column(table, 'D'))", 'year(sc.t.`D`)'),
     ("func.to_day_of_month(get_column(table, 'D'))", 'day(sc.t.`D`)'),
@@ -100,3 +100,31 @@ def test_other_warehouses_are_untouched():
     from sqlalchemy.dialects import postgresql
     assert str(func.starts_with(column('a'), 'x').compile(dialect=postgresql.dialect())) == 'starts_with(a, %(starts_with_1)s)'
     assert sf.starts_with.name == 'starts_with'
+
+
+@pytest.mark.parametrize('postgres_format, java_pattern', [
+    ('YYYYMMDD', 'yyyyMMdd'),
+    ('YYYYMMDDHH24MISS', 'yyyyMMddHHmmss'),
+    ('DD-MM-YYYY HH24:MI', 'd-M-yyyy H:m'),
+])
+def test_a_field_next_to_another_is_fixed_width_so_compact_dates_parse(postgres_format, java_pattern):
+    sql = databricks(f"func.to_timestamp(get_column(table, 'S'), {postgres_format!r})")
+    assert sql == f"try_to_timestamp(nullif(trim(CAST(sc.t.`S` AS STRING)), ''), '{java_pattern}')"
+
+
+def test_week_specifiers_java_has_no_letter_for_are_computed():
+    sql = databricks("func.date_format(get_column(table, 'D'), '%U/%w')")
+    assert sql == (
+        "concat(lpad(CAST(floor((dayofyear(sc.t.`D`) + 6 - (dayofweek(sc.t.`D`) - 1)) / 7) AS STRING), 2, '0'), "
+        "date_format(sc.t.`D`, '/'), CAST(dayofweek(sc.t.`D`) - 1 AS STRING))"
+    )
+
+
+@pytest.mark.parametrize('specifier', ['%u', '%Q'])
+def test_a_specifier_with_no_spelling_refuses_naming_it(specifier):
+    with pytest.raises(sqlalchemy.exc.CompileError, match=specifier):
+        databricks(f"func.date_format(get_column(table, 'D'), 'Week {specifier}')")
+
+
+def test_float_is_the_64_bit_double():
+    assert sqlalchemy.Float().compile(dialect=DatabricksDialect()) == 'DOUBLE'
