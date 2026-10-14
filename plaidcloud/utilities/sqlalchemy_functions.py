@@ -2307,6 +2307,11 @@ _FUNCTION_RENAMES = {
         'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
         'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
     },
+    'databricks': {
+        'modulo': 'mod', 'ord': 'ascii', 'today': 'current_date',
+        'to_year': 'year', 'to_month': 'month', 'to_day_of_month': 'day',
+        'to_hour': 'hour', 'to_minute': 'minute', 'to_second': 'second',
+    },
 }
 
 
@@ -2348,6 +2353,19 @@ def _register_snowflake_dateadd(func_cls, unit):
 
 for _fn_name, _unit in _SNOWFLAKE_DATE_ADD_FUNCS.items():
     _register_snowflake_dateadd(globals()[_fn_name], _unit)
+
+
+def _register_databricks_timestampadd(func_cls, unit):
+    # timestampadd keeps the time of day; Spark's add_months and date_add return
+    # a DATE and silently drop it.
+    @compiles(func_cls, 'databricks')
+    def _compile(element, compiler, _unit=unit, **kw):
+        moment, amount = list(element.clauses)
+        return f"timestampadd({_unit.upper()}, {compiler.process(amount, **kw)}, {compiler.process(moment, **kw)})"
+
+
+for _fn_name, _unit in _SNOWFLAKE_DATE_ADD_FUNCS.items():
+    _register_databricks_timestampadd(globals()[_fn_name], _unit)
 
 
 class array_tail(GenericFunction):
@@ -3300,3 +3318,189 @@ def compile_cast_starrocks(element, compiler, **kw):
     if target is None:
         return compiler.visit_cast(element, **kw)
     return f'CAST({compiler.process(element.clause, **kw)} AS {target})'
+
+
+# ---------------------------------------------------------------------------
+# Databricks (Spark SQL) spellings
+# ---------------------------------------------------------------------------
+# The renames and add_<unit>s above; the rest follows. Spark has no TEXT type, and
+# under ANSI mode a malformed CAST stops the step where StarRocks answers NULL for
+# the cell -- so Cast renders try_cast, which is what the Alteryx converter's
+# contract (a bad cell is NULL) assumes.
+
+@compiles(sqlalchemy.Text, 'databricks')
+@compiles(sqlalchemy.TEXT, 'databricks')
+def compile_text_databricks(element, compiler, **kw):
+    return 'STRING'
+
+
+@compiles(sqlalchemy.sql.elements.Cast, 'databricks')
+def compile_cast_databricks(element, compiler, **kw):
+    return f'try_cast({compiler.process(element.clause, **kw)} AS {compiler.process(element.typeclause, **kw)})'
+
+
+class starts_with(GenericFunction):
+    name = 'starts_with'
+    inherit_cache = True
+
+
+class ends_with(GenericFunction):
+    name = 'ends_with'
+    inherit_cache = True
+
+
+class date_format(GenericFunction):
+    """date_format(moment, MySQL format): the format direction the Alteryx converter emits."""
+    name = 'date_format'
+    inherit_cache = True
+
+
+def _register_databricks_rename(func_cls, spark_name):
+    @compiles(func_cls, 'databricks')
+    def _compile(element, compiler, **kw):
+        return f"{spark_name}({', '.join(compiler.process(c, **kw) for c in element.clauses)})"
+
+
+_register_databricks_rename(starts_with, 'startswith')
+_register_databricks_rename(ends_with, 'endswith')
+
+
+@compiles(to_string, 'databricks')
+def compile_to_string_databricks(element, compiler, **kw):
+    return f"CAST({', '.join(compiler.process(c, **kw) for c in element.clauses)} AS STRING)"
+
+
+@compiles(try_to_float64, 'databricks')
+def compile_try_to_float64_databricks(element, compiler, **kw):
+    return f"try_cast({', '.join(compiler.process(c, **kw) for c in element.clauses)} AS DOUBLE)"
+
+
+@compiles(regexp_substr, 'databricks')
+def compile_regexp_substr_databricks(element, compiler, **kw):
+    # regexp_substr is NULL on a miss in Spark; every other warehouse answers ''
+    # (NULL only for a NULL subject), which regexp_extract does too.
+    arguments = [compiler.process(c, **kw) for c in element.clauses]
+    if len(arguments) != 2:
+        raise CompileError('regexp_substr takes the subject and the pattern: a position or occurrence is not carried')
+    return f'regexp_extract({arguments[0]}, {arguments[1]}, 0)'
+
+
+_DATABRICKS_DIFF_UNITS = {
+    'year', 'quarter', 'month', 'week', 'day', 'hour', 'minute', 'second', 'millisecond', 'microsecond',
+}
+
+
+@compiles(date_diff, 'databricks')
+def compile_date_diff_databricks(element, compiler, **kw):
+    # Spark wants the unit as an unquoted keyword.
+    unit, start, end = list(element.clauses)
+    name = getattr(unit, 'value', None)
+    if name not in _DATABRICKS_DIFF_UNITS:
+        raise CompileError(f'date_diff unit {name!r} has no Databricks spelling')
+    return f'timestampdiff({name.upper()}, {compiler.process(start, **kw)}, {compiler.process(end, **kw)})'
+
+
+#: Spark's datetime patterns are Java's: a letter is a field, so literal text is
+#: quoted, and the widths are strict (`dd` will not read a one-digit day).
+_JAVA_PLAIN_LITERAL = ' -/:.,()'
+
+
+def _java_literal(text):
+    """`text` as Java pattern literal: separators bare, anything else quoted."""
+    out = []
+    run = ''
+    for char in text + ' ':
+        if char in _JAVA_PLAIN_LITERAL:
+            if run:
+                out.append("'" + run.replace("'", "''") + "'")
+                run = ''
+            out.append(char)
+        else:
+            run += char
+    return ''.join(out[:-1])
+
+
+def _java_pattern(text, tokens):
+    """`text`, whose tokens are the keys of `tokens`, as a Java datetime pattern."""
+    ordered = sorted(tokens, key=len, reverse=True)
+    out = []
+    literal = []
+    index = 0
+    while index < len(text):
+        for token in ordered:
+            if text.startswith(token, index):
+                out.append(_java_literal(''.join(literal)))
+                literal = []
+                out.append(tokens[token])
+                index += len(token)
+                break
+        else:
+            literal.append(text[index])
+            index += 1
+    out.append(_java_literal(''.join(literal)))
+    return ''.join(out)
+
+
+#: MySQL specifiers -- what the Alteryx converter emits for the format direction.
+_MYSQL_TO_JAVA = {
+    '%%': '%', '%Y': 'yyyy', '%y': 'yy', '%m': 'MM', '%c': 'M', '%d': 'dd', '%e': 'd',
+    '%H': 'HH', '%k': 'H', '%h': 'hh', '%I': 'hh', '%l': 'h', '%i': 'mm', '%s': 'ss',
+    '%S': 'ss', '%f': 'SSSSSS', '%p': 'a', '%M': 'MMMM', '%b': 'MMM', '%W': 'EEEE',
+    '%a': 'EEE', '%j': 'DDD', '%T': 'HH:mm:ss', '%r': 'hh:mm:ss a',
+}
+
+#: Postgres tokens -- what to_char, to_timestamp and to_date carry. A parse reads one
+#: digit where a format writes two, as Postgres does.
+_POSTGRES_FORMAT_TO_JAVA = {
+    'YYYY': 'yyyy', 'YY': 'yy', 'MM': 'MM', 'Month': 'MMMM', 'MONTH': 'MMMM', 'Mon': 'MMM',
+    'MON': 'MMM', 'DD': 'dd', 'DDD': 'DDD', 'Day': 'EEEE', 'DAY': 'EEEE', 'Dy': 'EEE',
+    'DY': 'EEE', 'HH24': 'HH', 'HH12': 'hh', 'HH': 'hh', 'MI': 'mm', 'SS': 'ss',
+    'US': 'SSSSSS', 'MS': 'SSS', 'AM': 'a', 'PM': 'a', 'am': 'a', 'pm': 'a',
+}
+_POSTGRES_PARSE_TO_JAVA = {
+    **_POSTGRES_FORMAT_TO_JAVA, 'MM': 'M', 'DD': 'd', 'HH24': 'H', 'HH12': 'h', 'HH': 'h', 'MI': 'm', 'SS': 's',
+}
+
+
+def _databricks_pattern(format_, tokens, compiler, **kw):
+    value = getattr(format_, 'value', None)
+    if not isinstance(value, str):
+        raise CompileError('a Databricks date format has to be a constant string')
+    return compiler.process(sqlalchemy.literal(_java_pattern(value, tokens)), **kw)
+
+
+@compiles(date_format, 'databricks')
+def compile_date_format_databricks(element, compiler, **kw):
+    source, *fmt = list(element.clauses)
+    if not fmt:
+        return f"date_format({compiler.process(source, **kw)}, 'yyyy-MM-dd HH:mm:ss')"
+    return f'date_format({compiler.process(source, **kw)}, {_databricks_pattern(fmt[0], _MYSQL_TO_JAVA, compiler, **kw)})'
+
+
+@compiles(sql_to_char, 'databricks')
+def compile_to_char_databricks(element, compiler, **kw):
+    source, *fmt = list(element.clauses)
+    if not fmt:
+        return f'CAST({compiler.process(source, **kw)} AS STRING)'
+    return (f'date_format({compiler.process(source, **kw)}, '
+            f'{_databricks_pattern(fmt[0], _POSTGRES_FORMAT_TO_JAVA, compiler, **kw)})')
+
+
+def _databricks_parse(element, compiler, **kw):
+    # Alteryx reads an unparseable date as null; to_timestamp raises under ANSI,
+    # try_to_timestamp does not.
+    text, *fmt = list(element.clauses)
+    cleaned = f"nullif(trim(CAST({compiler.process(text, **kw)} AS STRING)), '')"
+    if not fmt:
+        return f'try_to_timestamp({cleaned})'
+    return f'try_to_timestamp({cleaned}, {_databricks_pattern(fmt[0], _POSTGRES_PARSE_TO_JAVA, compiler, **kw)})'
+
+
+@compiles(safe_to_timestamp, 'databricks')
+def compile_to_timestamp_databricks(element, compiler, **kw):
+    return _databricks_parse(element, compiler, **kw)
+
+
+@compiles(safe_to_date, 'databricks')
+def compile_to_date_databricks(element, compiler, **kw):
+    return f'CAST({_databricks_parse(element, compiler, **kw)} AS DATE)'
