@@ -2976,6 +2976,11 @@ class TestStarrocksDefaultOkSweepMembership(unittest.TestCase):
             sf.sql_slice_string: (sqlalchemy.column('s'), 0, 3),
             sf.sql_zfill: (sqlalchemy.column('s'), 5),
             sf.sql_integerize_round: (sqlalchemy.column('s'),),
+            sf.round_half_even: (sqlalchemy.column('n'), 2),
+            sf.natural_sort_key: (sqlalchemy.column('s'),),
+            sf.starts_with: (sqlalchemy.column('s'), 'a'),
+            sf.ends_with: (sqlalchemy.column('s'), 'a'),
+            sf.date_format: (sqlalchemy.column('d'), '%Y-%m-%d'),
         }
         self.assertEqual(set(args_by_class), sf._STARROCKS_DEFAULT_OK)
         for cls, args in args_by_class.items():

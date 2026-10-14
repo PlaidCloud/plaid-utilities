@@ -40,7 +40,6 @@ def databricks(expression):
     ("func.try_to_float64(get_column(table, 'S'))", 'try_cast(sc.t.`S` AS DOUBLE)'),
     ("func.starts_with(get_column(table, 'S'), 'a')", "startswith(sc.t.`S`, 'a')"),
     ("func.ends_with(get_column(table, 'S'), 'a')", "endswith(sc.t.`S`, 'a')"),
-    ("func.regexp_substr(get_column(table, 'S'), 'x+')", "regexp_extract(sc.t.`S`, 'x+', 0)"),
 ])
 def test_function_is_spelled_the_way_spark_reads_it(expression, expected):
     assert databricks(expression) == expected
@@ -89,11 +88,6 @@ def test_cast_is_try_cast_so_a_malformed_cell_is_null_not_a_failed_step():
 def test_a_date_diff_unit_spark_has_no_name_for_refuses():
     with pytest.raises(sqlalchemy.exc.CompileError):
         databricks("func.date_diff('fortnight', get_column(table, 'D2'), get_column(table, 'D'))")
-
-
-def test_regexp_substr_with_an_occurrence_refuses_rather_than_dropping_it():
-    with pytest.raises(sqlalchemy.exc.CompileError):
-        databricks("func.regexp_substr(get_column(table, 'S'), 'x', 1, 2)")
 
 
 def test_other_warehouses_are_untouched():

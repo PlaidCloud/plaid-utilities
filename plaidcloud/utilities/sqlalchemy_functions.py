@@ -3259,6 +3259,10 @@ _STARROCKS_DEFAULT_OK = frozenset({
     sql_slice_string,
     sql_zfill,
     sql_integerize_round,
+    # Built from floor/mod and a StarRocks-checked backreference, and tested on starrocks with databend
+    # (test_knime_p6_emitters.py).
+    round_half_even,
+    natural_sort_key,
 })
 
 
@@ -3382,16 +3386,6 @@ def compile_to_string_databricks(element, compiler, **kw):
 @compiles(try_to_float64, 'databricks')
 def compile_try_to_float64_databricks(element, compiler, **kw):
     return f"try_cast({', '.join(compiler.process(c, **kw) for c in element.clauses)} AS DOUBLE)"
-
-
-@compiles(regexp_substr, 'databricks')
-def compile_regexp_substr_databricks(element, compiler, **kw):
-    # regexp_substr is NULL on a miss in Spark; the StarRocks hook and the DuckDB
-    # harness answer '' (NULL only for a NULL subject), which regexp_extract does too.
-    arguments = [compiler.process(c, **kw) for c in element.clauses]
-    if len(arguments) != 2:
-        raise CompileError('regexp_substr takes the subject and the pattern: a position or occurrence is not carried')
-    return f'regexp_extract({arguments[0]}, {arguments[1]}, 0)'
 
 
 _DATABRICKS_DIFF_UNITS = {
@@ -3557,3 +3551,9 @@ def compile_to_timestamp_databricks(element, compiler, **kw):
 @compiles(safe_to_date, 'databricks')
 def compile_to_date_databricks(element, compiler, **kw):
     return f'CAST({_databricks_parse(element, compiler, **kw)} AS DATE)'
+
+
+# starts_with(str, prefix), ends_with(str, suffix) and date_format(datetime, MySQL format) are StarRocks
+# built-ins with the arguments and NULL-in-NULL-out behaviour the converter relies on; the default rendering
+# is the StarRocks one (docs.starrocks.io string/date-time functions).
+_STARROCKS_DEFAULT_OK = _STARROCKS_DEFAULT_OK | {starts_with, ends_with, date_format}
