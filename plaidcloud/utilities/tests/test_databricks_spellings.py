@@ -127,4 +127,5 @@ def test_a_specifier_with_no_spelling_refuses_naming_it(specifier):
 
 
 def test_float_is_the_64_bit_double():
-    assert sqlalchemy.Float().compile(dialect=DatabricksDialect()) == 'DOUBLE'
+    sql = str(sqlalchemy.cast(column('x'), sqlalchemy.Float).compile(dialect=DatabricksDialect()))
+    assert sql == 'try_cast(x AS DOUBLE)'

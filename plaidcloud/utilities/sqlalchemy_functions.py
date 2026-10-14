@@ -3334,12 +3334,6 @@ def compile_text_databricks(element, compiler, **kw):
     return 'STRING'
 
 
-@compiles(sqlalchemy.Float, 'databricks')
-def compile_float_databricks(element, compiler, **kw):
-    # Spark's FLOAT is 32-bit; a Float here is the 64-bit DOUBLE every warehouse casts to.
-    return 'DOUBLE'
-
-
 @compiles(modulo, 'databricks')
 def compile_modulo_databricks(element, compiler, **kw):
     # A zero divisor is an error under ANSI; StarRocks and DuckDB answer NULL.
@@ -3349,7 +3343,9 @@ def compile_modulo_databricks(element, compiler, **kw):
 
 @compiles(sqlalchemy.sql.elements.Cast, 'databricks')
 def compile_cast_databricks(element, compiler, **kw):
-    return f'try_cast({compiler.process(element.clause, **kw)} AS {compiler.process(element.typeclause, **kw)})'
+    # Spark's FLOAT is 32-bit; a Float cast is the 64-bit DOUBLE every warehouse means.
+    target = 'DOUBLE' if isinstance(element.type, sqlalchemy.Float) else compiler.process(element.typeclause, **kw)
+    return f'try_cast({compiler.process(element.clause, **kw)} AS {target})'
 
 
 class starts_with(GenericFunction):
