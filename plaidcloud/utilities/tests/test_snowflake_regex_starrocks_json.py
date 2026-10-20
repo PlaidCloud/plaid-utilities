@@ -131,7 +131,14 @@ def test_per_row_replacement_cannot_follow_renumbered_groups():
 @pytest.mark.parametrize('pattern, expected', [
     (r'\x{41}\x42', 'AB'),
     (r'a\x{2E}', r'a\\.'),           # a metacharacter stays literal
-    (r'[\x{5D}\x85]', '[\\\\]\x85]'),  # in a class only ] \ ^ - need escaping
+    (r'[\x{5D}\x{2E}]', '[\\\\].]'),  # in a class only [ ] \ ^ - need escaping
+    (r'[\x{5E}a]', '[\\\\^a]'),
+    (r'[a\x{2D}z]', '[a\\\\-z]'),
+    (r'\x{5C}\x5C', '\\\\\\\\\\\\\\\\'),  # outside a class: an escaped backslash twice
+    (r'[\x{5C}\x5C]', '[\\\\\\\\\\\\\\\\]'),  # inside a class: still escaped
+    (r'[\x5B:alpha:]]', '[\\\\[:alpha:]]'),
+    (r'\x{7C}', r'\\|'),            # | and { are metacharacters
+    (r'\x{7B}', r'\\{'),
 ])
 def test_hex_escapes_become_the_character(pattern, expected):
     assert sql(func.regexp_instr(S, pattern), 'snowflake') == f"REGEXP_INSTR(s, '{expected}', 1, 1, 0, 'c')"
@@ -215,8 +222,9 @@ def test_json_extract_path_text_becomes_get_json_string(path, expected):
 
 
 def test_json_extract_path_text_per_row_path():
+    # Databend's `:` separator is StarRocks' `.`.
     assert sql(func.json_extract_path_text(S, func.concat('[', 1, ']')), 'starrocks') == \
-        "get_json_string(s, concat('$.', concat('[', 1, ']')))"
+        "get_json_string(s, concat('$.', replace(concat('[', 1, ']'), ':', '.')))"
 
 
 @pytest.mark.parametrize('args', [(S, 'a..b'), (S, 'a', 'b'), ()])
@@ -227,13 +235,28 @@ def test_json_extract_path_text_without_a_starrocks_spelling_is_refused(args):
 
 def test_json_object_insert_text_value_stays_a_json_string():
     assert sql(func.json_object_insert(func.parse_json(S), 'k', S, True), 'starrocks') == (
-        """json_set(parse_json(s), '$."k"', CASE WHEN (s IS NULL) THEN NULL """
-        """ELSE json_query(to_json(named_struct('v', s)), '$.v') END)""")
+        """CASE WHEN (s IS NULL) THEN parse_json(s) """
+        """ELSE json_set(parse_json(s), '$."k"', json_query(to_json(named_struct('v', s)), '$.v')) END""")
 
 
-def test_json_object_insert_number_value_and_per_row_key():
-    assert sql(func.json_object_insert(func.parse_json(S), S, 99, True), 'starrocks') == \
-        """json_set(parse_json(s), concat('$."', s, '"'), 99)"""
+def test_json_object_insert_per_row_key_is_refused():
+    with pytest.raises(CompileError, match='literal key'):
+        sql(func.json_object_insert(func.parse_json(S), S, 99, True), 'starrocks')
+
+
+def test_json_object_insert_untyped_json_looking_text_stays_a_string():
+    # upper('{"a":1}') is untyped (NullType); raw into json_set StarRocks parsed it into {"k": {"A": 1}}.
+    compiled = sql(func.json_object_insert(func.parse_json(S), 'k', func.upper(S), True), 'starrocks')
+    assert "json_query(to_json(named_struct('v', upper(" in compiled and compiled.endswith("'$.v')) END")
+
+
+def test_json_object_insert_typed_number_and_boolean_stay_raw():
+    number = sqlalchemy.type_coerce(func.round(column('x', sqlalchemy.Float), 1), sqlalchemy.Numeric)
+    flag = sqlalchemy.type_coerce(column('x', sqlalchemy.Float) > 1, sqlalchemy.Boolean)
+    assert sql(func.json_object_insert(func.parse_json(S), 'k', flag, True), 'starrocks') == \
+        """CASE WHEN ((x > 1) IS NULL) THEN parse_json(s) ELSE json_set(parse_json(s), '$."k"', x > 1) END"""
+    compiled = sql(func.json_object_insert(func.parse_json(S), 'k', number, True), 'starrocks')
+    assert "ELSE json_set(parse_json(s), '$.\"k\"', round(" in compiled and 'named_struct' not in compiled
 
 
 def test_json_object_insert_without_update_is_refused():
@@ -259,10 +282,15 @@ def test_json_and_time_zone_functions_keep_other_dialects(dialect, name, args):
     assert sql(getattr(func, name)(*args), dialect) == sql(sqlalchemy.sql.functions.Function(name, *args), dialect)
 
 
-def test_other_group_constructs_are_left_for_snowflake_to_answer():
-    # A lookahead has no Snowflake spelling: carried as written, and it numbers no group.
-    assert sql(func.regexp_extract(S, '(?=a)(?:b)(c)', 1), 'snowflake') == \
-        "IFF(s IS NULL, NULL, COALESCE(REGEXP_SUBSTR(s, '(?=a)(b)(c)', 1, 1, 'ce', 2), ''))"
+@pytest.mark.parametrize('expression', [
+    func.regexp_extract(S, '(?=a)(?:b)(c)', 1),       # a lookahead
+    func.regexp_instr(S, '(?i)a(?m)^b'),              # a flag group past the start
+    func.regexp_substr(S, '(?i:a.b)'),                # a scoped flag over more than text
+    func.regexp_replace(S, '(?-i:a)(?:b)', 'x'),      # a flag turned off
+])
+def test_construct_without_an_exact_snowflake_spelling_keeps_the_old_rendering(expression):
+    # Rather than emit a pattern that means something else.
+    assert sql(expression, 'snowflake') == default(expression.name, *expression.clauses)
 
 
 def test_per_row_group_number_cannot_follow_renumbered_groups():
@@ -283,6 +311,10 @@ def test_regexp_extract_arity_is_checked_on_snowflake():
     # An escaped brace is text, so the `?` after it is a quantifier, not laziness.
     (r'a\{2,3}?(?:x)(y)', 1, r'a\\{2,3}?(x)(y)', 2),
     (r'\x{110000}(?:a)(b)', 1, r'\\x{110000}(a)(b)', 2),
+    # A leading `]` (after an optional `^`) is a member, so the `(` after it is still inside the brackets.
+    ('[^]a(](?:x)(b)', 1, '[^]a(](x)(b)', 2),
+    # A nested non-capturing group inherits the dotall of the group around it.
+    (r'(?s:a(?:b.))(c)', 1, r'(a(b[\\s\\S]))(c)', 3),
 ])
 def test_scanner_edges(pattern, group, expected_pattern, expected_group):
     assert sql(func.regexp_extract(S, pattern, group), 'snowflake') == (
@@ -298,3 +330,104 @@ def test_value_reading_starrocks_compiles_are_not_statement_cached():
     # The StarRocks path/key is rendered from the bound value; a cache hit would reuse another call's path.
     assert func.json_extract_path_text(S, 'a')._generate_cache_key() is None
     assert func.json_object_insert(S, 'k', 1, True)._generate_cache_key() is None
+
+
+@pytest.mark.parametrize('pattern, expected, flags', [
+    ('(?i)(?m)^a', '^a', 'im'),                      # Savant's (?i) before the user's own flags
+    ('(?s)(?i)(?m)a', 'a', 'ims'),
+])
+def test_every_leading_flag_group_becomes_a_parameter(pattern, expected, flags):
+    assert sql(func.regexp_instr(S, pattern), 'snowflake') == f"REGEXP_INSTR(s, '{expected}', 1, 1, 0, '{flags}')"
+
+
+@pytest.mark.parametrize('pattern, group, expected_pattern, expected_group, flags', [
+    # Prophecy's case-insensitive keyword alternation.
+    (r'\s(?i:AND|or)\s(x)', 1, r'\\s([Aa][Nn][Dd]|[Oo][Rr])\\s(x)', 2, 'ce'),
+    # Already case-insensitive throughout: the group only stops being non-capturing.
+    (r'(?i)(?i:ab)(x)', 1, '(ab)(x)', 2, 'ie'),
+])
+def test_scoped_case_flag_over_text_spells_both_cases(pattern, group, expected_pattern, expected_group, flags):
+    assert sql(func.regexp_extract(S, pattern, group), 'snowflake') == (
+        f"IFF(s IS NULL, NULL, COALESCE(REGEXP_SUBSTR(s, '{expected_pattern}', 1, 1, '{flags}', {expected_group}), ''))")
+
+
+def test_control_characters_are_literal_but_nul_stays_an_escape():
+    assert sql(func.regexp_instr(S, r'(?i)\x00\x{1F}\x85'), 'snowflake') == \
+        "REGEXP_INSTR(s, '\\\\x00\x1f\x85', 1, 1, 0, 'i')"
+
+
+def test_scoped_case_flag_over_a_multi_character_case_keeps_the_old_rendering():
+    # 'ß'.upper() is 'SS' and no other letter folds with it; [SSß] would match a lone S.
+    rendered = sql(func.regexp_extract(S, r'(?i:ße)(x)', 1), 'snowflake')
+    assert '[S' not in rendered and '(?i:ße)' in rendered
+
+
+def test_snowflake_regexp_compiles_are_not_statement_cached():
+    # The Snowflake rendering is built from the pattern's value; a cache hit would reuse another call's pattern.
+    for expression in (func.regexp_instr(S, 'a'), func.regexp_substr(S, 'a'), func.regexp_extract(S, 'a', 1)):
+        assert expression._generate_cache_key() is None
+    # regexp_replace is a plain (cacheable) Function: safe only while the dialect never caches statements.
+    assert DIALECTS['snowflake'].supports_statement_cache is False
+
+
+@pytest.mark.parametrize('letter', ['ς', 'σ', 'Σ', 'k', 'K', '\u212a', 's', '\u017f', 'å', '\u212b', '\u0131', '\u0130'])
+def test_scoped_case_flag_over_a_letter_with_extra_case_folds_keeps_the_old_rendering(letter):
+    rendered = sql(func.regexp_extract(S, f'(?i:a{letter})(x)', 1), 'snowflake')
+    assert '[Aa]' not in rendered and f'(?i:a{letter})' in rendered
+
+
+@pytest.mark.parametrize('value, expected', [
+    # An untyped (NullType) result, such as substr's, is wrapped: its text may read as JSON.
+    (func.substr(S, 1, 2), "json_query(to_json(named_struct('v', substr("),
+    (column('t', sqlalchemy.Text), "json_query(to_json(named_struct('v', t)), '$.v')"),
+    (column('ts', sqlalchemy.DateTime), "json_query(to_json(named_struct('v', CAST(ts AS STRING))), '$.v')"),
+    (column('d', sqlalchemy.Date), "json_query(to_json(named_struct('v', CAST(d AS STRING))), '$.v')"),
+    (column('n', sqlalchemy.Numeric(38, 10)), None),
+    (column('i', sqlalchemy.Integer), None),
+    (sqlalchemy.literal(True), None),
+    (column('j', sqlalchemy.JSON), None),
+])
+def test_json_object_insert_wraps_all_but_typed_numbers_booleans_and_json(value, expected):
+    compiled = sql(func.json_object_insert(func.parse_json(S), 'k', value, True), 'starrocks')
+    if expected is None:
+        # to_json would store a DECIMAL as a string and a boolean as 1
+        assert 'named_struct' not in compiled
+    else:
+        assert expected in compiled
+
+
+@pytest.mark.parametrize('key', ['k"x', 'y[0]', 'a[', 'a]', 'a\\b', '$', ''])
+def test_json_object_insert_key_starrocks_misreads_is_refused(key):
+    with pytest.raises(CompileError, match='key'):
+        sql(func.json_object_insert(func.parse_json(S), key, 1, True), 'starrocks')
+
+
+@pytest.mark.parametrize('key', ['a b', 'x.y', 'a*', '*', 'é', 'a$', 'a-b', 'a:b'])
+def test_json_object_insert_key_starrocks_reads_literally_is_kept(key):
+    assert f'$."{key}"' in sql(func.json_object_insert(func.parse_json(S), key, 1, True), 'starrocks')
+
+
+@pytest.mark.parametrize('path', ['a[', 'a]', '["y[0]"]', '["a\\\\b"]', '["$"]', '[""]'])
+def test_json_extract_path_text_key_starrocks_misreads_is_refused(path):
+    with pytest.raises(CompileError, match='json_extract_path_text'):
+        sql(func.json_extract_path_text(S, path), 'starrocks')
+
+
+def test_json_object_insert_decorated_number_stays_raw():
+    from plaidcloud.rpc.database import PlaidNumeric
+    compiled = sql(func.json_object_insert(func.parse_json(S), 'k', column('n', PlaidNumeric), True), 'starrocks')
+    assert 'named_struct' not in compiled
+
+
+def test_dotall_group_leaves_a_dot_after_it_alone():
+    assert sql(func.regexp_instr(S, r'(?s:a.)b.c'), 'snowflake') == \
+        r"REGEXP_INSTR(s, '(a[\\s\\S])b.c', 1, 1, 0, 'c')"
+
+
+@pytest.mark.parametrize('value', [
+    column('t', sqlalchemy.Text), column('n', sqlalchemy.Numeric(38, 10)), column('i', sqlalchemy.Integer),
+    sqlalchemy.null(), sqlalchemy.cast(sqlalchemy.null(), sqlalchemy.Integer),
+])
+def test_json_object_insert_null_value_returns_the_document_unchanged(value):
+    compiled = sql(func.json_object_insert(func.parse_json(S), 'k', value, True), 'starrocks')
+    assert compiled.startswith('CASE WHEN (') and 'IS NULL) THEN parse_json(s) ELSE json_set(' in compiled
