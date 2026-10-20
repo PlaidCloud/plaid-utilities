@@ -1396,9 +1396,12 @@ class TestConverterRenamesStarrocks(StarrocksTest):
         # sc-30414: this was a plain rename to regexp(), which answers 1/0 —
         # right only inside the converter's `regexp_instr(...) > 0` idiom and
         # silently wrong everywhere else. Databend returns the 1-based offset,
-        # 0 when absent, NULL when an argument is NULL.
+        # 0 when absent, NULL when an argument is NULL. The offset is one past
+        # the shortest prefix the pattern follows, not where the matched TEXT
+        # first occurs (locate), which was wrong for '12 abc 12' / '\d+$'.
         self.assertEqual(
-            "CASE WHEN (regexp('s', 'p') = 1) THEN locate(regexp_extract('s', 'p', 0), 's') "
+            "CASE WHEN (regexp('s', 'p') = 1) THEN char_length(regexp_extract('s', "
+            "concat('^((?s:.*?))(?:', 'p', ')'), 1)) + 1 "
             "WHEN (regexp('s', 'p') = 0) THEN 0 ELSE NULL END",
             self._sql(sqlalchemy.func.regexp_instr('s', 'p')))
 
@@ -2981,6 +2984,7 @@ class TestStarrocksDefaultOkSweepMembership(unittest.TestCase):
             sf.starts_with: (sqlalchemy.column('s'), 'a'),
             sf.ends_with: (sqlalchemy.column('s'), 'a'),
             sf.date_format: (sqlalchemy.column('d'), '%Y-%m-%d'),
+            sf.regexp_extract: (sqlalchemy.column('s'), 'p', 1),
         }
         self.assertEqual(set(args_by_class), sf._STARROCKS_DEFAULT_OK)
         for cls, args in args_by_class.items():
