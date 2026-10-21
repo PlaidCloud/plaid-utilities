@@ -2988,6 +2988,7 @@ class TestStarrocksDefaultOkSweepMembership(unittest.TestCase):
             sf.ends_with: (sqlalchemy.column('s'), 'a'),
             sf.date_format: (sqlalchemy.column('d'), '%Y-%m-%d'),
             sf.regexp_extract: (sqlalchemy.column('s'), 'p', 1),
+            sf.json_pretty: (sqlalchemy.func.parse_json(sqlalchemy.column('s')),),
         }
         self.assertEqual(set(args_by_class), sf._STARROCKS_DEFAULT_OK)
         for cls, args in args_by_class.items():
