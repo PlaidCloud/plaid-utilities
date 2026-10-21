@@ -2449,7 +2449,7 @@ def _titlecase_argument(element, compiler, **kw):
 
 
 def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
-                               sentinel, split_fn, transform_fn, join_fn):
+                               sentinel, split_fn, transform_fn, join_fn, lambda_head='tc_word -> '):
     r"""Render Alteryx TitleCase where the dialect's builtins cannot express it.
 
     Marks each word start with a sentinel, splits there so every chunk is one
@@ -2477,6 +2477,7 @@ def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
         split_fn (str): split-string-to-array function name.
         transform_fn (str): map-over-array function name.
         join_fn (str): join-array-to-string function name.
+        lambda_head (str): how the dialect opens a one-argument lambda over `tc_word`.
 
     Returns:
         str: the rendered title-case expression.
@@ -2484,7 +2485,7 @@ def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
     marked = (f"regexp_replace({value}, '{word_pattern}', "
               f"concat({sentinel}, '{group_ref}'){replace_tail})")
     chunks = f'{split_fn}({marked}, {sentinel})'
-    cased = (f'{transform_fn}({chunks}, tc_word -> '
+    cased = (f'{transform_fn}({chunks}, {lambda_head}'
              f'concat(upper(substr(tc_word, 1, 1)), lower(substr(tc_word, 2))))')
     return f"{join_fn}({cased}, '')"
 
@@ -2571,6 +2572,8 @@ def compile_titlecase_duckdb(element, compiler, **kw):
         split_fn='str_split',
         transform_fn='list_transform',
         join_fn='array_to_string',
+        # DuckDB 2.0 rejects the `x -> expr` arrow; the Python-style form parses since 1.3.
+        lambda_head='lambda tc_word: ',
     )
 
 
@@ -3147,6 +3150,20 @@ def compile_json_object_insert_starrocks(element, compiler, **kw):
         value = func.json_query(func.to_json(func.named_struct('v', value)), '$.v')
     # A NULL value leaves the document as it was, as Databend does; json_set would make the whole result NULL.
     return compiler.process(case((raw_value.is_(None), document), else_=func.json_set(document, path, value)), **kw)
+
+
+@compiles(json_object_insert, 'snowflake')
+def compile_json_object_insert_snowflake(element, compiler, **kw):
+    # OBJECT_INSERT(object, key, value, update_flag) takes the key as a plain string (no path syntax to misread) and
+    # stores a text value as a JSON string and a number or boolean as that type, as Databend does; its update flag
+    # means the same (FALSE fails on a key already present). A NULL value leaves the object as it was, as Databend does.
+    clauses = list(element.clauses)
+    if len(clauses) not in (3, 4):
+        raise CompileError('json_object_insert: Snowflake is given (object, key, value[, update_flag])')
+    if _string_value(clauses[1]) == '':
+        raise CompileError('json_object_insert: Snowflake does not take an empty key')
+    document, value = clauses[0], clauses[2]
+    return compiler.process(case((value.is_(None), document), else_=func.object_insert(*clauses)), **kw)
 
 
 class convert_timezone(GenericFunction):

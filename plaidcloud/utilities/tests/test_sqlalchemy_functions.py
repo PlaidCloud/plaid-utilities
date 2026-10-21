@@ -2654,6 +2654,9 @@ class TestTitlecaseDialectContract(unittest.TestCase):
         rendered = self._spell('duckdb')
         self.assertIn(", 'g')", rendered)
         self.assertIn(r"'\1'", rendered)
+        # DuckDB 2.0 rejects the `x -> expr` arrow; the Python-style lambda parses on every DuckDB since 1.3.
+        self.assertIn('lambda tc_word: ', rendered)
+        self.assertNotIn('->', rendered)
 
     @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
     def test_matches_starrocks_semantics(self):
@@ -2673,7 +2676,7 @@ class TestTitlecaseDialectContract(unittest.TestCase):
                       .compile(dialect=d, compile_kwargs={"literal_binds": True}))
             with self.subTest(value=value):
                 self.assertEqual(_starrocks_initcap(value),
-                                 con.sql(f'select {sql}').fetchone()[0])
+                                 con.execute(f'select {sql}').fetchone()[0])
 
 
 class TestStarrocksUnterminatedLiteral(unittest.TestCase):

@@ -272,10 +272,17 @@ def test_convert_timezone_becomes_convert_tz_from_utc():
         sql(func.convert_timezone('UTC', 'America/New_York', moment), 'starrocks')
 
 
+@pytest.mark.parametrize('dialect', ['databend', 'databricks'])
+@pytest.mark.parametrize('name, args', [
+    ('json_object_insert', (S, 'k', S, True)),
+])
+def test_json_object_insert_keeps_other_dialects(dialect, name, args):
+    assert sql(getattr(func, name)(*args), dialect) == sql(sqlalchemy.sql.functions.Function(name, *args), dialect)
+
+
 @pytest.mark.parametrize('dialect', ['databend', 'snowflake', 'databricks'])
 @pytest.mark.parametrize('name, args', [
     ('json_extract_path_text', (S, 'a.b[0]')),
-    ('json_object_insert', (S, 'k', S, True)),
     ('convert_timezone', ('America/New_York', S)),
 ])
 def test_json_and_time_zone_functions_keep_other_dialects(dialect, name, args):
@@ -431,3 +438,32 @@ def test_dotall_group_leaves_a_dot_after_it_alone():
 def test_json_object_insert_null_value_returns_the_document_unchanged(value):
     compiled = sql(func.json_object_insert(func.parse_json(S), 'k', value, True), 'starrocks')
     assert compiled.startswith('CASE WHEN (') and 'IS NULL) THEN parse_json(s) ELSE json_set(' in compiled
+
+
+# --- Snowflake JSON ------------------------------------------------------------------------------------------
+
+def test_json_object_insert_snowflake_is_object_insert_with_a_null_guard():
+    assert sql(func.json_object_insert(func.parse_json(S), 'k', S, True), 'snowflake') == (
+        "CASE WHEN (s IS NULL) THEN parse_json(s) ELSE object_insert(parse_json(s), 'k', s, true) END")
+
+
+def test_json_object_insert_snowflake_passes_the_update_flag_and_a_per_row_key():
+    key = column('k', sqlalchemy.Text)
+    assert sql(func.json_object_insert(func.parse_json(S), key, 1, False), 'snowflake') == (
+        'CASE WHEN (1 IS NULL) THEN parse_json(s) ELSE object_insert(parse_json(s), k, 1, false) END')
+
+
+@pytest.mark.parametrize('key', ['a"b', 'a[0]', '$', 'a.b'])
+def test_json_object_insert_snowflake_keys_are_plain_strings(key):
+    assert sql(func.json_object_insert(func.parse_json(S), key, 1, True), 'snowflake') == (
+        f"CASE WHEN (1 IS NULL) THEN parse_json(s) ELSE object_insert(parse_json(s), '{key}', 1, true) END")
+
+
+def test_json_object_insert_snowflake_empty_key_is_refused():
+    with pytest.raises(CompileError, match='empty key'):
+        sql(func.json_object_insert(func.parse_json(S), '', 1, True), 'snowflake')
+
+
+def test_json_object_insert_snowflake_needs_a_document_key_and_value():
+    with pytest.raises(CompileError):
+        sql(func.json_object_insert(func.parse_json(S), 'k'), 'snowflake')
