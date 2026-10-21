@@ -3654,6 +3654,9 @@ _STARROCKS_DEFAULT_OK = frozenset({
     natural_sort_key,
     # Same name, arguments and '' on no match as Databend (verified live, bugfixes2 StarRocks 4.1).
     regexp_extract,
+    # json_pretty(parse_json(x)) indents the document (verified live, bugfixes2 StarRocks 4.1); it writes
+    # `"a" : 1` where Databend writes `"a": 1`.
+    json_pretty,
 })
 
 
