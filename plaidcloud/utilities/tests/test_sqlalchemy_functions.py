@@ -2654,6 +2654,9 @@ class TestTitlecaseDialectContract(unittest.TestCase):
         rendered = self._spell('duckdb')
         self.assertIn(", 'g')", rendered)
         self.assertIn(r"'\1'", rendered)
+        # DuckDB 2.0 rejects the `x -> expr` arrow; the Python-style lambda parses on every DuckDB since 1.3.
+        self.assertIn('lambda tc_word: ', rendered)
+        self.assertNotIn('->', rendered)
 
     @unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
     def test_matches_starrocks_semantics(self):

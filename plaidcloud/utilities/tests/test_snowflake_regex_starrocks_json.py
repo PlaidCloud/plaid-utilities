@@ -462,3 +462,8 @@ def test_json_object_insert_snowflake_keys_are_plain_strings(key):
 def test_json_object_insert_snowflake_empty_key_is_refused():
     with pytest.raises(CompileError, match='empty key'):
         sql(func.json_object_insert(func.parse_json(S), '', 1, True), 'snowflake')
+
+
+def test_json_object_insert_snowflake_needs_a_document_key_and_value():
+    with pytest.raises(CompileError):
+        sql(func.json_object_insert(func.parse_json(S), 'k'), 'snowflake')
