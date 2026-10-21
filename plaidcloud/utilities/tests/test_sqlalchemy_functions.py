@@ -2673,7 +2673,7 @@ class TestTitlecaseDialectContract(unittest.TestCase):
                       .compile(dialect=d, compile_kwargs={"literal_binds": True}))
             with self.subTest(value=value):
                 self.assertEqual(_starrocks_initcap(value),
-                                 con.sql(f'select {sql}').fetchone()[0])
+                                 con.execute(f'select {sql}').fetchone()[0])
 
 
 class TestStarrocksUnterminatedLiteral(unittest.TestCase):

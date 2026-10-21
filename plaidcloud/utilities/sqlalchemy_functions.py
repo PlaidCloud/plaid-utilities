@@ -2449,7 +2449,7 @@ def _titlecase_argument(element, compiler, **kw):
 
 
 def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
-                               sentinel, split_fn, transform_fn, join_fn):
+                               sentinel, split_fn, transform_fn, join_fn, lambda_head='tc_word -> '):
     r"""Render Alteryx TitleCase where the dialect's builtins cannot express it.
 
     Marks each word start with a sentinel, splits there so every chunk is one
@@ -2477,6 +2477,7 @@ def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
         split_fn (str): split-string-to-array function name.
         transform_fn (str): map-over-array function name.
         join_fn (str): join-array-to-string function name.
+        lambda_head (str): how the dialect opens a one-argument lambda over `tc_word`.
 
     Returns:
         str: the rendered title-case expression.
@@ -2484,7 +2485,7 @@ def _render_titlecase_by_words(value, *, word_pattern, group_ref, replace_tail,
     marked = (f"regexp_replace({value}, '{word_pattern}', "
               f"concat({sentinel}, '{group_ref}'){replace_tail})")
     chunks = f'{split_fn}({marked}, {sentinel})'
-    cased = (f'{transform_fn}({chunks}, tc_word -> '
+    cased = (f'{transform_fn}({chunks}, {lambda_head}'
              f'concat(upper(substr(tc_word, 1, 1)), lower(substr(tc_word, 2))))')
     return f"{join_fn}({cased}, '')"
 
@@ -2571,6 +2572,8 @@ def compile_titlecase_duckdb(element, compiler, **kw):
         split_fn='str_split',
         transform_fn='list_transform',
         join_fn='array_to_string',
+        # DuckDB 2.0 rejects the `x -> expr` arrow; the Python-style form parses since 1.3.
+        lambda_head='lambda tc_word: ',
     )
 
 
