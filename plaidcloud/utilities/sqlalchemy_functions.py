@@ -1,6 +1,8 @@
 # coding=utf-8
 # pylint: disable=function-redefined
 
+import collections
+import functools
 import re
 import warnings
 from contextlib import contextmanager
@@ -2750,7 +2752,7 @@ class regexp_instr(GenericFunction):
     StarRocks needs a rewrite, not a rename (sc-30414), and Snowflake ships the
     same contract natively."""
     name = 'regexp_instr'
-    inherit_cache = True
+    inherit_cache = False  # the Snowflake rendering reads the pattern's value (see the Snowflake regexp section)
 
 
 @compiles(regexp_instr, 'starrocks')
@@ -2767,12 +2769,19 @@ def compile_regexp_instr_starrocks(element, compiler, **kw):
     # than the match itself. The CASE is keyed on regexp()'s 1/0/NULL rather
     # than on a truthiness test so a NULL argument still yields NULL instead
     # of collapsing to 0.
+    #
+    # The offset is one more than the length of the text before the match: the
+    # shortest prefix the pattern follows, which a lazy capture finds. This used
+    # to be locate(<the matched text>, col) -- the first place that TEXT occurs,
+    # so '12 abc 12' with '\d+$' answered 1 instead of 8. `(?s:` lets the prefix
+    # cross a line break; regexp_extract honours laziness over a column.
     clauses = list(element.clauses)
     col, pattern = clauses[0], clauses[1]
     matched = func.regexp(col, pattern)
+    prefix = func.regexp_extract(col, func.concat('^((?s:.*?))(?:', pattern, ')'), 1)
     return compiler.process(
         sqlalchemy.case(
-            (matched == 1, func.locate(func.regexp_extract(col, pattern, 0), col)),
+            (matched == 1, func.char_length(prefix) + 1),
             (matched == 0, sqlalchemy.literal(0)),
             else_=sqlalchemy.null(),
         ),
@@ -2782,7 +2791,7 @@ def compile_regexp_instr_starrocks(element, compiler, **kw):
 
 class regexp_substr(GenericFunction):
     name = 'regexp_substr'
-    inherit_cache = True
+    inherit_cache = False  # as regexp_instr
 
 @compiles(regexp_substr, 'starrocks')
 def compile_regexp_substr_starrocks(element, compiler, **kw):
@@ -2797,6 +2806,363 @@ def compile_regexp_substr_starrocks(element, compiler, **kw):
     clauses = list(element.clauses)
     col, pattern = clauses[0], clauses[1]
     return compiler.process(func.nullif(func.regexp_extract(col, pattern, 0), ''), **kw)
+
+
+class regexp_extract(GenericFunction):
+    """Databend regexp_extract(str, pat, group): the group's text in the first
+    match, '' when nothing matches. StarRocks spells it alike (default rendering);
+    Snowflake has no regexp_extract (see compile_regexp_extract_snowflake)."""
+    name = 'regexp_extract'
+    inherit_cache = False  # as regexp_instr
+
+
+# ---------------------------------------------------------------------------
+# Snowflake regular expressions
+# ---------------------------------------------------------------------------
+# Snowflake reads POSIX ERE plus Perl's \d \s \w \b classes: no inline flags,
+# no non-capturing groups and no lazy quantifiers (docs.snowflake.com
+# functions-regexp; not run live -- the trial account is suspended). The
+# converters emit Databend/RE2 spellings, so a pattern carrying one of those
+# constructs is rewritten for Snowflake; every other call keeps its default
+# rendering byte for byte.
+#
+# The rewrite reads the pattern's VALUE, so a compiled statement must not be
+# reused for another pattern: the regexp classes opt out of the statement
+# cache. regexp_replace is a plain Function (see its hook) and stays cacheable;
+# that is safe because snowflake-sqlalchemy turns the statement cache off
+# (supports_statement_cache = False, pinned by a test).
+
+#: Leading inline flags Snowflake carries as its `parameters` argument.
+_SNOWFLAKE_LEADING_FLAGS = re.compile(r'\(\?([ims]+)\)')
+#: A scoped flag group whose body is plain text and alternation: (?i:AND|OR).
+_SNOWFLAKE_SCOPED_TEXT = re.compile(r'\(\?([ims]+):([^\\()\[\]{}.*+?^$]*)\)')
+_SNOWFLAKE_REGEX_META = frozenset('.^$|?*+()[]{}\\')
+_SNOWFLAKE_CLASS_META = frozenset('[]\\^-')
+_HEX_ESCAPE = re.compile(r'\\x(?:\{([0-9A-Fa-f]+)\}|([0-9A-Fa-f]{2}))')
+_REPETITION_END = re.compile(r'(?<!\\)\{\d+(?:,\d*)?$')
+
+
+@functools.cache
+def _case_fold_sizes():
+    return collections.Counter(c.casefold() for c in map(chr, range(0x110000)) if len(c.casefold()) == 1)
+
+
+def _has_two_cases(letter):
+    """The letter folds to one character, with at most its lower and upper case in its fold class."""
+    return (len(letter.upper()) == 1 and len(letter.lower()) == 1 and _case_fold_sizes()[letter.casefold()] <= 2
+            and letter.upper().casefold() == letter.casefold() and letter.lower().casefold() == letter.casefold())
+
+
+def _snowflake_regex(pattern, strip_lazy):
+    """`pattern` (RE2 spelling) as Snowflake reads it: (pattern, flags, group numbers, lazy quantifier), or None
+    when it holds a construct with no exact Snowflake spelling (the call then keeps its old rendering).
+
+    Every leading flag group goes to `flags`. `group numbers[n]` is the new number of the pattern's capture
+    group n: a non-capturing `(?:` / `(?s:` becomes a plain group, which shifts the groups after it. `(?s:X)` has
+    no flag scope on Snowflake, so its dots become `[\\s\\S]` (the rest of the pattern keeps `.` as written);
+    `(?i:text|text)` spells each letter's two cases. A `\\x{HH}` other than NUL becomes the character itself. A lazy
+    quantifier is dropped when `strip_lazy` (a match's start does not depend on it), else kept and returned.
+    """
+    flags = set()
+    while leading := _SNOWFLAKE_LEADING_FLAGS.match(pattern):
+        flags, pattern = flags | set(leading.group(1)), pattern[leading.end():]
+    out, groups, dotall, lazy = [], [0], [False], None
+    count = index = 0
+    class_start = -1
+    while index < len(pattern):
+        char = pattern[index]
+        in_class = class_start >= 0
+        if char == '\\':
+            escape = _HEX_ESCAPE.match(pattern, index)
+            code = int(escape.group(1) or escape.group(2), 16) if escape else None
+            if code is not None and (code > 0x10FFFF or 0xD800 <= code <= 0xDFFF or code == 0):
+                escape = None  # NUL or no such character: the escape stays as written
+            if escape:
+                literal = chr(code)
+                meta = _SNOWFLAKE_CLASS_META if in_class else _SNOWFLAKE_REGEX_META
+                out.append('\\' + literal if literal in meta else literal)
+                index = escape.end()
+            else:
+                out.append(pattern[index:index + 2])
+                index += 2
+            continue
+        if in_class and pattern.startswith('[:', index) and ':]' in pattern[index + 2:]:
+            # A POSIX class inside the brackets ends at its own `:]`, not the bracket's `]`.
+            end = pattern.index(':]', index + 2) + 2
+            out.append(pattern[index:end])
+            index = end
+            continue
+        if in_class:
+            # `[]a]` and `[^]a]` hold `]`; only a later `]` closes the class.
+            if char == ']' and index > class_start + (2 if pattern[class_start + 1:class_start + 2] == '^' else 1):
+                class_start = -1
+            out.append(char)
+        elif char == '[':
+            class_start = index
+            out.append(char)
+        elif char == '(':
+            named = re.match(r'\(\?P?<(?![=!])[^>]*>', pattern[index:])
+            scoped = _SNOWFLAKE_SCOPED_TEXT.match(pattern, index)
+            opener = '(?s:' if pattern.startswith('(?s:', index) else '(?:' if pattern.startswith('(?:', index) else None
+            if scoped and not opener and 'i' in scoped.group(1) and 'i' not in flags \
+                    and any(c.isalpha() and not _has_two_cases(c) for c in scoped.group(2)):
+                return None  # a letter with more than a lower and an upper case (ß, σ/ς/Σ, K/Kelvin): no per-letter spelling
+            if scoped and not opener:
+                body = scoped.group(2)
+                if 'i' in scoped.group(1) and 'i' not in flags:
+                    body = ''.join(f'[{c.upper()}{c.lower()}]' if c.isalpha() else c for c in body)
+                count += 1
+                out.append(f'({body})')
+                index = scoped.end()
+                continue
+            if pattern.startswith('(?', index) and not (opener or named):
+                return None
+            count += 1
+            if not opener:
+                groups.append(count)
+            dotall.append(dotall[-1] or opener == '(?s:')
+            out.append('(')
+            index += len(opener) if opener else named.end() if named else 1
+            continue
+        elif char == ')':
+            if len(dotall) > 1:
+                dotall.pop()
+            out.append(char)
+        elif char == '.' and dotall[-1]:
+            out.append('[\\s\\S]')
+        elif (char in '*+?' or (char == '}' and _REPETITION_END.search(pattern, 0, index))) \
+                and pattern[index + 1:index + 2] == '?':
+            lazy = lazy or char + '?'
+            out.append(char if strip_lazy else char + '?')
+            index += 2
+            continue
+        else:
+            out.append(char)
+        index += 1
+    return ''.join(out), ''.join(sorted(flags)) or 'c', groups, lazy
+
+
+def _string_value(clause):
+    value = getattr(clause, 'effective_value', None) if isinstance(clause, sqlalchemy.sql.elements.BindParameter) else None
+    return value if isinstance(value, str) else None
+
+
+def _snowflake_pattern(pattern, strip_lazy, always=False, flag_suffix=''):
+    """(pattern clause, flags clause, group numbers or None, lazy) for a Snowflake regexp call, or None when
+    the call needs no rewrite and keeps its default rendering. A literal pattern is translated; a pattern known
+    only per row has its leading `(?i)` read at run time (nothing else in it can be), when a literal in it
+    carries one or `always`."""
+    value = _string_value(pattern)
+    if value is not None:
+        read = _snowflake_regex(value, strip_lazy)
+        if read is None or (not always and read[0] == value and read[1] == 'c'):
+            return None
+        translated, flags, groups, lazy = read
+        return sqlalchemy.literal(translated), sqlalchemy.literal(flags + flag_suffix), groups, lazy
+    if not always and not any((_string_value(c) or '').startswith('(?i)')
+                              for c in sqlalchemy.sql.visitors.iterate(pattern)):
+        return None
+    insensitive = func.startswith(pattern, '(?i)')
+    return (case((insensitive, func.substr(pattern, 5)), else_=pattern),
+            case((insensitive, 'i' + flag_suffix), else_='c' + flag_suffix), None, None)
+
+
+@compiles(regexp_instr, 'snowflake')
+def compile_regexp_instr_snowflake(element, compiler, **kw):
+    clauses = list(element.clauses)
+    read = _snowflake_pattern(clauses[1], strip_lazy=True) if len(clauses) == 2 else None
+    if read is None:
+        return compiler.visit_function(element, **kw)
+    pattern, flags = (compiler.process(c, **kw) for c in read[:2])
+    return f'REGEXP_INSTR({compiler.process(clauses[0], **kw)}, {pattern}, 1, 1, 0, {flags})'
+
+
+@compiles(regexp_substr, 'snowflake')
+def compile_regexp_substr_snowflake(element, compiler, **kw):
+    clauses = list(element.clauses)
+    read = _snowflake_pattern(clauses[1], strip_lazy=False) if len(clauses) == 2 else None
+    if read is None or read[3]:
+        # A lazy quantifier decides the extent and Snowflake has none: the call keeps its rendering.
+        return compiler.visit_function(element, **kw)
+    pattern, flags = (compiler.process(c, **kw) for c in read[:2])
+    return f'REGEXP_SUBSTR({compiler.process(clauses[0], **kw)}, {pattern}, 1, 1, {flags})'
+
+
+@compiles(regexp_extract, 'snowflake')
+def compile_regexp_extract_snowflake(element, compiler, **kw):
+    # REGEXP_SUBSTR with 'e' and a group number. NULL (no match, or a group
+    # that took no part) becomes Databend's '', keeping NULL for a NULL subject.
+    clauses = list(element.clauses)
+    if len(clauses) not in (2, 3):
+        raise CompileError('regexp_extract takes (subject, pattern[, group])')
+    subject, pattern, *rest = clauses
+    group = rest[0] if rest else sqlalchemy.literal(0)
+    number = getattr(group, 'effective_value', None)
+    whole = number == 0
+    read = _snowflake_pattern(pattern, strip_lazy=False, always=True, flag_suffix='' if whole else 'e')
+    if read is None:
+        return compiler.visit_function(element, **kw)
+    new_pattern, flags, groups, lazy = read
+    if lazy:
+        # No earlier rendering to keep: Snowflake has no regexp_extract.
+        raise CompileError(f'regexp_extract: Snowflake has no non-greedy quantifiers, and {lazy!r} decides which '
+                           'text this pattern matches')
+    if groups is not None and isinstance(number, int) and 0 <= number < len(groups):
+        group = sqlalchemy.literal(groups[number])
+    elif groups is not None and number is None and groups != list(range(len(groups))):
+        raise CompileError('regexp_extract: the group number must be a literal when Snowflake renumbers the '
+                           'pattern\'s groups')
+    args = [subject, new_pattern, sqlalchemy.literal(1), sqlalchemy.literal(1), flags] + ([] if whole else [group])
+    found = ', '.join(compiler.process(c, **kw) for c in args)
+    unknown = subject.is_(None) if _string_value(pattern) is not None else sqlalchemy.or_(subject.is_(None), pattern.is_(None))
+    return f"IFF({compiler.process(unknown, **kw)}, NULL, COALESCE(REGEXP_SUBSTR({found}), ''))"
+
+
+def _renumber_replacement(replacement, groups):
+    """`replacement` with each `\\n` group reference renumbered to `groups[n]`."""
+    def renumber(match):
+        if match.group(0) == '\\\\' or int(match.group(1)) >= len(groups):
+            return match.group(0)
+        if groups[int(match.group(1))] > 9:
+            raise CompileError('regexp_replace: Snowflake has no replacement spelling for a group above 9')
+        return f'\\{groups[int(match.group(1))]}'
+    return re.sub(r'\\\\|\\(\d)', renumber, replacement)
+
+
+@compiles(sqlalchemy.sql.functions.Function, 'snowflake')
+def compile_regexp_replace_snowflake(element, compiler, **kw):
+    # regexp_replace has no GenericFunction here: the Alteryx isolation harness
+    # declares one of that name, which would displace a utilities class from
+    # SQLAlchemy's registry (plaid test_shims_do_not_shadow_utilities). So the
+    # plain Function is hooked, and every other function renders as before.
+    clauses = list(element.clauses) if element.name.lower() == 'regexp_replace' and not element.packagenames else []
+    read = _snowflake_pattern(clauses[1], strip_lazy=False) if len(clauses) == 3 else None
+    if read is None or read[3]:
+        # As regexp_substr: a lazy quantifier leaves the call as it was (the Alteryx converter emits such forms).
+        return compiler.visit_function(element, **kw)
+    pattern, flags, groups, _ = read
+    replacement = clauses[2]
+    if groups is not None and groups != list(range(len(groups))):
+        value = _string_value(replacement)
+        if value is None:
+            raise CompileError('regexp_replace: the replacement must be a literal when Snowflake renumbers the '
+                               'pattern\'s groups')
+        replacement = sqlalchemy.literal(_renumber_replacement(value, groups))
+    rendered = ', '.join(compiler.process(c, **kw) for c in (clauses[0], pattern, replacement))
+    return f'REGEXP_REPLACE({rendered}, 1, 0, {compiler.process(flags, **kw)})'
+
+
+# ---------------------------------------------------------------------------
+# Databend JSON and time zone functions StarRocks spells differently
+# ---------------------------------------------------------------------------
+# Each previously rendered by name and failed on StarRocks ("No matching
+# function"); every other dialect keeps its default rendering.
+
+class json_extract_path_text(GenericFunction):
+    """Databend json_extract_path_text(json, path): the value at `path` (`a.b[0]`, `["a b"]`) as text."""
+    name = 'json_extract_path_text'
+    # The StarRocks rendering reads the path's value, so a cached compile must not be reused for another path.
+    inherit_cache = False
+
+
+#: One step of a Databend JSON path: a key (first, or after `.` / `:`), `[n]`, or `["key"]`.
+_DATABEND_JSON_PATH_STEP = re.compile(r'(?:^|[.:])([^.:\[\]"]+)|\[(\d+)\]|\["((?:[^"\\]|\\.)*)"\]')
+
+
+def _starrocks_key_is_literal(key):
+    """StarRocks reads `key` literally inside `$."key"`: `"`, `[`, `]` and `\\` are path syntax (a `[`/`]` indexes
+    or fails the path, `\\` starts an escape) and a key of just `$` or an empty one is read as the document itself."""
+    return key not in ('', '$') and not set(key) & set('"[]\\')
+
+
+def _starrocks_json_path(path):
+    """A Databend path as a StarRocks JSON path, every key double-quoted so `.` or a space inside it is part of it."""
+    steps, index = ['$'], 0
+    while index < len(path):
+        step = _DATABEND_JSON_PATH_STEP.match(path, index)
+        if not step:
+            raise CompileError(f'json_extract_path_text: StarRocks has no spelling for the JSON path {path!r}')
+        key, item, quoted = step.groups()
+        if item is None:
+            key = key if quoted is None else quoted
+            if not _starrocks_key_is_literal(key):
+                raise CompileError(f'json_extract_path_text: StarRocks misreads the key {key!r} in a JSON path')
+            steps.append(f'."{key}"')
+        else:
+            steps.append(f'[{item}]')
+        index = step.end()
+    return ''.join(steps)
+
+
+@compiles(json_extract_path_text, 'starrocks')
+def compile_json_extract_path_text_starrocks(element, compiler, **kw):
+    # get_json_string answers NULL for a missing key and an object or array as
+    # its JSON text, as Databend does (StarRocks writes `{"b": 1}` with spaces).
+    clauses = list(element.clauses)
+    if len(clauses) != 2:
+        raise CompileError('json_extract_path_text: StarRocks is given (json, path)')
+    document, path = clauses
+    value = _string_value(path)
+    # A path known only per row is read as a key path: `$.` then the path with Databend's `:` separators as `.`
+    # (`$.[0]` is an index on StarRocks).
+    json_path = (sqlalchemy.literal(_starrocks_json_path(value)) if value is not None
+                 else func.concat('$.', func.replace(path, ':', '.')))
+    return compiler.process(func.get_json_string(document, json_path), **kw)
+
+
+class json_object_insert(GenericFunction):
+    """Databend json_object_insert(object, key, value, update_flag)."""
+    name = 'json_object_insert'
+    inherit_cache = False  # as json_extract_path_text: the StarRocks rendering reads the key's value
+
+
+@compiles(json_object_insert, 'starrocks')
+def compile_json_object_insert_starrocks(element, compiler, **kw):
+    clauses = list(element.clauses)
+    flag = clauses[3] if len(clauses) == 4 else None
+    if not (isinstance(flag, sqlalchemy.sql.elements.True_) or getattr(flag, 'effective_value', None) is True):
+        raise CompileError('json_object_insert: StarRocks spells only the update form (a literal True update flag), '
+                           'as json_set')
+    document, key, value = clauses[:3]
+    name = _string_value(key)
+    if name is None:
+        raise CompileError('json_object_insert: StarRocks spells only a literal key (a per-row key cannot be escaped '
+                           'in a JSON path)')
+    if not _starrocks_key_is_literal(name):
+        raise CompileError(f'json_object_insert: StarRocks has no JSON path spelling for the key {name!r}')
+    path = sqlalchemy.literal(f'$."{name}"')
+    raw_value = value
+    value_type = value.type
+    while isinstance(value_type, sqlalchemy.sql.sqltypes.TypeDecorator):
+        value_type = value_type.impl
+    if not isinstance(value_type, (sqlalchemy.Numeric, sqlalchemy.Integer, sqlalchemy.Float, sqlalchemy.Boolean,
+                                   sqlalchemy.JSON)):
+        # Only a value typed Numeric / Integer / Float / Boolean / JSON goes to json_set as it is (through to_json a
+        # DECIMAL becomes a string and a boolean 1); a caller that wants a number or boolean stored as one gives it
+        # that type. Everything else, including an untyped (NullType) result such as upper('{"a":1}'), is stored as a
+        # JSON string, as Databend stores a text value: StarRocks parses text that reads as JSON ('{"a":1}', '7')
+        # into JSON, so a struct field carries it. A Date or DateTime is its text first.
+        if isinstance(value_type, (sqlalchemy.Date, sqlalchemy.DateTime)):
+            value = sqlalchemy.cast(value, sqlalchemy.String)
+        value = func.json_query(func.to_json(func.named_struct('v', value)), '$.v')
+    # A NULL value leaves the document as it was, as Databend does; json_set would make the whole result NULL.
+    return compiler.process(case((raw_value.is_(None), document), else_=func.json_set(document, path, value)), **kw)
+
+
+class convert_timezone(GenericFunction):
+    """Databend convert_timezone(zone, moment): the wall-clock time in `zone` of the session-zone (UTC) `moment`."""
+    name = 'convert_timezone'
+    inherit_cache = True
+
+
+@compiles(convert_timezone, 'starrocks')
+def compile_convert_timezone_starrocks(element, compiler, **kw):
+    # PlaidCloud sessions are UTC and StarRocks datetimes are wall time; convert_tz follows each zone's DST rules.
+    clauses = list(element.clauses)
+    if len(clauses) != 2:
+        raise CompileError('convert_timezone: StarRocks is given the two-argument (zone, moment) form only')
+    zone, moment = clauses
+    return compiler.process(func.convert_tz(moment, 'UTC', zone), **kw)
 
 
 #: Databend date_diff(unit, start, end) = end - start. StarRocks has no such
@@ -3170,10 +3536,6 @@ def compile_vector_distance_databricks(element, compiler, **kw):
 #:                             week/dow/epoch(_second) are documented parts
 #:   safe_ltrim/rtrim/trim     LTRIM/RTRIM/TRIM(<expr> [, <characters>])
 #:                             match the default's optional-chars rendering
-#:   regexp_substr             REGEXP_SUBSTR(subject, pattern) — first whole
-#:                             match, NULL when none (Databend contract)
-#:   regexp_instr              REGEXP_INSTR(subject, pattern) — 1-based
-#:                             position, 0 on no match (Databend contract)
 #:   import_col                delegates to import_cast (which has a variant);
 #:                             its own 3-arg regexp_replace whitespace probe is
 #:                             valid Snowflake
@@ -3182,8 +3544,6 @@ _SNOWFLAKE_DEFAULT_OK = frozenset({
     safe_ltrim,
     safe_rtrim,
     safe_trim,
-    regexp_substr,
-    globals()['regexp_instr'],  # generated by the rename registry above
     import_col,
 })
 
@@ -3263,6 +3623,8 @@ _STARROCKS_DEFAULT_OK = frozenset({
     # (test_knime_p6_emitters.py).
     round_half_even,
     natural_sort_key,
+    # Same name, arguments and '' on no match as Databend (verified live, bugfixes2 StarRocks 4.1).
+    regexp_extract,
 })
 
 
