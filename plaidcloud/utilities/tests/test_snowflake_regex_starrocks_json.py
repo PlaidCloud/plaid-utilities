@@ -467,3 +467,12 @@ def test_json_object_insert_snowflake_empty_key_is_refused():
 def test_json_object_insert_snowflake_needs_a_document_key_and_value():
     with pytest.raises(CompileError):
         sql(func.json_object_insert(func.parse_json(S), 'k'), 'snowflake')
+
+
+def test_json_pretty_is_compact_to_json_on_snowflake():
+    assert sql(func.json_pretty(func.parse_json(S)), 'snowflake') == 'to_json(parse_json(s))'
+
+
+@pytest.mark.parametrize('dialect', ['databend', 'starrocks', 'databricks'])
+def test_json_pretty_keeps_other_dialects(dialect):
+    assert sql(func.json_pretty(func.parse_json(S)), dialect).startswith('json_pretty(')

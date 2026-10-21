@@ -3166,6 +3166,18 @@ def compile_json_object_insert_snowflake(element, compiler, **kw):
     return compiler.process(case((value.is_(None), document), else_=func.object_insert(*clauses)), **kw)
 
 
+class json_pretty(GenericFunction):
+    """Databend json_pretty(json): the JSON text indented."""
+    name = 'json_pretty'
+    inherit_cache = True
+
+
+@compiles(json_pretty, 'snowflake')
+def compile_json_pretty_snowflake(element, compiler, **kw):
+    # Snowflake has no JSON pretty-printer; TO_JSON writes the same document compact, one line.
+    return compiler.process(func.to_json(*element.clauses), **kw)
+
+
 class convert_timezone(GenericFunction):
     """Databend convert_timezone(zone, moment): the wall-clock time in `zone` of the session-zone (UTC) `moment`."""
     name = 'convert_timezone'
