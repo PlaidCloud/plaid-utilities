@@ -3149,6 +3149,20 @@ def compile_json_object_insert_starrocks(element, compiler, **kw):
     return compiler.process(case((raw_value.is_(None), document), else_=func.json_set(document, path, value)), **kw)
 
 
+@compiles(json_object_insert, 'snowflake')
+def compile_json_object_insert_snowflake(element, compiler, **kw):
+    # OBJECT_INSERT(object, key, value, update_flag) takes the key as a plain string (no path syntax to misread) and
+    # stores a text value as a JSON string and a number or boolean as that type, as Databend does; its update flag
+    # means the same (FALSE fails on a key already present). A NULL value leaves the object as it was, as Databend does.
+    clauses = list(element.clauses)
+    if len(clauses) not in (3, 4):
+        raise CompileError('json_object_insert: Snowflake is given (object, key, value[, update_flag])')
+    if _string_value(clauses[1]) == '':
+        raise CompileError('json_object_insert: Snowflake does not take an empty key')
+    document, value = clauses[0], clauses[2]
+    return compiler.process(case((value.is_(None), document), else_=func.object_insert(*clauses)), **kw)
+
+
 class convert_timezone(GenericFunction):
     """Databend convert_timezone(zone, moment): the wall-clock time in `zone` of the session-zone (UTC) `moment`."""
     name = 'convert_timezone'
