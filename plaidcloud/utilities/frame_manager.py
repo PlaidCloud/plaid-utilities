@@ -260,8 +260,8 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
         final Exception.
     Raises:
         RuntimeError: a table's SQLAlchemy query needs a dialect `conn` cannot load. The
-            dialect is resolved outside the retries, which would swallow that into an
-            empty frame of the table's shape (sc-23700).
+            dialect is read outside the ``try`` that swallows each failed attempt, which
+            would turn that into an empty frame of the table's shape (sc-23700).
     Examples:
     """
 
