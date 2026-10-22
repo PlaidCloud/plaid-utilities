@@ -677,13 +677,14 @@ class TestDownload(unittest.TestCase):
         """`download` swallows each failed query attempt and falls back to an empty frame of the
         table's shape. A missing driver is no transient fault: it must raise (sc-23700)."""
         rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
+        conn = make_connection(rpc=rpc)
         tbl = sqlalchemy.Table('tab', sqlalchemy.MetaData(), sqlalchemy.Column('a', sqlalchemy.Integer))
         table_obj = mock.MagicMock()
         table_obj.cols.return_value = [{'id': 'a'}]
         with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
             frame_manager.download(
                 [{'table_name': 'tab', 'query': sqlalchemy.select(tbl.c.a), 'table_object': table_obj}],
-                configuration={'project_id': 'proj-id-123'}, conn=make_connection(rpc=rpc), retries=2,
+                configuration={'project_id': 'proj-id-123'}, conn=conn, retries=2,
             )
         rpc.analyze.query.download_csv.assert_not_called()
 
