@@ -1,9 +1,13 @@
-"""The SQL dialect drivers every image that builds a `query.Connection` must carry.
+"""The SQL dialect drivers every image that compiles SQL through a `query.Connection` must carry.
 
-`Connection.__init__` calls `registry.load()` on the project's datastore dialect and
-raises when that driver is absent, rather than compiling Postgres SQL against a
-Databend or StarRocks warehouse (sc-23700). That is the right answer, but it fires at
+The first read of `Connection.dialect` calls `registry.load()` on the project's datastore
+dialect and raises when that driver is absent, rather than compiling Postgres SQL against
+a Databend or StarRocks warehouse (sc-23700). That is the right answer, but it fires at
 query time, on a customer's step, in whichever image happens to be short a driver.
+
+Building a `Connection` loads nothing. An image that builds one but compiles no SQL
+through it — the PlaidCloud agent, which only loads tables — never reads `dialect` and
+needs none of these drivers.
 
 The requirement is declared here, next to the code that enforces it, and every
 consuming image runs it as a build step:
@@ -66,7 +70,7 @@ def assert_dialects_available(image, requirements_file):
     raise RuntimeError('\n'.join([
         f'{image}: missing {len(failures)} of {len(REQUIRED_DIALECTS)} SQL dialect drivers.',
         'This image cannot compile SQL for every warehouse PlaidCloud supports, so any',
-        'project on one of the engines below dies at plaidcloud.utilities.query.Connection()',
+        'project on one of the engines below dies at plaidcloud.utilities.query.Connection.dialect',
         '— at query time, on the customer, with the image deployed green (sc-23700).',
         '',
         f'FIX: add the pip package(s) below to {requirements_file}, then rebuild {image}.',
