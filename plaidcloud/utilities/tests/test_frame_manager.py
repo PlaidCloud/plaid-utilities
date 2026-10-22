@@ -6,13 +6,16 @@ from io import StringIO
 from types import MappingProxyType
 from unittest import mock
 
-import pytest
 import numpy as np
 import pandas as pd
+import pytest
+import sqlalchemy
 from plaidcloud.rpc import type_conversion
 from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype
+
 from plaidcloud.utilities import frame_manager
 from plaidcloud.utilities.frame_manager import coalesce
+from plaidcloud.utilities.tests.test_query import make_connection, make_mock_rpc
 
 __author__ = "Andrew Hodgson"
 __copyright__ = "© Copyright 2009-2014, Tartan Solutions, Inc"
@@ -666,6 +669,23 @@ class TestCoalesce(unittest.TestCase):
         # ...for now.
         with self.assertRaises(TypeError):
             coalesce(df['two'], df['C'], consider_null=['cccc'])
+
+
+class TestDownload(unittest.TestCase):
+
+    def test_an_unloadable_dialect_raises_rather_than_returning_an_empty_frame(self):
+        """`download` swallows each failed query attempt and falls back to an empty frame of the
+        table's shape. A missing driver is no transient fault: it must raise (sc-23700)."""
+        rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
+        tbl = sqlalchemy.Table('tab', sqlalchemy.MetaData(), sqlalchemy.Column('a', sqlalchemy.Integer))
+        table_obj = mock.MagicMock()
+        table_obj.cols.return_value = [{'id': 'a'}]
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
+            frame_manager.download(
+                [{'table_name': 'tab', 'query': sqlalchemy.select(tbl.c.a), 'table_object': table_obj}],
+                configuration={'project_id': 'proj-id-123'}, conn=make_connection(rpc=rpc), retries=2,
+            )
+        rpc.analyze.query.download_csv.assert_not_called()
 
 
 if __name__ == '__main__':

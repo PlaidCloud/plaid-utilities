@@ -2,28 +2,27 @@
 # coding=utf-8
 # vim: set filetype=python:
 
+import csv
+import datetime
+import math
 import os
 import posixpath
 import sys
-import math
-import datetime
-import csv
-from functools import wraps
-from io import StringIO, BytesIO
 import traceback
+from functools import wraps
+from io import BytesIO, StringIO
 
-import pandas as pd
-from pandas.api.types import is_string_dtype
 import numpy as np
 import orjson as json
-
+import pandas as pd
+from pandas.api.types import is_string_dtype
 from plaidcloud.rpc import utc
-from plaidcloud.rpc.type_conversion import UnsupportedDtype, analyze_type, require_dtype_capability
 from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
 from plaidcloud.rpc.rpc_connect import Connect
-from plaidcloud.utilities.query import Connection, Table
-from plaidcloud.utilities import data_helpers as dh
+from plaidcloud.rpc.type_conversion import UnsupportedDtype, analyze_type, require_dtype_capability
 
+from plaidcloud.utilities import data_helpers as dh
+from plaidcloud.utilities.query import Connection, Table
 
 __author__ = 'Paul Morel'
 __maintainer__ = 'Paul Morel <paul.morel@tartansolutions.com>'
@@ -259,6 +258,10 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
     Returns:
         The return value of function. If retries are exhausted, raises the
         final Exception.
+    Raises:
+        RuntimeError: a table's SQLAlchemy query needs a dialect `conn` cannot load. The
+            dialect is resolved outside the retries, which would swallow that into an
+            empty frame of the table's shape (sc-23700).
     Examples:
     """
 
@@ -316,6 +319,7 @@ def download(tables, configuration=None, retries=5, conn=None, clean=False, **kw
                             break
                 else:
                     # query object passed in.  execute it
+                    _ = conn.dialect
                     try:
                         df = conn.get_dataframe_by_query(query)
                     except Exception as e:
@@ -467,7 +471,7 @@ def avro_from_sql(sql, default=None):
         
     Returns:
         str: the Avro data type equivalent"""
-    
+
     mapping = {
         'null': 'null',
         'text': 'string',
