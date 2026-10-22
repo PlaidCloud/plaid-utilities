@@ -1,25 +1,25 @@
 import base64
+import csv
 import logging
 import os
 import tempfile
 import uuid
-import csv
-from typing import Any, overload, NamedTuple
-
-import pandas as pd
-import numpy as np
-import requests
-from requests.adapters import HTTPAdapter
-import sqlalchemy
-from sqlalchemy.sql import selectable
-from sqlalchemy.dialects import registry
-from urllib3.util.retry import Retry
+from typing import Any, NamedTuple, overload
 from urllib.parse import urlparse, urlunparse
 
+import numpy as np
+import pandas as pd
+import requests
+import sqlalchemy
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
 from plaidcloud.rpc.identifiers import SCHEMA_PREFIX, TABLE_PREFIX
 from plaidcloud.rpc.rpc_connect import Connect, PlaidXLConnect
-from plaidcloud.rpc.type_conversion import sqlalchemy_from_dtype, pandas_dtype_from_sql, analyze_type
+from plaidcloud.rpc.type_conversion import analyze_type, pandas_dtype_from_sql, sqlalchemy_from_dtype
+from requests.adapters import HTTPAdapter
+from sqlalchemy.dialects import registry
+from sqlalchemy.sql import selectable
+from urllib3.util.retry import Retry
+
 from plaidcloud.utilities import data_helpers as dh
 from plaidcloud.utilities.remote.dimension import Dimensions
 from plaidcloud.utilities.stringtransforms import apply_variables
@@ -54,7 +54,9 @@ class Connection:
 
     _NOT_LOADED = object()
 
-    def __init__(self, project: str = None, rpc: [Connect, PlaidXLConnect] = None, dialect: str = None):
+    def __init__(
+        self, project: str | None = None, rpc: Connect | PlaidXLConnect | None = None, dialect: str | None = None,
+    ) -> None:
         """
 
         Args:
@@ -64,7 +66,8 @@ class Connection:
                 compiled for. A caller that was *told* the dialect — a workflow step, which
                 carries it on the run payload as ``datastore_dialect`` — passes it here, and
                 that value wins. Omitted, it is resolved from the project over RPC
-                (sc-23158 WS-J4).
+                (sc-23158 WS-J4). Either way nothing is resolved or loaded until
+                `dialect` is first read.
         """
         if rpc:
             self.rpc = rpc
@@ -91,32 +94,8 @@ class Connection:
         if self._project_id:
             self._project_name = self.rpc.analyze.project.project(project_id=self._project_id, keys=['name'])['name']
 
-        # The caller's value is authoritative. There are two sources for a project's
-        # dialect and they can only disagree once a tenant has more than one lakehouse:
-        # what the run payload was stamped with when the job was launched for *this*
-        # project, and whatever this process asks the server for now. The stamped one is
-        # the project's; deriving a second answer here is how a project's SQL gets
-        # compiled for another project's engine (sc-23158 WS-J4).
-        #
-        # Naming the project on the fallback matters for the same reason — an
-        # unqualified `dialect()` answers for the tenant's own lakehouse, not
-        # necessarily this project's. It requires a plaid that accepts `project_id`;
-        # that release ships first (sc-23158 WS-J4 merge order).
-        _dialect_kind = dialect or self.rpc.analyze.query.dialect(project_id=self._project_id)
-
-        # No fallback: a bare `except` here used to substitute 'postgresql',
-        # which compiles plausible-looking Postgres SQL against a Databend or
-        # StarRocks warehouse rather than failing. An unloadable dialect means
-        # the image is missing that engine's driver, which is a deployment
-        # fault, not something to paper over (sc-23700).
-        try:
-            dialect_cls = registry.load(_dialect_kind)
-        except sqlalchemy.exc.NoSuchModuleError as exc:
-            raise RuntimeError(
-                f'No SQLAlchemy driver for the project datastore dialect {_dialect_kind!r} — '
-                'this image cannot compile SQL for that warehouse.'
-            ) from exc
-        self.dialect = dialect_cls(paramstyle='pyformat')
+        self._requested_dialect = dialect
+        self._dialect = self._NOT_LOADED
         self._variables = self._NOT_LOADED
         self._udf = self._NOT_LOADED
         self._project_schema = self._NOT_LOADED
@@ -146,6 +125,61 @@ class Connection:
     @udf.setter
     def udf(self, value):
         self._udf = value
+
+    @property
+    def dialect(self) -> sqlalchemy.engine.Dialect:
+        """The SQLAlchemy dialect the project's SQL compiles for, resolved on first read and cached.
+
+        Deferred from ``__init__`` so that a connection which never compiles SQL makes no
+        dialect RPC and needs no driver for the project's warehouse: the PlaidCloud agent
+        builds one per job only to load tables. A failed resolution caches nothing, so the
+        next read tries again. Assigning replaces the dialect; deleting it resolves afresh
+        on the next read.
+
+        An ``AttributeError`` comes out as ``RuntimeError``. Escaping a property, it would
+        send Python to ``__getattr__``, and the plaidcloud-rpc classes `Connection` is mixed
+        with answer any name there with an RPC namespace — a "dialect" that compiles
+        nothing. Loading snowflake-sqlalchemy under SQLAlchemy 2.1 raises one.
+        """
+        if self._dialect is self._NOT_LOADED:
+            try:
+                self._dialect = self._load_project_dialect()
+            except AttributeError as exc:
+                raise RuntimeError(f'Loading the project datastore dialect raised AttributeError: {exc}') from exc
+        return self._dialect
+
+    @dialect.setter
+    def dialect(self, value: sqlalchemy.engine.Dialect) -> None:
+        self._dialect = value
+
+    @dialect.deleter
+    def dialect(self) -> None:
+        self._dialect = self._NOT_LOADED
+
+    def _load_project_dialect(self) -> sqlalchemy.engine.Dialect:
+        """Build the dialect the caller named, or else the one the server reports for this project.
+
+        The caller's value is authoritative. The two sources can disagree once a tenant has
+        more than one lakehouse: the run payload was stamped for *this* project, while the
+        server answers whatever this process asks now, and deriving that second answer is how
+        a project's SQL gets compiled for another project's engine. The fallback names the
+        project for the same reason — an unqualified ``dialect()`` answers for the tenant's
+        own lakehouse (sc-23158 WS-J4).
+
+        There is no fallback to postgresql. Substituting it compiled plausible-looking
+        Postgres SQL against a Databend or StarRocks warehouse; an unloadable dialect means
+        the image lacks that engine's driver, a deployment fault to raise rather than paper
+        over (sc-23700).
+        """
+        dialect_kind = self._requested_dialect or self.rpc.analyze.query.dialect(project_id=self._project_id)
+        try:
+            dialect_cls = registry.load(dialect_kind)
+        except sqlalchemy.exc.NoSuchModuleError as exc:
+            raise RuntimeError(
+                f'No SQLAlchemy driver for the project datastore dialect {dialect_kind!r} — '
+                'this image cannot compile SQL for that warehouse.'
+            ) from exc
+        return dialect_cls(paramstyle='pyformat')
 
     def _compiled(self, sa_query):
         """Returns SQL query for datastore dialect, in the form of a string, given a
@@ -200,7 +234,7 @@ class Connection:
                 project_id=self._project_id,
                 query=query,
                 params=params,
-            ) 
+            )
 
         return self.rpc.analyze.query.download_csv(
             project_id=self._project_id,

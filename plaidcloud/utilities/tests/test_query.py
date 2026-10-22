@@ -5,19 +5,22 @@ import os
 import tempfile
 import unittest
 import uuid
-from unittest.mock import MagicMock, patch, mock_open, ANY
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 import sqlalchemy
-
+from plaidcloud.rpc.connection.jsonrpc import SimpleRPC
 from plaidcloud.rpc.database import PlaidDate, PlaidTimestamp
+from sqlalchemy.dialects import sqlite
+
 from plaidcloud.utilities import query
+from plaidcloud.utilities.connect import PlaidConnection, PlaidXLConnection
 from plaidcloud.utilities.query import (
-    Connection,
     SCHEMA_PREFIX,
     TABLE_PREFIX,
+    Connection,
     Table,
     UDFParams,
     _get_table_id,
@@ -202,12 +205,43 @@ class TestConnectionInit(unittest.TestCase):
         conn = make_connection(rpc=rpc)
         self.assertEqual(conn._project_id, 'rpc-default')
 
+    def test_construction_neither_asks_for_nor_loads_a_dialect(self):
+        """The PlaidCloud agent builds a Connection per job only to load tables, and carries no
+        StarRocks, Snowflake or Databricks driver: an unloadable dialect must not fail
+        construction, whoever named it."""
+        for passed in (None, 'nonexistent-dialect-xyz'):
+            with self.subTest(passed=passed):
+                rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
+                make_connection(rpc=rpc, project=str(uuid.uuid4()), dialect=passed)
+                rpc.analyze.query.dialect.assert_not_called()
+
+    def test_creates_default_rpc_when_none_provided(self):
+        """``Connection()`` with no arguments should construct a default
+        ``Connect`` and use its ``project_id``."""
+        with patch.object(query, 'Connect') as mock_connect, \
+             patch.object(query, 'Dimensions'):
+            rpc = make_mock_rpc()
+            mock_connect.return_value = rpc
+            conn = Connection()
+            mock_connect.assert_called_once()
+            self.assertIs(conn.rpc, rpc)
+            self.assertEqual(conn._project_id, rpc.project_id)
+
+
+# ---------------------------------------------------------------------------
+# Connection.dialect (lazy)
+# ---------------------------------------------------------------------------
+class TestConnectionDialect(unittest.TestCase):
     def test_unloadable_dialect_raises_and_does_not_substitute_postgresql(self):
         # Substituting postgresql compiled plausible-looking Postgres SQL against
         # a Databend or StarRocks warehouse instead of failing (sc-23700).
         rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
-            make_connection(rpc=rpc, project=str(uuid.uuid4()))
+        conn = make_connection(rpc=rpc, project=str(uuid.uuid4()))
+        with self.assertRaisesRegex(
+            RuntimeError, "^No SQLAlchemy driver for the project datastore dialect 'nonexistent-dialect-xyz'",
+        ) as raised:
+            conn.dialect
+        self.assertIsInstance(raised.exception.__cause__, sqlalchemy.exc.NoSuchModuleError)
 
     def test_passed_dialect_wins_and_nothing_is_derived(self):
         """sc-23158 WS-J4: the caller's value is the project's; the derived one is the process's."""
@@ -220,7 +254,8 @@ class TestConnectionInit(unittest.TestCase):
         """The fallback still has to answer for *this* project, not the tenant default."""
         proj_uuid = str(uuid.uuid4())
         rpc = make_mock_rpc(dialect_name='postgresql')
-        make_connection(rpc=rpc, project=proj_uuid)
+        conn = make_connection(rpc=rpc, project=proj_uuid)
+        self.assertEqual('postgresql', conn.dialect.name)
         rpc.analyze.query.dialect.assert_called_once_with(project_id=proj_uuid)
 
     def test_a_projectless_connection_falls_back_to_the_rpc_project(self):
@@ -233,7 +268,8 @@ class TestConnectionInit(unittest.TestCase):
         project_id reached a Redis key builder.
         """
         rpc = make_mock_rpc(project_id='rpc-owned-project')
-        make_connection(rpc=rpc, project=None)
+        conn = make_connection(rpc=rpc, project=None)
+        conn.dialect
         rpc.analyze.query.dialect.assert_called_once_with(
             project_id='rpc-owned-project')
 
@@ -247,26 +283,99 @@ class TestConnectionInit(unittest.TestCase):
         unqualified fast path.
         """
         rpc = make_mock_rpc(project_id=None)
-        make_connection(rpc=rpc, project=None)
+        conn = make_connection(rpc=rpc, project=None)
+        conn.dialect
         rpc.analyze.query.dialect.assert_called_once_with(project_id=None)
 
     def test_a_passed_dialect_that_cannot_load_still_raises(self):
         rpc = make_mock_rpc(dialect_name='postgresql')
+        conn = make_connection(rpc=rpc, project=str(uuid.uuid4()), dialect='nonexistent-dialect-xyz')
         with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
-            make_connection(rpc=rpc, project=str(uuid.uuid4()),
-                            dialect='nonexistent-dialect-xyz')
+            conn.dialect
+        rpc.analyze.query.dialect.assert_not_called()
 
-    def test_creates_default_rpc_when_none_provided(self):
-        """``Connection()`` with no arguments should construct a default
-        ``Connect`` and use its ``project_id``."""
-        with patch.object(query, 'Connect') as mock_connect, \
-             patch.object(query, 'Dimensions'):
-            rpc = make_mock_rpc()
-            mock_connect.return_value = rpc
-            conn = Connection()
-            mock_connect.assert_called_once()
-            self.assertIs(conn.rpc, rpc)
-            self.assertEqual(conn._project_id, rpc.project_id)
+    def test_repeated_reads_make_one_rpc(self):
+        proj_uuid = str(uuid.uuid4())
+        rpc = make_mock_rpc(dialect_name='postgresql')
+        conn = make_connection(rpc=rpc, project=proj_uuid)
+        first = conn.dialect
+        conn._compiled(sqlalchemy.select(sqlalchemy.literal(1)))
+        self.assertIs(first, conn.dialect)
+        rpc.analyze.query.dialect.assert_called_once_with(project_id=proj_uuid)
+
+    def test_a_read_after_a_failed_resolution_retries(self):
+        """A failure caches nothing: the next read asks again rather than replaying a broken state."""
+        rpc = make_mock_rpc()
+        rpc.analyze.query.dialect.side_effect = ['nonexistent-dialect-xyz', 'postgresql']
+        conn = make_connection(rpc=rpc, project=str(uuid.uuid4()))
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
+            conn.dialect
+        self.assertEqual('postgresql', conn.dialect.name)
+        self.assertEqual(2, rpc.analyze.query.dialect.call_count)
+
+    def test_an_assigned_dialect_is_used_and_nothing_is_derived(self):
+        rpc = make_mock_rpc(dialect_name='nonexistent-dialect-xyz')
+        conn = make_connection(rpc=rpc, project=str(uuid.uuid4()))
+        assigned = sqlite.dialect(paramstyle='pyformat')
+        conn.dialect = assigned
+        self.assertIs(assigned, conn.dialect)
+        rpc.analyze.query.dialect.assert_not_called()
+
+    def test_patching_the_dialect_on_an_instance_restores_the_resolved_one(self):
+        conn = make_connection(rpc=make_mock_rpc(dialect_name='postgresql'))
+        with patch.object(conn, 'dialect', sqlite.dialect()):
+            self.assertEqual('sqlite', conn.dialect.name)
+        self.assertEqual('postgresql', conn.dialect.name)
+
+    def test_the_dialect_renders_pyformat_parameters_whoever_named_it(self):
+        """sqlite defaults to qmark, so this fails if the dialect is built without paramstyle='pyformat'."""
+        for passed in (None, 'sqlite'):
+            with self.subTest(passed=passed):
+                conn = make_connection(rpc=make_mock_rpc(dialect_name='sqlite'), dialect=passed)
+                self.assertEqual('pyformat', conn.dialect.paramstyle)
+
+    def test_every_internal_use_reads_the_lazy_dialect(self):
+        """Compiling a query, naming get_csv's table and typing save_data's columns all go
+        through `dialect`, so an unloadable one fails each of them the same way."""
+        tbl = sqlalchemy.Table(
+            'tab', sqlalchemy.MetaData(), sqlalchemy.Column('a', sqlalchemy.Integer), schema='anlz_schema',
+        )
+        uses = {
+            '_compiled': lambda conn: conn._compiled(sqlalchemy.select(tbl.c.a)),
+            'get_csv': lambda conn: conn.get_csv(tbl),
+            'save_data': lambda conn: conn.save_data(sqlalchemy.select(tbl.c.a), 'target'),
+        }
+        for name, use in uses.items():
+            with self.subTest(use=name):
+                conn = make_connection(rpc=make_mock_rpc(dialect_name='nonexistent-dialect-xyz'))
+                with self.assertRaisesRegex(RuntimeError, 'nonexistent-dialect-xyz'):
+                    use(conn)
+
+    def test_an_attribute_error_while_loading_is_not_answered_by_the_rpc_mixin(self):
+        """plaidcloud-rpc's PlainRPCCommon answers every missing attribute with an RPC namespace.
+        An AttributeError escaping the property -- snowflake-sqlalchemy raises one on load under
+        SQLAlchemy 2.1 -- would reach that ``__getattr__`` and hand back a namespace as the dialect."""
+
+        class RpcMixedConnection(SimpleRPC, Connection):
+            def __init__(self, rpc):
+                SimpleRPC.__init__(self, 'tok', uri='https://example.invalid/json-rpc')
+                Connection.__init__(self, project=str(uuid.uuid4()), rpc=rpc)
+
+        with patch.object(query, 'Dimensions'):
+            conn = RpcMixedConnection(make_mock_rpc())
+        load_failure = AttributeError("module 'sqlalchemy.orm.context' has no attribute 'ORMSelectCompileState'")
+        with patch.object(query.registry, 'load', side_effect=load_failure), \
+                self.assertRaisesRegex(RuntimeError, 'ORMSelectCompileState') as raised:
+            conn.dialect
+        self.assertIs(load_failure, raised.exception.__cause__)
+
+    def test_every_shipped_subclass_finds_dialect_on_connection(self):
+        """`dialect` is a property here, so a mixin defining the name earlier in the MRO would
+        shadow it. No plaidcloud-rpc class does (checked at 1.21.0); this fails the day one does."""
+        for cls in (PlaidConnection, PlaidXLConnection):
+            with self.subTest(cls=cls.__name__):
+                owner = next(c for c in cls.__mro__ if 'dialect' in vars(c))
+                self.assertIs(Connection, owner)
 
 
 # ---------------------------------------------------------------------------
