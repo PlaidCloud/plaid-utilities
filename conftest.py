@@ -1,5 +1,5 @@
 
-import platform
+import importlib.util
 
 collect_ignore = ["setup.py"]
 collect_ignore.append('plaidcloud/utilities/tests/test_remote_dimension.py')
@@ -13,5 +13,5 @@ collect_ignore.append('plaidcloud/utilities/tests/test_remote_dimension.py')
 # doctest collection loses nothing.
 collect_ignore.append('plaidcloud/utilities/sqlalchemy_functions.py')
 
-if platform.system() == "Linux":
+if importlib.util.find_spec("xlwings") is None:
     collect_ignore.append("plaidcloud/utilities/xlwings_utility.py")
