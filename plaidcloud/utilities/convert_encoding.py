@@ -6,6 +6,7 @@ import chardet
 import unicodedata
 import sys
 import codecs
+import warnings
 
 starting_chunksize = 1 * 1024 * 1024  # 1 MB
 max_chunksize = 8 * 1024 * 1024  # 8 MB
@@ -28,6 +29,16 @@ def convert(target_encoding, in_path, out_path, include_bom=False):
         out_path (str): Where to write out the converted file
         include_bom (bool, optional): If the BOM marker should be added to
             the top of the file. Defaults to `False`"""
+
+    warnings.warn(
+        'plaidcloud.utilities.convert_encoding.convert is deprecated and will be removed no earlier than '
+        '2027-01-24. It always writes the process locale encoding (UTF-8) whatever target_encoding is, raises '
+        'TypeError with include_bom=True when the target is utf-16le or utf-16be, transliterates text (NFKD) for every target, and raises TypeError '
+        'when the source encoding cannot be detected. Do not rely on it to produce UTF-16 or any non-locale '
+        'encoding; convert with codecs/str.encode directly instead (sc-30953).',
+        FutureWarning,
+        stacklevel=2,
+    )
 
     guess = 'utf8'
 
