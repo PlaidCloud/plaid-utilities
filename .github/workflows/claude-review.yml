@@ -105,7 +105,7 @@ jobs:
       # blocked, the run summary names the denied endpoint — add it below
       # (or set egress-policy: audit briefly to learn the set).
       - name: Harden runner (egress firewall)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: block
           disable-sudo: true
@@ -324,7 +324,7 @@ jobs:
       # SECURITY: egress firewall — see rationale in the triage job. This is
       # the primary exfil control for the Bash + secrets review context.
       - name: Harden runner (egress firewall)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: block
           disable-sudo: true
@@ -468,7 +468,7 @@ jobs:
       # and holds no Anthropic key — only the GitHub token for `gh pr comment`
       # — so its allowlist is just GitHub.
       - name: Harden runner (egress firewall)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: block
           disable-sudo: true
@@ -533,7 +533,7 @@ jobs:
       # SECURITY: egress firewall — see rationale in the triage job. Primary
       # exfil control for the Bash + secrets follow-up context.
       - name: Harden runner (egress firewall)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@dc2769abcc0fcfbadfc1df54081c1608579ef6b2 # v2.22.2
         with:
           egress-policy: block
           disable-sudo: true
