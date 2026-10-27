@@ -117,6 +117,29 @@ class TestProject(unittest.TestCase):
         pc.assert_called_once_with()
 
 
+class TestInputs(unittest.TestCase):
+    def test_unknown_aggregate_names_the_allowed_set(self):
+        t, _ = make_table()
+        with self.assertRaisesRegex(ValueError, "'median'.*'avg'.*'sum'"):
+            t.aggregate(x=('amount', 'median'))
+
+    def test_aggregate_without_measures_is_rejected(self):
+        t, conn = make_table()
+        with self.assertRaises(ValueError):
+            t.aggregate(by=['region'])
+        conn.execute.assert_not_called()
+
+    def test_frozenset_filters_as_in(self):
+        t, conn = make_table(id=frozenset({4}))
+        t.page()
+        self.assertIn('t.id IN (4)', sql(conn))
+
+    def test_string_sort_is_one_column(self):
+        t, conn = make_table()
+        t.page(sort='amount')
+        self.assertIn('ORDER BY t.amount, t.region, t.id', sql(conn))
+
+
 class TestOnRealSql(unittest.TestCase):
     """Compile through a real query.Connection and execute on sqlite, so the SQL is proven, not just shaped."""
 

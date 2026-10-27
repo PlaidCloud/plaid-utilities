@@ -7,6 +7,7 @@ token handling happens here.
 """
 import logging
 import os
+from collections.abc import Set
 
 import pandas as pd
 import sqlalchemy
@@ -52,9 +53,9 @@ class Table:
         conditions = list(self._conditions)
         for name, value in values.items():
             col = self._col(name)
-            if value is None or value == '' or (isinstance(value, (list, tuple, set)) and not value):
+            if value is None or value == '' or (isinstance(value, (list, tuple, Set)) and not value):
                 continue
-            conditions.append(col.in_(list(value)) if isinstance(value, (list, tuple, set)) else col == value)
+            conditions.append(col.in_(list(value)) if isinstance(value, (list, tuple, Set)) else col == value)
         return Table(self._conn, self._table, conditions)
 
     def _select(self, *entities):
@@ -73,6 +74,7 @@ class Table:
             raise ValueError('page n and size must be >= 1')
         order = []
         seen = set()
+        sort = [sort] if isinstance(sort, str) else sort
         for item in sort:
             name = item.lstrip('-')
             order.append(self._col(name).desc() if item.startswith('-') else self._col(name))
@@ -90,6 +92,11 @@ class Table:
     def aggregate(self, by=(), limit=1000, **aggs):
         """``aggregate(by=['region'], total=('amount', 'sum'))`` -> one row per group, ordered by `by`.
         With no `by` it is a single totals row over the filtered set."""
+        if not aggs:
+            raise ValueError('aggregate needs at least one measure, e.g. total=("amount", "sum")')
+        for _, fn in aggs.values():
+            if fn not in _AGGREGATES:
+                raise ValueError(f'Unknown aggregate {fn!r}; use one of {sorted(_AGGREGATES)}')
         groups = [self._col(name) for name in by]
         measures = [_AGGREGATES[fn](self._col(col)).label(label) for label, (col, fn) in aggs.items()]
         stmt = self._select(*groups, *measures).group_by(*groups).order_by(*groups).limit(limit)
