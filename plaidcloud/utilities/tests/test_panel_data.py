@@ -1,4 +1,5 @@
 import logging
+import re
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -31,7 +32,6 @@ class TestPage(unittest.TestCase):
         self.assertIn('ORDER BY t.amount DESC, t.region, t.id', s)
         self.assertIn('LIMIT 50', s)
         self.assertIn('OFFSET 50', s)
-        self.assertIs(conn.execute.call_args.kwargs['return_df'], True)
 
     def test_explicit_key_is_the_tie_break_and_not_repeated(self):
         t, conn = make_table()
@@ -115,3 +115,45 @@ class TestProject(unittest.TestCase):
             pc = self._connect({})
         self.assertIn('PLAID_PANEL_PROJECT_ID', logs.output[0])
         pc.assert_called_once_with()
+
+
+class TestOnRealSql(unittest.TestCase):
+    """Compile through a real query.Connection and execute on sqlite, so the SQL is proven, not just shaped."""
+
+    def setUp(self):
+        from plaidcloud.utilities.query import Connection
+        engine = sqlalchemy.create_engine('sqlite://')
+        with engine.begin() as c:
+            c.execute(sqlalchemy.text('create table t (region text, id int, amount int)'))
+            c.execute(sqlalchemy.text('insert into t values (:r, :i, :a)'),
+                      [dict(r='East' if i % 2 else 'West', i=i, a=i % 3) for i in range(1, 11)])
+        rpc = MagicMock()
+        rpc.analyze.project.lookup_by_name.return_value = 'proj'
+        rpc.analyze.query.dialect.return_value = 'postgresql'
+
+        def query(project_id, query, params):
+            with engine.connect() as c:
+                result = c.execute(sqlalchemy.text(re.sub(r'%\((\w+)\)s', r':\1', query)), params)
+                return [dict(r._mapping) for r in result]
+
+        rpc.analyze.query.query.side_effect = query
+        with patch('plaidcloud.utilities.query.Dimensions'):
+            conn = Connection(project='proj', rpc=rpc)
+        sa = sqlalchemy.Table('t', sqlalchemy.MetaData(), sqlalchemy.Column('region', sqlalchemy.Text),
+                              sqlalchemy.Column('id', sqlalchemy.Integer), sqlalchemy.Column('amount', sqlalchemy.Integer))
+        self.t = panel_data.Table(conn, sa)
+
+    def test_unfiltered_count_is_the_row_count(self):
+        self.assertEqual(self.t.count(), 10)
+        self.assertEqual(self.t.filter(region='East').count(), 5)
+
+    def test_page_returns_real_string_values_in_stable_pages(self):
+        first = self.t.page(1, 4, sort=['-amount'])
+        self.assertEqual(set(first['region']) - {'East', 'West'}, set())
+        second = self.t.page(2, 4, sort=['-amount'])
+        self.assertEqual(len(set(first['id']) | set(second['id'])), 8)
+
+    def test_grouped_aggregate_and_totals_equal_direct_sql(self):
+        by_region = self.t.aggregate(by=['region'], rows=('id', 'count'), total=('amount', 'sum'))
+        self.assertEqual(dict(zip(by_region['region'], by_region['rows'])), {'East': 5, 'West': 5})
+        self.assertEqual(int(self.t.aggregate(total=('amount', 'sum'))['total'][0]), sum(i % 3 for i in range(1, 11)))

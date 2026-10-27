@@ -8,6 +8,7 @@ token handling happens here.
 import logging
 import os
 
+import pandas as pd
 import sqlalchemy
 
 logger = logging.getLogger(__name__)
@@ -79,11 +80,11 @@ class Table:
         key = [key] if isinstance(key, str) else (key or [c.name for c in self._table.c])
         order += [self._col(name) for name in key if name not in seen]
         stmt = self._select(self._table).order_by(*order).limit(size).offset((n - 1) * size)
-        return self._conn.execute(stmt, return_df=True)
+        return pd.DataFrame(self._conn.execute(stmt))
 
     def count(self):
         """Rows matching the filters."""
-        rows = self._conn.execute(self._select(sqlalchemy.func.count().label('n')))
+        rows = self._conn.execute(self._select(sqlalchemy.func.count().label('n')).select_from(self._table))
         return int(rows[0]['n'])
 
     def aggregate(self, by=(), limit=1000, **aggs):
@@ -92,4 +93,4 @@ class Table:
         groups = [self._col(name) for name in by]
         measures = [_AGGREGATES[fn](self._col(col)).label(label) for label, (col, fn) in aggs.items()]
         stmt = self._select(*groups, *measures).group_by(*groups).order_by(*groups).limit(limit)
-        return self._conn.execute(stmt, return_df=True)
+        return pd.DataFrame(self._conn.execute(stmt))
