@@ -807,6 +807,20 @@ class TestExecute(unittest.TestCase):
         self.assertEqual(result, [{'a': 1}])
         conn.rpc.analyze.query.query.assert_called_once()
 
+    def test_execute_sends_a_page_and_a_grouped_aggregate_as_one_statement(self):
+        # The Data API contract (sc-34474): ORDER BY / LIMIT / OFFSET / GROUP BY ride in the
+        # statement text and the page bounds in `params`; there is no separate paging argument.
+        conn = make_connection()
+        tbl = sqlalchemy.Table('t', sqlalchemy.MetaData(), sqlalchemy.Column('k', sqlalchemy.Text),
+                               sqlalchemy.Column('v', sqlalchemy.Integer))
+        page = sqlalchemy.select(tbl.c.k, sqlalchemy.func.sum(tbl.c.v).label('total')) \
+            .group_by(tbl.c.k).order_by(tbl.c.k).limit(10).offset(20)
+        conn.execute(page)
+        sent = conn.rpc.analyze.query.query.call_args.kwargs
+        for clause in ('GROUP BY', 'ORDER BY', 'LIMIT', 'OFFSET'):
+            self.assertIn(clause, sent['query'])
+        self.assertEqual(sorted(v for v in sent['params'].values()), [10, 20])
+
     def test_execute_return_df(self):
         conn = make_connection()
         conn.rpc.analyze.query.query.return_value = [{'a': 1}, {'a': 2}]
