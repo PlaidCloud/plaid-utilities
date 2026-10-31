@@ -1127,6 +1127,40 @@ class TestSafeToDateSR(StarrocksTest):
         self.assertEqual('%Y-%m-%d', compiled.params['param_1'])
         self.assertEqual('', compiled.params['nullif_1'])
 
+@unittest.skipUnless(importlib.util.find_spec('duckdb'), 'duckdb not installed')
+class TestSafeToDateDuckDB(unittest.TestCase):
+    """DuckDB has no to_date(); execute the compiled SQL on a real DuckDB."""
+
+    def _run(self, *args):
+        import duckdb
+        d = DefaultDialect()
+        d.name = 'duckdb'
+        compiled = sqlalchemy.func.to_date(*args).compile(dialect=d)
+        sql = re.sub(r':(\w+)', r'$\1', str(compiled))
+        return duckdb.connect().execute(f'select {sql}', dict(compiled.params)).fetchone()[0]
+
+    def test_formats(self):
+        cases = [
+            (('2019-01-05',), datetime.date(2019, 1, 5)),
+            (('2019-01-05', 'YYYY-MM-DD'), datetime.date(2019, 1, 5)),
+            (('2019-01-05', '%Y-%m-%d'), datetime.date(2019, 1, 5)),
+            (('01/05/2019', 'MM/DD/YYYY'), datetime.date(2019, 1, 5)),
+            (('01/05/2019', '%m/%d/%Y'), datetime.date(2019, 1, 5)),
+            (('05/01/2019', '%d/%m/%Y'), datetime.date(2019, 1, 5)),
+            (('2019-01-05 13:45:10', '%Y-%m-%d %H:%M:%S'), datetime.date(2019, 1, 5)),
+            (('  2019-01-05  ', '%Y-%m-%d'), datetime.date(2019, 1, 5)),
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(expected, self._run(*args))
+
+    def test_empty_and_blank_strings_are_null(self):
+        for text in ('', '   '):
+            with self.subTest(text=text):
+                self.assertIsNone(self._run(text))
+                self.assertIsNone(self._run(text, '%Y-%m-%d'))
+
+
 class TestSafeExtract(BaseTest):
     def test_extract_datetime(self):
         dt = datetime.datetime(2023, 11, 20, 9, 30, 0, 0)
