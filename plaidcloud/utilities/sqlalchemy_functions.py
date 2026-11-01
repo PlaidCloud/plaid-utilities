@@ -1421,6 +1421,20 @@ def compile_safe_to_date_databend(element, compiler, **kw):
 
     return f"to_date({compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)})"
 
+@compiles(safe_to_date, 'duckdb')
+def compile_safe_to_date_duckdb(element, compiler, **kw):
+    # DuckDB has no to_date(); strptime takes the same strftime specifiers the Databend variant targets.
+    text, *args = list(element.clauses)
+    cleaned = compiler.process(func.nullif(func.trim(func.cast(text, sqlalchemy.Text)), ''), **kw)
+    if len(args):
+        date_format = args[0].value
+        if date_format and '%' not in date_format:
+            date_format = date_format_from_datetime_format(date_format)
+            date_format = postgres_to_python_date_format(date_format)
+        return f"CAST(strptime({cleaned}, {compiler.process(func.cast(date_format, sqlalchemy.Text))}) AS DATE)"
+
+    return f"CAST({cleaned} AS DATE)"
+
 @compiles(safe_to_date, 'starrocks')
 def compile_safe_to_date_starrocks(element, compiler, **kw):
     text, *args = list(element.clauses)
