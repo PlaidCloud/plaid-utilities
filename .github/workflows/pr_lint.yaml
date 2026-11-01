@@ -1,10 +1,12 @@
 name: Lint PlaidCloud Utilities
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
 jobs:
   reviewdog:
+    if: ${{ !github.event.pull_request.draft }}
     name: Lint PlaidCloud Utilities w ReviewDog
     runs-on: ubuntu-latest
     steps:
@@ -61,6 +63,7 @@ jobs:
           reporter: java-junit      # Format of test results
           token: ${{ secrets.GITHUB_TOKEN }}
   license:
+    if: ${{ !github.event.pull_request.draft }}
     name: Check Dependency Licenses
     runs-on: ubuntu-latest
     timeout-minutes: 10
