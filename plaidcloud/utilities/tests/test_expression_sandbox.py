@@ -539,3 +539,41 @@ class TestExpressionSandboxAllows(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestRawSqlSplice(unittest.TestCase):
+    """`literal_column` and `.op()` are allowed, but their strings may not carry a statement or subquery."""
+
+    def _eval(self, expression):
+        return se.eval_expression(expression, {}, [_table()])
+
+    def test_subquery_in_literal_column_is_refused(self):
+        for expression in (
+            "sqlalchemy.literal_column('(SELECT secret FROM vault)')",
+            "sqlalchemy.literal_column('1; DROP TABLE t')",
+            "sqlalchemy.literal_column('1 -- x')",
+            "sqlalchemy.literal_column(\"'x\")",
+            "sqlalchemy.literal_column('(SELECT ' + 'secret FROM vault)')",
+            "get_column(table, 'a') + sqlalchemy.literal_column('(select 1 from t)')",
+        ):
+            with self.subTest(expression=expression), self.assertRaises(se.SQLExpressionError):
+                self._eval(expression)
+
+    def test_injected_operator_is_refused(self):
+        for opstring in (") UNION SELECT 1 -- ", "or", "a or b", "-- x"):
+            with self.subTest(opstring=opstring), self.assertRaises(se.SQLExpressionError):
+                self._eval("get_column(table, 'a').op({!r})(1)".format(opstring))
+
+    def test_ordinary_literal_columns_and_operators_pass(self):
+        for expression in (
+            "sqlalchemy.literal_column('1')",
+            "sqlalchemy.literal_column('*')",
+            "sqlalchemy.literal_column(\"'none'\")",
+            "sqlalchemy.literal_column(\"'a; b'\")",
+            "get_column(table, 'a') + sqlalchemy.literal_column('0.5')",
+            "get_column(table, 'a').op('->>')('x')",
+            "get_column(table, 'a').op('IS DISTINCT FROM')(1)",
+            "func.count()",
+        ):
+            with self.subTest(expression=expression):
+                self._eval(expression)
