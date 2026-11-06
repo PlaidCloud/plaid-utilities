@@ -80,3 +80,20 @@ jobs:
       # install, and so are what actually ships. [test] is dev-only.
       - name: Check dependency licenses
         uses: PlaidCloud/plaidcloud-github-actions/license-check@v1
+  audit:
+    if: ${{ !github.event.pull_request.draft }}
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ensure python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+      - name: pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit -e .
+          pip-audit --skip-editable
