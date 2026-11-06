@@ -4,11 +4,17 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - master
+permissions:
+  contents: read
+
 jobs:
   reviewdog:
     if: ${{ !github.event.pull_request.draft }}
     name: Lint PlaidCloud Utilities w ReviewDog
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - name: Ensure python 3.12
         uses: actions/setup-python@v7
