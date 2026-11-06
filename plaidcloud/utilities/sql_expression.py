@@ -449,6 +449,36 @@ def _assert_safe_expression(source, safe_dict=None):
 
 filter_nulls = curry(valfilter, lambda v: v is not None)
 
+_SQL_STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
+_SPLICE_KEYWORDS = re.compile(
+    r'\b(?:select|from|union|intersect|except|insert|update|delete|drop|create|alter|merge|with|values|into|join)\b',
+    re.IGNORECASE)
+_CUSTOM_OPERATOR = re.compile(r'[!%&*+:?\-/<=>@^|~]{1,4}|[A-Za-z]+(?: [A-Za-z]+){0,3}')
+
+
+def _assert_no_raw_sql_splice(compiled) -> None:
+    """Refuse a built expression whose raw-SQL carriers (`literal_column`, `.op()`) hold a subquery or statement.
+
+    `_assert_safe_expression` polices names, never the strings handed to them, and `literal_column` is
+    allowed because the product uses it. Its body reaches the statement verbatim, so one that reads another
+    table sits outside any row filter the enclosing query carries.
+    """
+    if not isinstance(compiled, sqlalchemy.sql.ClauseElement):
+        return
+    for node in visitors.iterate(compiled):
+        if isinstance(node, sqlalchemy.sql.elements.ColumnClause) and node.is_literal:
+            body = _SQL_STRING_LITERAL.sub('', str(node.name))
+            if "'" in body or ';' in body or '--' in body or '/*' in body or '#' in body or _SPLICE_KEYWORDS.search(body):
+                raise SQLExpressionError(
+                    'Error in expression:\n    literal_column({!r}) may not contain a statement or subquery.'.format(str(node.name)))
+        operator = getattr(node, 'operator', None)
+        opstring = getattr(operator, 'opstring', None)
+        if opstring is not None and (
+                not _CUSTOM_OPERATOR.fullmatch(opstring) or '--' in opstring or '/*' in opstring
+                or {w.lower() for w in opstring.split()} & {'or', 'xor'}):
+            raise SQLExpressionError(
+                'Error in expression:\n    operator {!r} is not permitted.'.format(opstring))
+
 
 def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1, tables_by_alias: dict|None = None):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start, tables_by_alias=tables_by_alias)
@@ -465,7 +495,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
-        return eval(compiled_expression, safe_dict)
+        result = eval(compiled_expression, safe_dict)
     except Exception as e:
         message = str(e)
         raise SQLExpressionError(
@@ -473,6 +503,8 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
             + '    {}\n'.format(expression)
             + message
         )
+    _assert_no_raw_sql_splice(result)
+    return result
 
 
 def on_clause(table_a: sqlalchemy.Table, table_b: sqlalchemy.Table, join_map: list[dict], special_null_handling: bool = False):
