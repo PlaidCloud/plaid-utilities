@@ -9,11 +9,11 @@ import re
 import uuid
 from collections import Counter
 from copy import deepcopy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
 import sqlalchemy.orm
-from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
+from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency, PlaidVector
 from plaidcloud.rpc.type_conversion import UnsupportedDtype, require_dtype_capability, sqlalchemy_from_dtype
 from sqlalchemy.sql import operators, visitors
 from toolz.dicttoolz import assoc, merge, valfilter
@@ -481,23 +481,39 @@ def _assert_no_raw_sql_splice(compiled) -> None:
                 'Error in expression:\n    operator {!r} is not permitted.'.format(opstring))
 
 
+def _one_value_of(sequence: tuple | list, value_type: sqlalchemy.types.TypeEngine | type[sqlalchemy.types.TypeEngine] | None) -> bool:
+    """Whether a tuple or list is a single value of `value_type`: of a JSON or ARRAY type, read by affinity so that a
+    TypeDecorator such as PlaidJSON answers for its impl, or of plaid's vector, an ARRAY whose StarRocks affinity is
+    neither. Not when it holds a column or other SQL, which none of them can serialise."""
+    if value_type is None:
+        return False
+    value_type = sqlalchemy.types.to_instance(value_type)
+    return (
+        (isinstance(value_type, PlaidVector) or issubclass(value_type._type_affinity, (sqlalchemy.ARRAY, sqlalchemy.JSON)))
+        and not any(isinstance(item, sqlalchemy.sql.ClauseElement) for item in sequence)
+    )
+
+
 def _binds_several_values(node: sqlalchemy.sql.ClauseElement) -> bool:
     return (
         isinstance(node, sqlalchemy.sql.elements.BindParameter)
         and isinstance(node.value, (tuple, list))
         and not node.expanding
-        and not isinstance(node.type, (sqlalchemy.ARRAY, sqlalchemy.JSON))
+        and not _one_value_of(node.value, node.type)
     )
 
 
-def several_values_reason(result: object) -> str | None:
+def several_values_reason(result: object, value_type: sqlalchemy.types.TypeEngine | type[sqlalchemy.types.TypeEngine] | None = None) -> str | None:
     """Why an evaluated expression is not a single SQL value, when it is, or passes, a tuple or list.
 
     SQLAlchemy binds the whole sequence as one parameter, which each driver renders its own way; Databend's raises
     only at execution, after the step has emptied its target. A one-element tuple that some drivers happen to read
     as its value is refused with the rest, so an expression means the same on every warehouse. `in_` expands its
-    list, and an ARRAY or JSON bind is one value by declaration, whether or not a given driver can bind it.
+    list, and a bind typed JSON, ARRAY or vector is one value by declaration, whether or not a given driver can bind
+    it. `value_type` is the type the caller binds a bare result as, such as its target column's.
     """
+    if isinstance(result, (tuple, list)) and _one_value_of(result, value_type):
+        return None
     if isinstance(result, tuple):
         return ('This expression is a list of values, but a column or filter needs a single value. '
                 'Remove any trailing comma, or any comma that is not inside brackets.')
@@ -517,7 +533,9 @@ def several_values_reason(result: object) -> str | None:
     return None
 
 
-def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1, tables_by_alias: dict|None = None):
+def eval_expression(expression: str, variables: dict | None, tables: list[sqlalchemy.Table], extra_keys: dict | None = None, disable_variables: bool = False, table_numbering_start: int = 1, tables_by_alias: dict | None = None, *, value_type: sqlalchemy.types.TypeEngine | type[sqlalchemy.types.TypeEngine] | None = None) -> Any:
+    """`value_type` is the type a bare result is bound as, where the caller binds it as a value, as a target column's
+    cast and an update's column do; see `several_values_reason`."""
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start, tables_by_alias=tables_by_alias)
 
     try:
@@ -541,7 +559,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
             + message
         )
     _assert_no_raw_sql_splice(result)
-    if reason := several_values_reason(result):
+    if reason := several_values_reason(result, value_type):
         raise SQLExpressionError(f'Error in expression:\n    {expression}\n{reason}')
     return result
 
@@ -744,6 +762,7 @@ def expression_from_clause(expression: str, tables: list[sqlalchemy.Table], sort
         disable_variables=disable_variables,
         table_numbering_start=table_numbering_start,
         tables_by_alias=tables_by_alias,
+        value_type=cast_type,
     )
     # An expression that evaluates to Python None -- an Alteryx Null(), an empty
     # formula, or a bare null/NULL/Null, all of which get_safe_dict maps to None
@@ -1762,7 +1781,8 @@ def get_update_value(tc, table, dtype_map, variables):
     if tc.get('constant'):
         return (True, conditional_empty_string_fn(sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))))
     if tc.get('expression'):
-        return (True, conditional_empty_string_fn(eval_expression(tc['expression'].strip(), variables, [table])))
+        return (True, conditional_empty_string_fn(
+            eval_expression(tc['expression'].strip(), variables, [table], value_type=sqlalchemy_from_dtype(dtype))))
     if dtype == 'text':
         # Special condition for empty string
         # It works this way because it's impossible to type 'constant': '' in the UI
@@ -2232,11 +2252,14 @@ def eval_rule(rule: str, variables: dict, tables: list, extra_keys=None, disable
     compiled_expression = compile(expression_with_variables, '<string>', 'eval')
 
     try:
-        return eval(compiled_expression, safe_dict)
+        result = eval(compiled_expression, safe_dict)
     except Exception as e:
         raise SQLExpressionError(
             f'Error in rule evaluation:\n{rule}\n' + str(e)
         )
+    if reason := several_values_reason(result):
+        raise SQLExpressionError(f'Error in rule evaluation:\n{rule}\n{reason}')
+    return result
 
 
 BLANK_RULE_VALUES = ('', 'None', 'nan')

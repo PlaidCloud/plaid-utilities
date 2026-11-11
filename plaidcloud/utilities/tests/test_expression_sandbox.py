@@ -639,3 +639,42 @@ class TestSeveralValues(unittest.TestCase):
                 target_columns=[{'target': 'x', 'dtype': 'integer', 'expression': "get_column(table, 'a'),"}],
                 wheres=[], config={}, variables={},
             )
+
+    TYPED_COLUMNS = [{'source': 'region', 'dtype': 'text'}, {'source': 'j', 'dtype': 'json'}, {'source': 'v', 'dtype': 'vector'}]
+
+    def _typed_table(self):
+        return se.get_table_rep('t', self.TYPED_COLUMNS, 'anlz', sqlalchemy.MetaData())
+
+    def _select_into(self, dtype, expression):
+        return se.get_select_query(
+            tables=[self._typed_table()], source_columns=[self.TYPED_COLUMNS],
+            target_columns=[{'target': 'x', 'dtype': dtype, 'expression': expression}],
+            wheres=[], config={}, variables={},
+        )
+
+    def test_a_list_compared_with_a_json_or_vector_column_is_one_value(self):
+        for expression in ("get_column(table, 'j') == [1, 2]", "get_column(table, 'v') == [0.1, 0.2, 0.3]"):
+            with self.subTest(expression=expression):
+                se.eval_expression(expression, {}, [self._typed_table()])
+
+    def test_a_list_or_tuple_is_one_value_of_a_json_target_column_only(self):
+        for expression in ("['x', 'y']", "'x', 'y'"):
+            with self.subTest(expression=expression):
+                self._select_into('json', expression)
+                with self.assertRaises(se.SQLExpressionError):
+                    self._select_into('text', expression)
+
+    def test_a_json_target_column_still_refuses_a_column_with_a_trailing_comma(self):
+        with self.assertRaisesRegex(se.SQLExpressionError, 'trailing comma'):
+            self._select_into('json', "get_column(table, 'region'),")
+
+    def test_an_update_value_is_judged_against_its_column(self):
+        table = self._typed_table()
+        self.assertEqual(se.get_update_value({'source': 'j', 'expression': "['x', 'y']"}, table, {'j': 'json'}, {}),
+                         (True, ['x', 'y']))
+        with self.assertRaisesRegex(se.SQLExpressionError, 'Square brackets'):
+            se.get_update_value({'source': 'region', 'expression': "['x', 'y']"}, table, {'region': 'text'}, {})
+
+    def test_a_rule_is_refused_like_an_expression(self):
+        with self.assertRaisesRegex(se.SQLExpressionError, r'use \.in_\(\[\.\.\.\]\) in place of =='):
+            se.eval_rule("get_column(table, 'a') == ('EU', 'US')", {}, [_table()])
