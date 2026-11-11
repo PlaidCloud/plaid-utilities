@@ -692,7 +692,6 @@ def has_constant(column_config: dict) -> bool:
     return constant is not None and constant != ''
 
 
-# TODO: write tests, though TestGetFromClause already covers this
 def constant_from_clause(
     constant: str | int | float | bool, sort_type: bool | None, cast_type: type[sqlalchemy.types.TypeEngine] | None,
     name: str, variables: dict | None = None, disable_variables: bool = False, trim_zeroes: bool = False,

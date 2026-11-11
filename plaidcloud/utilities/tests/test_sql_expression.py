@@ -3138,6 +3138,14 @@ class TestAggregateProjectionRefusal(TestSQLExpression):
             self.render(self.grouped_region, {'target': 'lit', 'constant': 'x', 'dtype': 'text'}),
         )
 
+    def test_zero_constant_naming_an_ungrouped_source_is_not_refused(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(%(param_1)s AS DECIMAL(38, 10)) AS zero '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region,
+                        {'target': 'zero', 'constant': 0, 'source': 'note', 'dtype': 'numeric', 'agg': 'dont_group'}),
+        )
+
     def test_dont_group_with_self_aggregating_expression_still_renders(self):
         """The Alteryx Summarize/WeightedAvg conversions are built exactly this way."""
         self.assertEqual(
