@@ -490,14 +490,13 @@ def _binds_several_values(node: sqlalchemy.sql.ClauseElement) -> bool:
     )
 
 
-def _several_values_reason(result: object) -> str | None:
+def several_values_reason(result: object) -> str | None:
     """Why an evaluated expression is not a single SQL value, when it is, or passes, a tuple or list.
 
-    SQLAlchemy binds the whole sequence as one parameter and each driver renders it its own way: Databend's raises
-    only at execution, after the step has emptied its target, and StarRocks' writes a tuple of columns as the text
-    of their names. A one-element tuple that other drivers happen to read as its value is refused with the rest, so
-    an expression means the same on every warehouse. `in_` expands its list, and an ARRAY or JSON bind holds one by
-    declaration.
+    SQLAlchemy binds the whole sequence as one parameter, which each driver renders its own way; Databend's raises
+    only at execution, after the step has emptied its target. A one-element tuple that some drivers happen to read
+    as its value is refused with the rest, so an expression means the same on every warehouse. `in_` expands its
+    list, and an ARRAY or JSON bind is one value by declaration, whether or not a given driver can bind it.
     """
     if isinstance(result, tuple):
         return ('This expression is a list of values, but a column or filter needs a single value. '
@@ -508,7 +507,7 @@ def _several_values_reason(result: object) -> str | None:
     if not isinstance(result, sqlalchemy.sql.ClauseElement):
         return None
     for node in visitors.iterate(result):
-        if (isinstance(node, sqlalchemy.sql.elements.BinaryExpression) and operators.is_comparison(node.operator)
+        if (isinstance(node, sqlalchemy.sql.elements.BinaryExpression) and node.operator in (operators.eq, operators.ne)
                 and _binds_several_values(node.right)):
             return ('Part of this expression compares with a list of values, but a comparison takes a single value. '
                     'To match any of several values, use .in_([...]) in place of ==, or .not_in([...]) in place of !=.')
@@ -542,7 +541,7 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
             + message
         )
     _assert_no_raw_sql_splice(result)
-    if reason := _several_values_reason(result):
+    if reason := several_values_reason(result):
         raise SQLExpressionError(f'Error in expression:\n    {expression}\n{reason}')
     return result
 

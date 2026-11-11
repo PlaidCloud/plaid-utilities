@@ -599,6 +599,7 @@ class TestSeveralValues(unittest.TestCase):
         for expression in (
             "get_column(table, 'a') == ('EU', 'US')",
             "get_column(table, 'a') != ['EU', 'US']",
+            "('EU', 'US') == get_column(table, 'a')",
             "and_(get_column(table, 'b') == 1, get_column(table, 'a') == ('EU', 'US'))",
         ):
             with self.subTest(expression=expression):
@@ -608,6 +609,7 @@ class TestSeveralValues(unittest.TestCase):
         for expression in (
             "func.coalesce(get_column(table, 'a'), ('EU', 'US'))",
             "case((get_column(table, 'a') == 1, ('EU', 'US')), else_='x')",
+            "get_column(table, 'a').like(('EU', 'US'))",
         ):
             with self.subTest(expression=expression):
                 self.assertIn('Check the brackets and commas', self._refusal(expression))
