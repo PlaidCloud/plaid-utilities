@@ -7,7 +7,7 @@ import pandas
 import sqlalchemy
 from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
 from plaidcloud.rpc.type_conversion import DTYPES, UnsupportedDtype, sqlalchemy_from_dtype
-from sqlalchemy.dialects import mssql
+from sqlalchemy.dialects import mssql, postgresql
 from toolz.functoolz import curry
 from toolz.functoolz import identity as ident
 
@@ -804,6 +804,68 @@ class TestGetFromClause(TestSQLExpression):
                 sqlalchemy.literal('{var}').label('TargetColumn'),
                 type_=PlaidUnicode(length=5000)
             ),
+        )
+
+    def test_number_constant(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'constant': 5, 'target': 'TargetColumn', 'dtype': 'text'},
+                self.source_column_configs,
+                variables={'var': 'foobar'},
+            ),
+            sqlalchemy.cast(sqlalchemy.literal(5), PlaidUnicode(length=5000)).label('TargetColumn'),
+        )
+
+    def test_number_constant_renders_as_a_literal(self):
+        clause = se.get_from_clause(
+            [self.table],
+            {'constant': 5, 'target': 'TargetColumn', 'dtype': 'text'},
+            self.source_column_configs,
+        )
+        self.assertEqual(
+            str(sqlalchemy.select(clause).compile(dialect=postgresql.dialect(), compile_kwargs={'literal_binds': True})),
+            'SELECT CAST(5 AS TEXT) AS "TargetColumn"',
+        )
+
+    def test_boolean_constant(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'constant': True, 'target': 'TargetColumn', 'dtype': 'boolean'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(sqlalchemy.literal(True), sqlalchemy_from_dtype('boolean')).label('TargetColumn'),
+        )
+
+    def test_zero_constant_takes_priority_over_source(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'constant': 0, 'source': 'Column2', 'target': 'TargetColumn', 'dtype': 'numeric'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(sqlalchemy.literal(0), sqlalchemy_from_dtype('numeric')).label('TargetColumn'),
+        )
+
+    def test_false_constant_takes_priority_over_source(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'constant': False, 'source': 'Column1', 'target': 'TargetColumn', 'dtype': 'boolean'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(sqlalchemy.literal(False), sqlalchemy_from_dtype('boolean')).label('TargetColumn'),
+        )
+
+    def test_empty_constant_falls_through_to_source(self):
+        self.assertEquivalent(
+            se.get_from_clause(
+                [self.table],
+                {'constant': '', 'source': 'Column1', 'target': 'TargetColumn', 'dtype': 'text'},
+                self.source_column_configs,
+            ),
+            sqlalchemy.cast(self.table.c.Column1, PlaidUnicode(length=5000)).label('TargetColumn'),
         )
 
     def test_constant_irrelevant_cast(self):
@@ -1606,6 +1668,23 @@ class TestGetSelectQuery(TestSQLExpression):
             sqlalchemy.select(
                 self.from_clause(self.groupby_column_1, aggregate=True),
                 self.from_clause(groupby_constant, aggregate=True),
+                self.from_clause(self.sum_column_2, aggregate=True),
+            ).group_by(self.from_clause(self.groupby_column_1, aggregate=False, cast=False)),
+        )
+
+    def test_dont_groupby_zero_constant(self):
+        groupby_zero = {'target': 'Zero', 'constant': 0, 'dtype': 'numeric', 'agg': 'group'}
+        self.assertEquivalent(
+            se.get_select_query(
+                [self.table],
+                self.source_columns,
+                [self.groupby_column_1, groupby_zero, self.sum_column_2],
+                [],
+                aggregate=True,
+            ),
+            sqlalchemy.select(
+                self.from_clause(self.groupby_column_1, aggregate=True),
+                self.from_clause(groupby_zero, aggregate=True),
                 self.from_clause(self.sum_column_2, aggregate=True),
             ).group_by(self.from_clause(self.groupby_column_1, aggregate=False, cast=False)),
         )
@@ -2508,6 +2587,13 @@ class TestGetUpdateValue(TestSQLExpression):
             sqlalchemy.literal('5', type_=sqlalchemy.NUMERIC)
         )
 
+    def test_number_constant(self):
+        include, value = se.get_update_value({'source': 'Column1', 'constant': 5}, self.table, self.dtype_map, {})
+        self.assertEquivalent(value, sqlalchemy.cast(sqlalchemy.literal(5), sqlalchemy_from_dtype('text')))
+
+    def test_zero_constant_is_included(self):
+        self.assertTrue(se.get_update_value({'source': 'Column2', 'constant': 0}, self.table, self.dtype_map, {})[0])
+
     def test_expression_none_returns_empty_string_for_text(self):
         empty_string_col = {'source': 'Column1', 'expression': 'None'}
         self.assertEqual(
@@ -2942,6 +3028,18 @@ class TestApplyRulesIterations(TestSQLExpression):
         self.assertEqual([('A', '0', 'R1', ''), ('B', '1', 'R2', 'b')] + unmatched, self.pandas_rows(df_rules))
 
 
+class TestHasConstant(unittest.TestCase):
+    def test_zero_and_false_are_constants(self):
+        for constant in (0, 0.0, False, '0', 'x'):
+            with self.subTest(constant=constant):
+                self.assertTrue(se.has_constant({'constant': constant}))
+
+    def test_none_and_empty_are_not(self):
+        for column in ({}, {'constant': None}, {'constant': ''}):
+            with self.subTest(column=column):
+                self.assertFalse(se.has_constant(column))
+
+
 class TestAggVocabulary(TestSQLExpression):
     """One definition of "this agg leaves the value alone", so callers stop restating it."""
 
@@ -2967,6 +3065,9 @@ class TestAggVocabulary(TestSQLExpression):
     def test_a_constants_agg_contributes_nothing(self):
         """`constant_from_clause` hard-passes `None` as the agg, so it never reaches the SQL."""
         self.assertFalse(se.column_contributes_an_aggregate({'constant': 'x', 'agg': 'sum'}))
+
+    def test_a_zero_constants_agg_contributes_nothing(self):
+        self.assertFalse(se.column_contributes_an_aggregate({'constant': 0, 'agg': 'sum'}))
 
 
 class TestAggregateProjectionRefusal(TestSQLExpression):
@@ -3035,6 +3136,14 @@ class TestAggregateProjectionRefusal(TestSQLExpression):
             'SELECT CAST(sch.src.region AS STRING) AS region, CAST(%(param_1)s AS STRING) AS lit '
             'FROM sch.src GROUP BY sch.src.region',
             self.render(self.grouped_region, {'target': 'lit', 'constant': 'x', 'dtype': 'text'}),
+        )
+
+    def test_zero_constant_naming_an_ungrouped_source_is_not_refused(self):
+        self.assertEqual(
+            'SELECT CAST(sch.src.region AS STRING) AS region, CAST(%(param_1)s AS DECIMAL(38, 10)) AS zero '
+            'FROM sch.src GROUP BY sch.src.region',
+            self.render(self.grouped_region,
+                        {'target': 'zero', 'constant': 0, 'source': 'note', 'dtype': 'numeric', 'agg': 'dont_group'}),
         )
 
     def test_dont_group_with_self_aggregating_expression_still_renders(self):
