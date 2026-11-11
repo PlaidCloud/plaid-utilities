@@ -740,14 +740,31 @@ def process_fn(sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine
 
     return compose(label_fn, sort_fn, trim_fn, cast_fn, agg_fn)
 
-# TODO: write tests, though TestGetFromClause already covers this
-def constant_from_clause(constant, sort_type: bool|None, cast_type: type[sqlalchemy.types.TypeEngine]|None, name: str, variables: dict = None, disable_variables: bool = False, trim_zeroes: bool = False, sort_options: dict|None = None):
-    """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments"""
-    if disable_variables:
-        var_fn = ident
+
+def has_constant(column_config: dict) -> bool:
+    """Whether `get_from_clause` builds this target column from its constant. `0` and `False` are
+    constants; `None` and `''` are none."""
+    constant = column_config.get('constant')
+    return constant is not None and constant != ''
+
+
+def constant_from_clause(
+    constant: str | int | float | bool, sort_type: bool | None, cast_type: type[sqlalchemy.types.TypeEngine] | None,
+    name: str, variables: dict | None = None, disable_variables: bool = False, trim_zeroes: bool = False,
+    sort_options: dict | None = None,
+) -> sqlalchemy.Label:
+    """Get a representation of a target column based on a constant. See process_fn & get_from_clause for explanation of arguments
+
+    Only a string has variables applied and is bound as the column's type. A number or boolean
+    is bound as its own type and converted by the cast, because a string type cannot render one
+    as a literal.
+    """
+    if not isinstance(constant, str):
+        const = sqlalchemy.literal(constant)
+    elif disable_variables:
+        const = sqlalchemy.literal(constant, type_=cast_type)
     else:
-        var_fn = curry(apply_variables, variables=variables)
-    const = sqlalchemy.literal(var_fn(constant), type_=cast_type)
+        const = sqlalchemy.literal(apply_variables(constant, variables), type_=cast_type)
 
     # never aggregate
     return process_fn(sort_type, cast_type, None, name, trim_zeroes, sort_options)(const)
@@ -964,7 +981,7 @@ def get_from_clause(
     sort: bool = False, variables: dict = None, cast: bool = True, disable_variables: bool = False, table_numbering_start: int = 1,
     sort_columns: list = None, use_row_number_for_serial: bool = True, trim_zeroes: bool = False,
     *, tables_by_alias: dict | None = None,
-):
+) -> sqlalchemy.ColumnElement | None:
     """Given info from a config, returns a sqlalchemy expression representing a single target column."""
 
     expression = target_column_config.get('expression')
@@ -997,7 +1014,7 @@ def get_from_clause(
         sort_type = None
         sort_options = None
 
-    if constant:
+    if has_constant(target_column_config):
         return constant_from_clause(constant, sort_type, cast_type, name, variables, disable_variables, trim_zeroes, sort_options)
     if expression:
         return expression_from_clause(expression, tables, sort_type, cast_type, agg_type, name, variables, disable_variables, table_numbering_start, trim_zeroes, tables_by_alias=tables_by_alias, sort_options=sort_options)
@@ -1340,7 +1357,7 @@ def is_passthrough_agg(agg):
     return agg in UNAGGREGATED_UNGROUPED_AGGS
 
 
-def column_contributes_an_aggregate(target_column):
+def column_contributes_an_aggregate(target_column: dict) -> bool:
     """Whether this target column puts a real aggregate in the query.
 
     Grouping tokens are excluded (they group, they do not aggregate) and so are constants:
@@ -1348,7 +1365,7 @@ def column_contributes_an_aggregate(target_column):
     the SQL, which is the same reason `get_select_query` keeps constants out of the GROUP BY.
     """
     agg = target_column.get('agg')
-    return not is_passthrough_agg(agg) and agg not in GROUPING_AGGS and not target_column.get('constant')
+    return not is_passthrough_agg(agg) and agg not in GROUPING_AGGS and not has_constant(target_column)
 
 
 def _source_column_key(tables, target_column_config, source_column_configs, table_numbering_start=1, tables_by_alias=None):
@@ -1449,9 +1466,10 @@ def _remedy_for(dtype):
 
 
 def assert_aggregate_projection_is_groupable(
-    tables, target_columns, source_columns, grouping_columns, table_numbering_start=1,
-    tables_by_alias=None, use_row_number_for_serial=True,
-):
+    tables: list[sqlalchemy.Table], target_columns: list[dict], source_columns: list[list[dict]],
+    grouping_columns: list[sqlalchemy.ColumnElement], table_numbering_start: int = 1,
+    tables_by_alias: dict | None = None, use_row_number_for_serial: bool = True,
+) -> None:
     """Refuse an aggregate config that projects a bare source column which is neither grouped
     nor aggregated.
 
@@ -1498,7 +1516,7 @@ def assert_aggregate_projection_is_groupable(
     grouped_keys = _columns_in(grouping_columns)
 
     for tc in target_columns:
-        if tc.get('constant') or tc.get('expression') or not tc.get('source'):
+        if has_constant(tc) or tc.get('expression') or not tc.get('source'):
             continue
         if not is_passthrough_agg(tc.get('agg')):
             continue
@@ -1524,7 +1542,7 @@ def get_select_query(
     distinct: bool = None, count: bool = None, disable_variables: bool = None, table_numbering_start: int = 1,
     use_row_number_for_serial: bool = True, aggregation_type: str = 'group', cast: bool = True, trim_zeroes: bool = False,
     *, tables_by_alias: dict | None = None,
-):
+) -> sqlalchemy.Select:
     """Returns a sqlalchemy select query from table objects and an extract
     config (or from the individual parameters in that config). tables,
     source_columns, and wheres should be lists, so that multiple tables can be
@@ -1666,7 +1684,7 @@ def get_select_query(
             for tc in target_columns
             if (
                 tc.get('agg') in ('group', 'group_null')
-                and not tc.get('constant')
+                and not has_constant(tc)
                 and (use_row_number_for_serial or tc.get('dtype') not in ('serial', 'bigserial'))
             )
         ]
@@ -1764,11 +1782,14 @@ def get_insert_query(target_table: sqlalchemy.Table, target_columns: list[dict],
     return target_table.insert().from_select(names, select_query)
 
 
-def get_update_value(tc, table, dtype_map, variables):
-    """returns (include, val) where val should be used in the query if include is True, but filtered out if not"""
+def get_update_value(tc: dict, table: sqlalchemy.Table, dtype_map: dict[str, str], variables: dict | None) -> tuple[bool, object]:
+    """returns (include, val) where val should be used in the query if include is True, but filtered out if not
+
+    A number or boolean constant is bound and cast as in `constant_from_clause`.
+    """
     dtype = dtype_map.get(tc['source'], 'text')
     if dtype == 'text':
-        def conditional_empty_string_fn(val):
+        def conditional_empty_string_fn(val: object) -> object:
             # Transforms None into '', but only if dtype is 'text'
             if val is None:
                 return ''
@@ -1778,8 +1799,11 @@ def get_update_value(tc, table, dtype_map, variables):
 
     if tc.get('nullify'):
         return (True, None)
-    if tc.get('constant'):
-        return (True, conditional_empty_string_fn(sqlalchemy.literal(apply_variables(tc['constant'], variables), type_=sqlalchemy_from_dtype(dtype))))
+    if has_constant(tc):
+        constant = tc['constant']
+        if not isinstance(constant, str):
+            return (True, sqlalchemy.cast(sqlalchemy.literal(constant), sqlalchemy_from_dtype(dtype)))
+        return (True, conditional_empty_string_fn(sqlalchemy.literal(apply_variables(constant, variables), type_=sqlalchemy_from_dtype(dtype))))
     if tc.get('expression'):
         return (True, conditional_empty_string_fn(
             eval_expression(tc['expression'].strip(), variables, [table], value_type=sqlalchemy_from_dtype(dtype))))
