@@ -577,3 +577,104 @@ class TestRawSqlSplice(unittest.TestCase):
         ):
             with self.subTest(expression=expression):
                 self._eval(expression)
+
+
+class TestSeveralValues(unittest.TestCase):
+    """An expression that is, or passes, a tuple or list where SQL takes a single value is refused by name."""
+
+    def _refusal(self, expression, variables=None):
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            se.eval_expression(expression, variables or {}, [_table()])
+        return str(raised.exception)
+
+    def test_a_trailing_or_stray_comma_is_refused(self):
+        for expression in ("get_column(table, 'a'),", "'EU', 'US'", "table.a, table.b"):
+            with self.subTest(expression=expression):
+                self.assertIn('Remove any trailing comma', self._refusal(expression))
+
+    def test_a_bracketed_list_is_refused(self):
+        self.assertIn('Square brackets make a list', self._refusal("['EU', 'US']"))
+
+    def test_a_comparison_with_several_values_is_steered_to_in(self):
+        for expression in (
+            "get_column(table, 'a') == ('EU', 'US')",
+            "get_column(table, 'a') != ['EU', 'US']",
+            "('EU', 'US') == get_column(table, 'a')",
+            "and_(get_column(table, 'b') == 1, get_column(table, 'a') == ('EU', 'US'))",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIn('use .in_([...]) in place of ==', self._refusal(expression))
+
+    def test_several_values_passed_to_a_function_are_refused(self):
+        for expression in (
+            "func.coalesce(get_column(table, 'a'), ('EU', 'US'))",
+            "case((get_column(table, 'a') == 1, ('EU', 'US')), else_='x')",
+            "get_column(table, 'a').like(('EU', 'US'))",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIn('Check the brackets and commas', self._refusal(expression))
+
+    def test_the_refusal_quotes_the_expression_as_written(self):
+        self.assertIn("\n    get_column(table, '{col}'),\n", self._refusal("get_column(table, '{col}'),", {'col': 'a'}))
+
+    def test_expanded_and_declared_sequences_pass(self):
+        for expression in (
+            "get_column(table, 'a').in_([1, 2])",
+            "get_column(table, 'a').not_in((1, 2))",
+            "get_column(table, 'a').between(1, 2)",
+            "cast(['x', 'y'], sqlalchemy.ARRAY(sqlalchemy.Text))",
+            "cast([1, 2], JSON)",
+            "func.coalesce(get_column(table, 'a'), 0)",
+            "'EU'",
+        ):
+            with self.subTest(expression=expression):
+                se.eval_expression(expression, {}, [_table()])
+
+    def test_a_target_column_is_refused_while_the_select_is_built(self):
+        columns = [{'source': 'a', 'dtype': 'integer'}]
+        table = se.get_table_rep('t', columns, 'anlz', sqlalchemy.MetaData())
+        with self.assertRaises(se.SQLExpressionError):
+            se.get_select_query(
+                tables=[table], source_columns=[columns],
+                target_columns=[{'target': 'x', 'dtype': 'integer', 'expression': "get_column(table, 'a'),"}],
+                wheres=[], config={}, variables={},
+            )
+
+    TYPED_COLUMNS = [{'source': 'region', 'dtype': 'text'}, {'source': 'j', 'dtype': 'json'}, {'source': 'v', 'dtype': 'vector'}]
+
+    def _typed_table(self):
+        return se.get_table_rep('t', self.TYPED_COLUMNS, 'anlz', sqlalchemy.MetaData())
+
+    def _select_into(self, dtype, expression):
+        return se.get_select_query(
+            tables=[self._typed_table()], source_columns=[self.TYPED_COLUMNS],
+            target_columns=[{'target': 'x', 'dtype': dtype, 'expression': expression}],
+            wheres=[], config={}, variables={},
+        )
+
+    def test_a_list_compared_with_a_json_or_vector_column_is_one_value(self):
+        for expression in ("get_column(table, 'j') == [1, 2]", "get_column(table, 'v') == [0.1, 0.2, 0.3]"):
+            with self.subTest(expression=expression):
+                se.eval_expression(expression, {}, [self._typed_table()])
+
+    def test_a_list_or_tuple_is_one_value_of_a_json_target_column_only(self):
+        for expression in ("['x', 'y']", "'x', 'y'"):
+            with self.subTest(expression=expression):
+                self._select_into('json', expression)
+                with self.assertRaises(se.SQLExpressionError):
+                    self._select_into('text', expression)
+
+    def test_a_json_target_column_still_refuses_a_column_with_a_trailing_comma(self):
+        with self.assertRaisesRegex(se.SQLExpressionError, 'trailing comma'):
+            self._select_into('json', "get_column(table, 'region'),")
+
+    def test_an_update_value_is_judged_against_its_column(self):
+        table = self._typed_table()
+        self.assertEqual(se.get_update_value({'source': 'j', 'expression': "['x', 'y']"}, table, {'j': 'json'}, {}),
+                         (True, ['x', 'y']))
+        with self.assertRaisesRegex(se.SQLExpressionError, 'Square brackets'):
+            se.get_update_value({'source': 'region', 'expression': "['x', 'y']"}, table, {'region': 'text'}, {})
+
+    def test_a_rule_is_refused_like_an_expression(self):
+        with self.assertRaisesRegex(se.SQLExpressionError, r'use \.in_\(\[\.\.\.\]\) in place of =='):
+            se.eval_rule("get_column(table, 'a') == ('EU', 'US')", {}, [_table()])
