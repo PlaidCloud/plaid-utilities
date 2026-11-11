@@ -2,6 +2,7 @@
 import functools
 import importlib.util
 import unittest
+
 import pandas
 import sqlalchemy
 from plaidcloud.rpc.database import PlaidCurrency, PlaidNumeric, PlaidUnicode
@@ -122,6 +123,41 @@ class TestGetTableRep(TestSQLExpression):
             column_key='foobar',
         )
         self.assertEqual(self.table, table_using_column_key)
+
+    def test_repeated_target_is_refused_by_name(self):
+        with self.assertRaises(se.SQLExpressionError) as refused:
+            se.get_table_rep(
+                'table_12345',
+                [{'target': 'id', 'dtype': 'text'}, {'target': 'id', 'dtype': 'numeric'}],
+                'anlz_schema',
+                column_key='target',
+            )
+        self.assertEqual(
+            str(refused.exception),
+            "Column 'id' appears more than once in the step's output; give each output column its own name.",
+        )
+
+    def test_every_repeated_target_is_named(self):
+        with self.assertRaises(se.SQLExpressionError) as refused:
+            se.get_table_rep(
+                'table_12345',
+                [{'id': name, 'dtype': 'text'} for name in ('id', 'code', 'id', 'name', 'code')],
+                'anlz_schema',
+                column_key='id',
+            )
+        self.assertEqual(
+            str(refused.exception),
+            "Columns 'id', 'code' each appear more than once in the step's output; "
+            'give each output column its own name.',
+        )
+
+    def test_repeated_source_is_read_once(self):
+        table = se.get_table_rep(
+            'table_12345',
+            [{'source': 'Column1', 'dtype': 'text'}, {'source': 'Column1', 'dtype': 'text'}],
+            'anlz_schema',
+        )
+        self.assertEqual([column.name for column in table.columns], ['Column1'])
 
     def test_alias(self):
         self.assertEquivalent(
@@ -2166,6 +2202,13 @@ class TestGetInsertQuery(TestSQLExpression):
             se.get_insert_query(target_table, [self.target_column], select),
             target_table.insert().from_select(['TargetColumn'], select)
         )
+
+    def test_repeated_target_is_refused_by_name(self):
+        target_table = se.get_table_rep('table_54321', [{'source': 'TargetColumn', 'dtype': 'text'}], 'anlz_schema')
+        repeat = {'target': 'TargetColumn', 'source': 'Column2', 'dtype': 'text'}
+        select = sqlalchemy.select(self.from_clause(self.target_column), self.from_clause(repeat))
+        with self.assertRaisesRegex(se.SQLExpressionError, "^Column 'TargetColumn' appears more than once"):
+            se.get_insert_query(target_table, [self.target_column, repeat], select)
 
     def test_serial(self):
         # Don't include serial columns

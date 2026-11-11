@@ -7,14 +7,15 @@ import ast
 import logging
 import re
 import uuid
+from collections import Counter
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import sqlalchemy
 import sqlalchemy.orm
-from sqlalchemy.sql import visitors
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
 from plaidcloud.rpc.type_conversion import UnsupportedDtype, require_dtype_capability, sqlalchemy_from_dtype
+from sqlalchemy.sql import visitors
 from toolz.dicttoolz import assoc, merge, valfilter
 from toolz.functoolz import compose, curry, juxt
 from toolz.functoolz import identity as ident
@@ -1131,8 +1132,29 @@ def get_safe_dict(tables: list[sqlalchemy.Table], extra_keys: dict|None = None, 
     return safe_dict
 
 
-def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
+def _refuse_repeated_output_names(names: list[str]) -> None:
+    """Raises:
+        SQLExpressionError: naming every column that appears more than once.
     """
+    repeated = [name for name, count in Counter(names).items() if count > 1]
+    if len(repeated) == 1:
+        raise SQLExpressionError(
+            f"Column '{repeated[0]}' appears more than once in the step's output; "
+            'give each output column its own name.'
+        )
+    if repeated:
+        quoted = ', '.join(f"'{name}'" for name in repeated)
+        raise SQLExpressionError(
+            f"Columns {quoted} each appear more than once in the step's output; "
+            'give each output column its own name.'
+        )
+
+
+def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sqlalchemy.MetaData|None = None, column_key: str = 'source', alias: str|None = None) -> sqlalchemy.Table|sqlalchemy.FromClause:
+    """A list keyed by anything but `source` is refused when it names one column twice: the
+    table would keep only one of them (`extend_existing`), and an INSERT naming both then
+    fails to compile with an AttributeError. Reading a source column twice is harmless.
+
     Returns:
         sqlalchemy.Table: object representing an analyze table
     Args:
@@ -1145,6 +1167,9 @@ def get_table_rep(table_id: str, columns: list[dict], schema: str, metadata: sql
     """
     if not table_id:
         raise SQLExpressionError('Cannot create sqlalchemy representation of a table without a table name.')
+
+    if column_key != 'source':
+        _refuse_repeated_output_names([sc[column_key] for sc in columns])
 
     if not metadata:
         metadata = sqlalchemy.MetaData()
@@ -1664,13 +1689,22 @@ def get_select_query(
     return select_query
 
 
-def get_insert_query(target_table, target_columns, select_query, use_row_number_for_serial: bool = True):
+def get_insert_query(target_table: sqlalchemy.Table, target_columns: list[dict],
+                     select_query: sqlalchemy.Select | sqlalchemy.CompoundSelect,
+                     use_row_number_for_serial: bool = True) -> sqlalchemy.Insert:
     """Returns a sqlalchemy insert query, given a table object, target_columns
-    config, and a sqlalchemy select query."""
-    return target_table.insert().from_select(
-        [tc['target'] for tc in target_columns if tc.get('dtype') not in ('serial', 'bigserial') or use_row_number_for_serial],
-        select_query,
-    )
+    config, and a sqlalchemy select query.
+
+    A repeated target is refused here as well as in `get_table_rep`, because a caller can
+    build the table from a different list, or from its sources' key. SQLAlchemy accepts the
+    repeat when the statement is built and fails only when it is compiled.
+    """
+    names = [
+        tc['target'] for tc in target_columns
+        if tc.get('dtype') not in ('serial', 'bigserial') or use_row_number_for_serial
+    ]
+    _refuse_repeated_output_names(names)
+    return target_table.insert().from_select(names, select_query)
 
 
 def get_update_value(tc, table, dtype_map, variables):
