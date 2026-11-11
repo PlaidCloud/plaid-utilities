@@ -577,3 +577,63 @@ class TestRawSqlSplice(unittest.TestCase):
         ):
             with self.subTest(expression=expression):
                 self._eval(expression)
+
+
+class TestSeveralValues(unittest.TestCase):
+    """An expression that is, or passes, a tuple or list where SQL takes a single value is refused by name."""
+
+    def _refusal(self, expression, variables=None):
+        with self.assertRaises(se.SQLExpressionError) as raised:
+            se.eval_expression(expression, variables or {}, [_table()])
+        return str(raised.exception)
+
+    def test_a_trailing_or_stray_comma_is_refused(self):
+        for expression in ("get_column(table, 'a'),", "'EU', 'US'", "table.a, table.b"):
+            with self.subTest(expression=expression):
+                self.assertIn('Remove any trailing comma', self._refusal(expression))
+
+    def test_a_bracketed_list_is_refused(self):
+        self.assertIn('Square brackets make a list', self._refusal("['EU', 'US']"))
+
+    def test_a_comparison_with_several_values_is_steered_to_in(self):
+        for expression in (
+            "get_column(table, 'a') == ('EU', 'US')",
+            "get_column(table, 'a') != ['EU', 'US']",
+            "and_(get_column(table, 'b') == 1, get_column(table, 'a') == ('EU', 'US'))",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIn('use .in_([...]) in place of ==', self._refusal(expression))
+
+    def test_several_values_passed_to_a_function_are_refused(self):
+        for expression in (
+            "func.coalesce(get_column(table, 'a'), ('EU', 'US'))",
+            "case((get_column(table, 'a') == 1, ('EU', 'US')), else_='x')",
+        ):
+            with self.subTest(expression=expression):
+                self.assertIn('Check the brackets and commas', self._refusal(expression))
+
+    def test_the_refusal_quotes_the_expression_as_written(self):
+        self.assertIn("\n    get_column(table, '{col}'),\n", self._refusal("get_column(table, '{col}'),", {'col': 'a'}))
+
+    def test_expanded_and_declared_sequences_pass(self):
+        for expression in (
+            "get_column(table, 'a').in_([1, 2])",
+            "get_column(table, 'a').not_in((1, 2))",
+            "get_column(table, 'a').between(1, 2)",
+            "cast(['x', 'y'], sqlalchemy.ARRAY(sqlalchemy.Text))",
+            "cast([1, 2], JSON)",
+            "func.coalesce(get_column(table, 'a'), 0)",
+            "'EU'",
+        ):
+            with self.subTest(expression=expression):
+                se.eval_expression(expression, {}, [_table()])
+
+    def test_a_target_column_is_refused_while_the_select_is_built(self):
+        columns = [{'source': 'a', 'dtype': 'integer'}]
+        table = se.get_table_rep('t', columns, 'anlz', sqlalchemy.MetaData())
+        with self.assertRaises(se.SQLExpressionError):
+            se.get_select_query(
+                tables=[table], source_columns=[columns],
+                target_columns=[{'target': 'x', 'dtype': 'integer', 'expression': "get_column(table, 'a'),"}],
+                wheres=[], config={}, variables={},
+            )

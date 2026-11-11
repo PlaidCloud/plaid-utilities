@@ -15,7 +15,7 @@ import sqlalchemy
 import sqlalchemy.orm
 from plaidcloud.rpc.database import GUIDHyphens, PlaidCurrency
 from plaidcloud.rpc.type_conversion import UnsupportedDtype, require_dtype_capability, sqlalchemy_from_dtype
-from sqlalchemy.sql import visitors
+from sqlalchemy.sql import operators, visitors
 from toolz.dicttoolz import assoc, merge, valfilter
 from toolz.functoolz import compose, curry, juxt
 from toolz.functoolz import identity as ident
@@ -481,6 +481,43 @@ def _assert_no_raw_sql_splice(compiled) -> None:
                 'Error in expression:\n    operator {!r} is not permitted.'.format(opstring))
 
 
+def _binds_several_values(node: sqlalchemy.sql.ClauseElement) -> bool:
+    return (
+        isinstance(node, sqlalchemy.sql.elements.BindParameter)
+        and isinstance(node.value, (tuple, list))
+        and not node.expanding
+        and not isinstance(node.type, (sqlalchemy.ARRAY, sqlalchemy.JSON))
+    )
+
+
+def _several_values_reason(result: object) -> str | None:
+    """Why an evaluated expression is not a single SQL value, when it is, or passes, a tuple or list.
+
+    SQLAlchemy binds the whole sequence as one parameter and each driver renders it its own way: Databend's raises
+    only at execution, after the step has emptied its target, and StarRocks' writes a tuple of columns as the text
+    of their names. A one-element tuple that other drivers happen to read as its value is refused with the rest, so
+    an expression means the same on every warehouse. `in_` expands its list, and an ARRAY or JSON bind holds one by
+    declaration.
+    """
+    if isinstance(result, tuple):
+        return ('This expression is a list of values, but a column or filter needs a single value. '
+                'Remove any trailing comma, or any comma that is not inside brackets.')
+    if isinstance(result, list):
+        return ('This expression is a list of values, but a column or filter needs a single value. Square brackets '
+                'make a list; to match a column against any of several values, use .in_([...]) on the column.')
+    if not isinstance(result, sqlalchemy.sql.ClauseElement):
+        return None
+    for node in visitors.iterate(result):
+        if (isinstance(node, sqlalchemy.sql.elements.BinaryExpression) and operators.is_comparison(node.operator)
+                and _binds_several_values(node.right)):
+            return ('Part of this expression compares with a list of values, but a comparison takes a single value. '
+                    'To match any of several values, use .in_([...]) in place of ==, or .not_in([...]) in place of !=.')
+        if _binds_several_values(node):
+            return ('Part of this expression is a list of values where a single value is needed. Check the brackets '
+                    'and commas around each value it passes to a function.')
+    return None
+
+
 def eval_expression(expression: str, variables: dict|None, tables: list[sqlalchemy.Table], extra_keys: dict = None, disable_variables: bool = False, table_numbering_start: int= 1, tables_by_alias: dict|None = None):
     safe_dict = get_safe_dict(tables, extra_keys, table_numbering_start=table_numbering_start, tables_by_alias=tables_by_alias)
 
@@ -505,6 +542,8 @@ def eval_expression(expression: str, variables: dict|None, tables: list[sqlalche
             + message
         )
     _assert_no_raw_sql_splice(result)
+    if reason := _several_values_reason(result):
+        raise SQLExpressionError(f'Error in expression:\n    {expression}\n{reason}')
     return result
 
 
