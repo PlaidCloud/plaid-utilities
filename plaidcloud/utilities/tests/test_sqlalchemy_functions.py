@@ -3247,3 +3247,81 @@ class TestVectorDistanceDatabricks(DatabricksTest):
         with self.assertRaises(CompileError) as ctx:
             self._sql('inner_product')
         self.assertIn('inner_product', str(ctx.exception))
+
+
+class TestDatabricksBareDecimal(DatabricksTest):
+    """A bare DECIMAL is DECIMAL(10, 0) on Spark: it rounds 10.5 to 11 and NULLs 10+ digit values."""
+
+    def _sql(self, expr):
+        return str(expr.compile(dialect=self.eng.dialect, compile_kwargs={'literal_binds': True}))
+
+    def test_bare_numeric_cast_is_38_10(self):
+        for numeric in (sqlalchemy.Numeric(), sqlalchemy.NUMERIC):
+            self.assertEqual("try_cast(x AS DECIMAL(38, 10))", self._sql(sqlalchemy.cast(sqlalchemy.column('x'), numeric)))
+
+    def test_sized_numeric_cast_is_unchanged(self):
+        self.assertEqual("try_cast(x AS DECIMAL(18, 4))", self._sql(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy.Numeric(18, 4))))
+
+    def test_float_cast_is_double(self):
+        self.assertEqual("try_cast(x AS DOUBLE)", self._sql(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy.Float())))
+
+    def test_integer_cast_is_unchanged(self):
+        self.assertEqual("try_cast(x AS INT)", self._sql(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy.Integer())))
+        self.assertEqual("try_cast(x AS BIGINT)", self._sql(sqlalchemy.cast(sqlalchemy.column('x'), sqlalchemy.BigInteger())))
+
+    def test_import_cast_numeric_and_integer_are_38_10(self):
+        for dtype in ('numeric', 'integer', 'bigint'):
+            sql = self._sql(sqlalchemy.func.import_cast('Column1', dtype, 'YYYY-MM-DD', False))
+            self.assertIn('AS DECIMAL(38, 10))', sql, dtype)
+            self.assertNotIn('AS DECIMAL)', sql, dtype)
+
+    def test_import_col_numeric_is_38_10(self):
+        sql = self._sql(sqlalchemy.func.import_col('Column1', 'numeric', 'YYYY-MM-DD', False))
+        self.assertIn('AS DECIMAL(38, 10))', sql)
+        self.assertNotIn('AS DECIMAL)', sql)
+
+    def test_safe_divide_operands_are_38_10(self):
+        sql = self._sql(sqlalchemy.func.safe_divide(123.45, 987.65, 100))
+        self.assertEqual(2, sql.count('AS DECIMAL(38, 10))'), sql)
+        self.assertNotIn('AS DECIMAL)', sql)
+
+    def test_import_cast_integer_rounds_and_numeric_does_not(self):
+        # Spark truncates a DECIMAL stored into an INT column; integer imports round like Postgres.
+        for dtype in ('integer', 'bigint', 'smallint'):
+            sql = self._sql(sqlalchemy.func.import_cast(sqlalchemy.column('c'), dtype, 'YYYY-MM-DD', False))
+            self.assertTrue(sql.startswith('round('), f'{dtype}: {sql}')
+            self.assertIn('try_cast(c AS DECIMAL(38, 10))', sql, dtype)
+        self.assertEqual(
+            "try_cast(c AS DECIMAL(38, 10))",
+            self._sql(sqlalchemy.func.import_cast(sqlalchemy.column('c'), 'numeric', 'YYYY-MM-DD', False)),
+        )
+
+    def test_import_cast_integer_is_unchanged_on_postgres(self):
+        from sqlalchemy.dialects import postgresql
+        sql = str(sqlalchemy.func.import_cast('Column1', 'integer', 'YYYY-MM-DD', False).compile(
+            dialect=postgresql.dialect(), compile_kwargs={'literal_binds': True}))
+        self.assertNotIn('round', sql)
+
+    def test_integerize_round_rounds_before_the_int_cast(self):
+        sql = self._sql(sqlalchemy.func.integerize_round(sqlalchemy.column('x')))
+        self.assertTrue(sql.startswith('try_cast(round('), sql)
+        self.assertTrue(sql.endswith(') AS INT)'), sql)
+        self.assertIn('AS DECIMAL(38, 10))', sql)
+
+    def test_rounding_keeps_literal_binds(self):
+        # View DDL compiles with literal_binds; a dropped **kw leaves :param placeholders.
+        for expr in (
+            sqlalchemy.func.integerize_round(sqlalchemy.column('x')),
+            sqlalchemy.func.import_cast(sqlalchemy.literal('10.5'), 'integer', 'YYYY-MM-DD', False),
+        ):
+            sql = self._sql(expr)
+            self.assertNotIn(':', sql.replace('::', ''), sql)
+
+    def test_import_cast_integer_rounds_once(self):
+        sql = self._sql(sqlalchemy.func.import_cast(sqlalchemy.column('c'), 'integer', 'YYYY-MM-DD', False))
+        self.assertEqual('round(try_cast(c AS DECIMAL(38, 10)))', sql)
+
+    def test_integerize_truncate_truncates(self):
+        sql = self._sql(sqlalchemy.func.integerize_truncate(sqlalchemy.column('x')))
+        self.assertTrue(sql.startswith('try_cast(trunc('), sql)
+        self.assertNotIn('round(', sql)
