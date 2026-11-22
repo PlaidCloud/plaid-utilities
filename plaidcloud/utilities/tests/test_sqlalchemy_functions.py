@@ -3308,6 +3308,19 @@ class TestDatabricksBareDecimal(DatabricksTest):
         self.assertTrue(sql.endswith(') AS INT)'), sql)
         self.assertIn('AS DECIMAL(38, 10))', sql)
 
+    def test_rounding_keeps_literal_binds(self):
+        # View DDL compiles with literal_binds; a dropped **kw leaves :param placeholders.
+        for expr in (
+            sqlalchemy.func.integerize_round(sqlalchemy.column('x')),
+            sqlalchemy.func.import_cast(sqlalchemy.literal('10.5'), 'integer', 'YYYY-MM-DD', False),
+        ):
+            sql = self._sql(expr)
+            self.assertNotIn(':', sql.replace('::', ''), sql)
+
+    def test_import_cast_integer_rounds_once(self):
+        sql = self._sql(sqlalchemy.func.import_cast(sqlalchemy.column('c'), 'integer', 'YYYY-MM-DD', False))
+        self.assertEqual('round(try_cast(c AS DECIMAL(38, 10)))', sql)
+
     def test_integerize_truncate_truncates(self):
         sql = self._sql(sqlalchemy.func.integerize_truncate(sqlalchemy.column('x')))
         self.assertTrue(sql.startswith('try_cast(trunc('), sql)

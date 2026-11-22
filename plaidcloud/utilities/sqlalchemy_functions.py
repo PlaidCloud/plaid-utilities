@@ -469,11 +469,12 @@ def compile_import_cast(element, compiler, **kw):
     elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
         if trailing_negs:
             return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
-        number = func.cast(col, sqlalchemy.Numeric)
+        number = compiler.process(func.cast(col, sqlalchemy.Numeric), **kw)
         if dtype != 'numeric' and compiler.dialect.name == 'databricks':
             # Spark truncates a DECIMAL stored into an integer column; round as Postgres does.
-            number = func.round(number)
-        return compiler.process(number, **kw)
+            # Plain SQL round: func.round is safe_round, which drops **kw (literal_binds).
+            return f'round({number})'
+        return number
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
@@ -1106,10 +1107,11 @@ def compile_sql_integerize_round(element, compiler, **kw):
 
 @compiles(sql_integerize_round, 'databricks')
 def compile_sql_integerize_round_databricks(element, compiler, **kw):
-    # Spark truncates DECIMAL -> INT, so the rounding has to be explicit.
+    # Spark truncates DECIMAL -> INT, so the rounding has to be explicit. Plain SQL round:
+    # func.round is safe_round, which drops **kw (literal_binds).
     arg, = list(element.clauses)
 
-    return compiler.process(func.cast(func.round(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
+    return f'try_cast(round({compiler.process(_squash_to_numeric(arg), **kw)}) AS INT)'
 
 
 class sql_integerize_truncate(GenericFunction):
