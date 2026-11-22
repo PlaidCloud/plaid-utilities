@@ -469,7 +469,11 @@ def compile_import_cast(element, compiler, **kw):
     elif dtype in ['integer', 'bigint', 'smallint', 'numeric']:
         if trailing_negs:
             return compiler.process(func.to_number(col, '9999999999999999999999999D9999999999999999999999999MI'), **kw)
-        return compiler.process(func.cast(col, sqlalchemy.Numeric), **kw)
+        number = func.cast(col, sqlalchemy.Numeric)
+        if dtype != 'numeric' and compiler.dialect.name == 'databricks':
+            # Spark truncates a DECIMAL stored into an integer column; round as Postgres does.
+            number = func.round(number)
+        return compiler.process(number, **kw)
     else:
         #if dtype == 'text':
         return compiler.process(col, **kw)
@@ -1098,6 +1102,14 @@ def compile_sql_integerize_round(element, compiler, **kw):
     arg, = list(element.clauses)
 
     return compiler.process(func.cast(_squash_to_numeric(arg), sqlalchemy.Integer), **kw)
+
+
+@compiles(sql_integerize_round, 'databricks')
+def compile_sql_integerize_round_databricks(element, compiler, **kw):
+    # Spark truncates DECIMAL -> INT, so the rounding has to be explicit.
+    arg, = list(element.clauses)
+
+    return compiler.process(func.cast(func.round(_squash_to_numeric(arg)), sqlalchemy.Integer), **kw)
 
 
 class sql_integerize_truncate(GenericFunction):
@@ -3756,7 +3768,14 @@ def compile_modulo_databricks(element, compiler, **kw):
 @compiles(sqlalchemy.sql.elements.Cast, 'databricks')
 def compile_cast_databricks(element, compiler, **kw):
     # Spark's FLOAT is 32-bit; a Float cast is the 64-bit DOUBLE every warehouse means.
-    target = 'DOUBLE' if isinstance(element.type, sqlalchemy.Float) else compiler.process(element.typeclause, **kw)
+    if isinstance(element.type, sqlalchemy.Float):
+        target = 'DOUBLE'
+    elif isinstance(element.type, sqlalchemy.Numeric) and element.type.precision is None:
+        # A bare DECIMAL is DECIMAL(10, 0) on Spark: it rounds the fraction away and
+        # NULLs any value of 10+ digits.
+        target = 'DECIMAL(38, 10)'
+    else:
+        target = compiler.process(element.typeclause, **kw)
     return f'try_cast({compiler.process(element.clause, **kw)} AS {target})'
 
 
